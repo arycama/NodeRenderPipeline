@@ -1,5 +1,5 @@
 {
-  "name": "com.arycama.noderenderingpipeline",
+  "name": "com.arycama.noderenderpipeline",
   "description": "A node based rendering pipeline",
   "version": "1.0.0",
   "unity": "2021.3",
