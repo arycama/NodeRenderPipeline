@@ -1,0 +1,151 @@
+#pragma kernel DepthCopy MIN_ONLY
+#pragma kernel DepthCopy MAX_ONLY
+#pragma kernel DepthCopy MIN_MAX_SEPERATE
+#pragma kernel DepthCopy MIN_MAX_COMBINED
+#pragma kernel DepthPyramid MIN_ONLY
+#pragma kernel DepthPyramid MAX_ONLY
+#pragma kernel DepthPyramid MIN_MAX_SEPERATE
+#pragma kernel DepthPyramid MIN_MAX_COMBINED
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+
+#define USE_MIN defined(MIN_ONLY) || defined(MIN_MAX_SEPERATE)
+#define USE_MAX defined(MAX_ONLY) || defined(MIN_MAX_SEPERATE)
+
+#ifdef MIN_MAX_COMBINED
+	RWTexture2D<float2> _Result;
+	RWTexture2D<float2> _Source;
+#else
+	#if USE_MIN
+		RWTexture2D<float> _MinSource;
+		RWTexture2D<float> _MinResult;
+	#endif
+
+	#if USE_MAX
+		RWTexture2D<float> _MaxResult;
+		RWTexture2D<float> _MaxSource;
+	#endif
+#endif
+
+Texture2D<float> Input;
+float _InputScale, _InputOffset;
+uint _Width, _Height;
+
+[numthreads(8, 8, 1)]
+void DepthCopy(uint2 id : SV_DispatchThreadID)
+{
+	float depth = Input[id];
+	
+	#ifdef MIN_MAX_COMBINED
+		_Result[id] = float2(depth, depth) * _InputScale + _InputOffset;
+	#else
+		#if USE_MIN
+			_MinResult[id] = depth;
+		#endif
+	
+		#if USE_MAX
+			_MaxResult[id] = depth;
+		#endif
+	#endif
+}
+
+float GetMinDepth(uint2 coord)
+{
+	uint2 size = uint2(_Width, _Height);
+	uint2 clampedCoord = min(coord, size - 1);
+	
+	#ifdef MIN_MAX_COMBINED
+		return _Source[clampedCoord].r;
+	#elif USE_MIN
+		return _MinSource[clampedCoord];
+	#else
+		return 0;
+	#endif
+}
+
+float GetMaxDepth(uint2 coord)
+{
+	uint2 size = uint2(_Width, _Height);
+	uint2 clampedCoord = min(coord, size - 1);
+	
+	#ifdef MIN_MAX_COMBINED
+		return _Source[clampedCoord].g;
+	#elif USE_MAX
+		return _MaxSource[clampedCoord];
+	#else
+		return 0;
+	#endif
+}
+
+// Calculate min Hi-Z chain. Note that max is used throughout due to reversed Z-buffer
+[numthreads(8, 8, 1)]
+void DepthPyramid(uint2 id : SV_DispatchThreadID)
+{
+	uint2 size = uint2(_Width, _Height);
+	uint2 coord = 2 * id;
+	
+	float4 minDepths;
+	minDepths.x = GetMinDepth(coord + uint2(0, 0));
+	minDepths.y = GetMinDepth(coord + uint2(1, 0));
+	minDepths.z = GetMinDepth(coord + uint2(0, 1));
+	minDepths.w = GetMinDepth(coord + uint2(1, 1));
+	float minDepth = Max4(minDepths);
+	
+	float4 maxDepths;
+	maxDepths.x = GetMaxDepth(coord + uint2(0, 0));
+	maxDepths.y = GetMaxDepth(coord + uint2(1, 0));
+	maxDepths.z = GetMaxDepth(coord + uint2(0, 1));
+	maxDepths.w = GetMaxDepth(coord + uint2(1, 1));
+	float maxDepth = Min4(maxDepths);
+	
+	// Incorporate additional texels if the previous level's width or height (or both) are odd.
+	bool shouldIncludeExtraColumnFromPreviousLevel = (size.x & 1) != 0;
+	bool shouldIncludeExtraRowFromPreviousLevel = (size.y & 1) != 0;
+	
+	if (shouldIncludeExtraColumnFromPreviousLevel)
+	{
+		float4 extraColumnTexelValues;
+		extraColumnTexelValues.x = GetMinDepth(coord + uint2(2, 0));
+		extraColumnTexelValues.y = GetMinDepth(coord + uint2(2, 1));
+		extraColumnTexelValues.z = GetMaxDepth(coord + uint2(2, 1));
+		extraColumnTexelValues.w = GetMaxDepth(coord + uint2(2, 1));
+
+		// In the case where the width and height are both odd, need to include the
+        // 'corner' value as well.
+		if (shouldIncludeExtraRowFromPreviousLevel)
+		{
+			float cornerTexelValueMin = GetMinDepth(coord + uint2(2, 2));
+			float cornerTexelValueMax = GetMaxDepth(coord + uint2(2, 2));
+			minDepth = max(minDepth, cornerTexelValueMin);
+			maxDepth = min(maxDepth, cornerTexelValueMax);
+		}
+		
+		minDepth = Max3(minDepth, extraColumnTexelValues.x, extraColumnTexelValues.y);
+		maxDepth = Min3(maxDepth, extraColumnTexelValues.z, extraColumnTexelValues.w);
+	}
+	
+	if (shouldIncludeExtraRowFromPreviousLevel)
+	{
+		float2 extraRowTexelValuesMin;
+		extraRowTexelValuesMin.x = GetMinDepth(coord + uint2(0, 2));
+		extraRowTexelValuesMin.y = GetMinDepth(coord + uint2(1, 2));
+		minDepth = Max3(minDepth, extraRowTexelValuesMin.x, extraRowTexelValuesMin.y);
+		
+		float2 extraRowTexelValuesMax;
+		extraRowTexelValuesMax.x = GetMaxDepth(coord + uint2(0, 2));
+		extraRowTexelValuesMax.y = GetMaxDepth(coord + uint2(1, 2));
+		maxDepth = Min3(maxDepth, extraRowTexelValuesMax.x, extraRowTexelValuesMax.y);
+	}
+	
+	#ifdef MIN_MAX_COMBINED
+		_Result[id] = float2(minDepth, maxDepth);
+	#else
+		#if USE_MIN
+			_MinResult[id] = minDepth;
+		#endif
+	
+		#if USE_MAX
+			_MaxResult[id] = maxDepth;
+		#endif
+	#endif
+}

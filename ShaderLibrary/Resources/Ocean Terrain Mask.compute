@@ -1,0 +1,109 @@
+﻿#pragma kernel ComputeMaskFirst KERNEL_NAME=ComputeMaskFirst FIRST
+#pragma kernel ComputeMask KERNEL_NAME=ComputeMask
+
+SamplerState _PointClampSampler;
+float4 _ScaleOffset;
+float _OceanHeight;
+uint _MipCount, _MipOffset, _Width, _Height;
+
+Texture2D<float> _Input;
+RWTexture2D<float> _Result0, _Result1, _Result2, _Result3, _Result4, _Result5, _Result6, _Result7;
+
+static const uint _GroupSize = 32;
+
+groupshared float groupData[_GroupSize][_GroupSize];
+
+void Write4(uint2 coord, float4 result, RWTexture2D<float> target)
+{
+	target[coord + uint2(0, 0)] = result.x;
+	target[coord + uint2(1, 0)] = result.y;
+	target[coord + uint2(0, 1)] = result.z;
+	target[coord + uint2(1, 1)] = result.w;
+}
+
+[numthreads(_GroupSize, _GroupSize, 1)]
+void KERNEL_NAME(uint2 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId : SV_GroupThreadID, uint2 groupId : SV_GroupID)
+{
+	RWTexture2D<float> results[8] = { _Result0, _Result1, _Result2, _Result3, _Result4, _Result5, _Result6, _Result7 };
+	
+	bool outOfBounds = dispatchThreadId.x >= _Width || dispatchThreadId.y >= _Height;
+	bool4 result0;
+	
+	if (!outOfBounds)
+	{
+		// Sample four textures and write 1 if they are all 1
+		// Check if height is greater than ocean height, write result to top output mip
+		[unroll]
+		for (uint y = 0, i = 0; y < 2; y++)
+		{
+			[unroll]
+			for (uint x = 0; x < 2; x++, i++)
+			{
+				#ifdef FIRST
+					float2 uv = (dispatchThreadId * 4 + uint2(x, y) * 2) * _ScaleOffset.xy + _ScaleOffset.zw;
+					bool4 results0 = _Input.Gather(_PointClampSampler, uv) > _OceanHeight;
+					Write4(4 * dispatchThreadId + uint2(x, y) * 2, results0, results[0]);
+				#else
+					float2 uv = (dispatchThreadId * 2 + uint2(x, y) * 1) * _ScaleOffset.xy + _ScaleOffset.zw;
+					bool results0 = all(_Input.Gather(_PointClampSampler, uv));
+					results[0][dispatchThreadId * 2 + uint2(x, y) * 1] = results0;
+				#endif
+				
+				result0[i] = all(results0);
+			}
+		}
+	}
+	
+	if (_MipCount < 1) 
+		return;
+	
+	if (!outOfBounds)
+	{
+		#ifdef FIRST
+			Write4(2 * dispatchThreadId, result0, results[1]);
+		#else
+			results[1][dispatchThreadId] = all(result0);
+			groupData[groupThreadId.x][groupThreadId.y] = all(result0);
+		#endif
+	}
+	
+	[unroll]
+	for (uint i = 2; i < 8; i++)
+	{
+		if (i >= _MipCount)
+			return;
+		
+		#ifdef FIRST
+			uint2 maxThread = _GroupSize >> (i - 2);
+		#else
+			uint2 maxThread = _GroupSize >> i;
+		#endif
+		
+		if (!outOfBounds && all(groupThreadId < maxThread))
+		{
+			bool isValid;
+			
+			#ifdef FIRST
+				if (i == 2)
+				{
+					isValid = all(result0);
+				}
+				else
+			#endif
+				{
+					uint2 position = groupThreadId * 2;
+	
+					// Sample four textures and write 1 if they are all 1
+					isValid = groupData[position.x + 0][position.y + 0];
+					isValid = isValid && groupData[position.x + 1][position.y + 0];
+					isValid = isValid && groupData[position.x + 0][position.y + 1];
+					isValid = isValid && groupData[position.x + 1][position.y + 1];
+				}
+			
+			results[i][groupId * maxThread + groupThreadId] = isValid;
+			groupData[groupThreadId.x][groupThreadId.y] = isValid;
+		}
+	
+		GroupMemoryBarrierWithGroupSync();
+	}
+}

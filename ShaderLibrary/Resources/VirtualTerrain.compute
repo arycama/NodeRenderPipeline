@@ -1,0 +1,16 @@
+﻿#pragma kernel CSMain
+
+AppendStructuredBuffer<uint> _VirtualRequests;
+RWStructuredBuffer<uint> _VirtualFeedbackTexture;
+
+[numthreads(1024, 1, 1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+	// Get the result, using the thread ID as the coordinate
+	uint result = _VirtualFeedbackTexture[id.x];
+	if (result == 1)
+	{
+		_VirtualRequests.Append(id.x);
+		_VirtualFeedbackTexture[id.x] = 0;
+	}
+}

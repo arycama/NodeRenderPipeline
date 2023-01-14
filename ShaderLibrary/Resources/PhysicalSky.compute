@@ -1,0 +1,444 @@
+#pragma kernel SkyMain KERNEL_NAME=SkyMain
+#pragma kernel SkyReflection KERNEL_NAME=SkyReflection REFLECTION_PROBE
+#pragma kernel SpatialDenoise
+#pragma kernel Temporal
+#pragma kernel Upsample
+
+#pragma multi_compile _ LIGHT_COUNT_ONE LIGHT_COUNT_TWO
+//#pragma multi_compile _ VOXEL_GI_ON
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/CloudCommon.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/MotionVectors.hlsl"
+
+RWTexture2D<float4> _VolumetricClouds;
+RWTexture2D<float3> _TransmittanceResult, _ScatterResult, _Result;
+RWTexture2D<float> _NewFrameCount;
+TextureCube<float3> _StarMap;
+Texture2D<float3> _Transmittance, _Scatter, _ScatterHistory, _TransmittanceHistory;
+Texture2D<float> _Depth, _CloudDepth, _PrevFrameCount;
+
+float4x4 _PixelCoordToViewDirWS;
+float4 _ScaleOffset;
+float3 _StarColor, _LightColor0, _LightDirection0, _LightColor1, _LightDirection1;
+
+#ifdef __INTELLISENSE__
+	#define LIGHT_COUNT_ONE 
+	#define LIGHT_COUNT_TWO
+#endif
+
+[numthreads(8, 8, 1)]
+void KERNEL_NAME(uint2 id : SV_DispatchThreadID)
+{
+	#ifdef REFLECTION_PROBE
+		float dither = 0.5;
+		bool useShadow = false;
+		float3 V = -MultiplyVector(_PixelCoordToViewDirWS, float3(id.xy + 0.5, 1.0), false);
+	#else
+		float dither = _BlueNoise1D[id % 128];
+		bool useShadow = true;
+		float3 V = -MultiplyVector(_PixelCoordToViewDirWS, float3((id.xy + 0.5) * 2.0, 1.0), false);
+	#endif
+
+	float lengthV = length(V);
+	V /= lengthV;
+
+	#ifdef REFLECTION_PROBE
+		float depth = UNITY_RAW_FAR_CLIP_VALUE;
+		bool isSky = true;
+		float sceneDepth = 0.0;
+		float cloudDepth;
+		float4 clouds = RenderCloud(float3(0.0, -(_WorldSpaceCameraPos.y - 10), 0.0), V, id, depth, sceneDepth, cloudDepth, false);
+		float maxDistance = IntersectRaySphereSimple(float3(0.0, -(_WorldSpaceCameraPos.y - 10), 0.0) + _PlanetOffset, V, _TopRadius);
+		float rayDistance = lerp(cloudDepth, maxDistance, clouds.a);
+	#else	
+		float depth = _Depth.mips[1][id];
+		bool isSky = depth == UNITY_RAW_FAR_CLIP_VALUE;
+		float sceneDepth = LinearEyeDepth(depth, _ZBufferParams) * lengthV;
+		float cloudDepth = _CloudDepth[id] * lengthV * _MaxDistance;
+		float rayDistance = isSky ? cloudDepth : min(sceneDepth, cloudDepth);
+	#endif
+	
+	// Need to start at near plane so we don't get shadow issues
+	float3 rayOrigin = _PlanetOffset;
+	
+	bool hasPlanetHit = false;
+	
+	float2 intersections;
+	if (!IntersectRaySphere(rayOrigin, V, _TopRadius, intersections) || intersections.y < 0.0)
+	{
+		#ifdef REFLECTION_PROBE
+			_Result[id] = 0.0;
+		#else
+			_TransmittanceResult[id] = 1.0;
+			_ScatterResult[id] = 0.0;
+		#endif
+			
+		// No planet hit, return
+		return;
+	}
+	
+	rayDistance = min(rayDistance, intersections.y);
+	hasPlanetHit = isSky && IntersectRaySphere(rayOrigin, V, _PlanetRadius, intersections) && intersections.x >= 0.0;
+	if (hasPlanetHit)
+	{
+		rayDistance = min(rayDistance, intersections.x);
+	}
+
+	float sampleCount = 16.0;
+	float3 luminance = 0.0, transmittance = 1.0;
+	float ds = rayDistance / sampleCount;
+
+	for (float i = dither; i < sampleCount; i++)
+	{
+		float3 P = rayOrigin + (i * ds) * V;
+		float3 lighting = 0.0;
+		
+		#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
+			float attenuation = 1.0;
+		
+			if (useShadow)
+			{
+				attenuation *= DirectionalLightShadow(P - _PlanetOffset, 0, 0.5, false, false);
+				attenuation *= CloudTransmittanceLevelZero(P - _PlanetOffset);
+			}
+		
+			lighting += AtmosphereLightFull(P, V, _LightDirection0, _LinearClampSampler, attenuation) * ApplyExposure(_LightColor0);
+		#endif
+		
+		#ifdef LIGHT_COUNT_TWO
+			lighting += AtmosphereLightFull(P, V, _LightDirection1, _LinearClampSampler, 1.0) * ApplyExposure(_LightColor1);
+		#endif
+        
+		float3 extinction = AtmosphereOpticalDepth(length(P));
+        
+		luminance += transmittance * (lighting) * (1.0 - exp(-extinction * ds)) / extinction;
+		transmittance *= exp(-extinction * ds);
+	}
+    
+    // Account for bounced light off the earth
+	if (hasPlanetHit)
+	{
+		float3 P = rayOrigin + V * rayDistance;
+		float3 N = normalize(P);
+		
+		#ifdef LIGHT_COUNT_ONE
+			float3 color = ApplyExposure(_LightColor0) * TransmittanceToAtmosphere(P, _LightDirection0, _LinearClampSampler);
+			float NdotL = dot(N, _LightDirection0);
+			luminance += color * transmittance * saturate(NdotL) * _GroundColor * INV_PI;
+		#endif
+		
+		#ifdef LIGHT_COUNT_TWO
+			float3 color1 = ApplyExposure(_LightColor1) * TransmittanceToAtmosphere(P, _LightDirection1, _LinearClampSampler);
+			float NdotL1 = dot(N, _LightDirection1);
+			luminance += color1 * transmittance * saturate(NdotL1) * _GroundColor * INV_PI;
+		#endif
+	}
+	
+#ifdef REFLECTION_PROBE
+	float4 cloudCoverage = _CloudCoverage[uint2(0, 0)];
+	luminance = luminance * cloudCoverage.a + cloudCoverage.rgb;
+	
+	luminance += clouds.rgb * transmittance;
+	transmittance *= clouds.a;
+	
+	if (isSky && !hasPlanetHit)
+	{
+		float3 Vx = -MultiplyVector(_PixelCoordToViewDirWS, float3(id.xy + 0.5 + float2(1.0, 0.0), 1.0), false);
+		float3 Vy = -MultiplyVector(_PixelCoordToViewDirWS, float3(id.xy + 0.5 + float2(0.0, 1.0), 1.0), false);
+		
+		float3 dx = Vx - V;
+		float3 dy = Vy - V;
+		
+		float3 stars = ApplyExposure(_StarMap.SampleGrad(_TrilinearClampSampler, V, dx, dy)) * _StarColor;
+		luminance += stars * transmittance;
+	}
+	_Result[id] = luminance;
+#else
+	_TransmittanceResult[id] = transmittance;
+	_ScatterResult[id] = luminance;
+#endif
+}
+
+[numthreads(8, 8, 1)]
+void SpatialDenoise(int2 id : SV_DispatchThreadID)
+{
+	float centerDepth = _Depth.mips[1][id];
+	
+	if (centerDepth == 0.0)
+	{
+		float cloudDepth = _CloudDepth[id] * _MaxDistance;
+		centerDepth = cloudDepth;
+	}
+	else
+	{
+		centerDepth = LinearEyeDepth(centerDepth, _ZBufferParams);
+	}
+			
+	float3 scatter = 0.0, transmittance = 0.0;
+	float weightSum = 0.0;
+	
+	for (float y = -3; y <= 3; y++)
+	{
+		for (float x = -3; x <= 3; x++)
+		{
+			float2 coord = clamp(id + float2(x, y), 0, floor(_ScreenSize.xy * 0.5) - 1);
+			float depth = _Depth.mips[1][coord];
+			
+			if (depth == 0.0)
+			{
+				float cloudDepth = _CloudDepth[coord] * _MaxDistance;
+				depth = cloudDepth;
+			}
+			else
+			{
+				depth = LinearEyeDepth(depth, _ZBufferParams);
+			}
+			
+			float weight = saturate(1.0 - abs(id.x - coord.x));
+			
+			
+			float _DepthWeight = 10;
+            weight = abs(depth - centerDepth) * _DepthWeight;
+			
+			// Divide final weighting by view distance, so that distant samples are weighted less,
+            // as the depth/derivatives will be larger
+			weight = saturate(1.0 - weight / centerDepth);
+			
+			// Tent?
+			float2 weights = 1.0 - abs(id - coord) / 5.0;
+			//weight *= weights.x * weights.y;
+			
+			//weight = weight * weight * (3.0 - 2.0 * weight);
+			
+			weightSum += weight;
+			scatter += _Scatter[coord] * weight;
+			transmittance += _Transmittance[coord] * weight;
+		}
+	}
+	
+	scatter /= weightSum;
+	transmittance /= weightSum;
+	
+	float4 clouds = _VolumetricClouds[id];
+	scatter += clouds.rgb * transmittance;
+	transmittance *= clouds.a;
+	
+	_ScatterResult[id] = scatter;
+	_TransmittanceResult[id] = transmittance;
+}
+
+static const float MAX_FRAME_NUM = 16.0;
+
+[numthreads(8, 8, 1)]
+void Temporal(uint2 id : SV_DispatchThreadID)
+{
+	float3 scatter = 0.0, scatterMean = 0.0, scatterStdDev = 0.0, transmittance = 0.0, transmittanceMean = 0.0, transmittanceStdDev = 0.0;
+	float2 closestDepthUv = 0.0;
+	float closestDepth = -1.0, weightSum = 0.0, samples = 0.0;
+	
+	float depth = _Depth.mips[1][clamp(id, 0, floor(_ScreenSize.xy * 0.5) - 1)];
+	bool isSky = depth == 0.0;
+	
+	for (float y = -1; y < 2; y++)
+	{
+		for (float x = -1; x < 2; x++)
+		{
+			float depth = _Depth.mips[1][clamp(id + float2(x, y), 0, floor(_ScreenSize.xy * 0.5) - 1)];
+			
+			// Don't accumulate sky samples on non sky pixels and vice versa
+			// Todo: Maybe a bilateral weight would work better?
+			if ((depth == 0.0) != isSky)
+				continue;
+			
+			samples++;
+			
+			float2 offset = float2(x, y) - _Jitter * 0.5;
+			float weight = exp(-2.29 * dot(offset, offset));
+			weightSum += weight;
+			
+			float3 scatterColor = _Scatter[clamp(id + float2(x, y), 0, floor(_ScreenSize.xy * 0.5) - 1)];
+			scatterColor /= 1.0 + Luminance(scatterColor);
+			scatter += scatterColor * weight;
+			
+			float3 transmittanceColor = _Transmittance[clamp(id + float2(x, y), 0, floor(_ScreenSize.xy * 0.5) - 1)];
+			transmittance += transmittanceColor * weight;
+			
+			scatterMean += scatterColor;
+			transmittanceMean += transmittanceColor;
+			
+			scatterStdDev += scatterColor * scatterColor;
+			transmittanceStdDev += transmittanceColor * transmittanceColor;
+			
+			if (depth == 0.0)
+			{
+				float cloudDepth = _CloudDepth[clamp(id + float2(x, y), 0, floor(_ScreenSize.xy * 0.5) - 1)] * _MaxDistance;
+				depth = EyeToDeviceDepth(cloudDepth, _ZBufferParams);
+			}
+			
+			if (depth > closestDepth)
+			{
+				closestDepth = depth;
+				closestDepthUv = clamp(id + float2(x, y), 0, floor(_ScreenSize.xy * 0.5) - 1);
+			}
+		}
+	}
+	
+	scatter /= weightSum;
+	transmittance /= weightSum;
+	
+	scatterMean /= samples;
+	transmittanceMean /= samples;
+	
+	scatterStdDev = sqrt(abs(scatterStdDev / samples - scatterMean * scatterMean)) * 1;
+	transmittanceStdDev = sqrt(abs(transmittanceStdDev / samples - transmittanceMean * transmittanceMean)) * 1;
+
+	float3 positionWS = PixelToWorld(float3((closestDepthUv + 0.5) * 2, closestDepth));
+	float2 velocity = MotionVectorFragment(WorldToClipNonJittered(positionWS), WorldToClipPrevious(positionWS)).xy;
+	
+	float2 uv = id * _ScaleOffset.xy + _ScaleOffset.zw;
+	float2 previousUv = uv - velocity;
+	
+	// Sample history
+	float3 previousScatter, previousTransmittance;
+	float newFrameCount = 0.0;
+	if (all(previousUv >= 0.0 && previousUv <= 1.0))
+	{
+		float oldFrameCount = _PrevFrameCount.SampleLevel(_PointClampSampler, previousUv, 0.0) * 255.0;
+		
+		previousScatter = _ScatterHistory.SampleLevel(_LinearClampSampler, previousUv, 0.0);
+		previousScatter /= 1.0 + Luminance(previousScatter);
+		previousTransmittance = _TransmittanceHistory.SampleLevel(_LinearClampSampler, previousUv, 0.0);
+
+		float3 transmittanceColor = _Transmittance[id];
+		
+		//bool wasClipped, wasClipped2;
+		//previousScatter = ClipToAABB(previousScatter, scatterMean, scatterStdDev, wasClipped);
+		//previousTransmittance = ClipHistory(previousTransmittance, transmittanceColor, transmittanceMean, transmittanceStdDev);
+		previousTransmittance = clamp(previousTransmittance, transmittanceMean - transmittanceStdDev, transmittanceMean + transmittanceStdDev);
+		
+		float3 scatterColor = _Scatter[id];
+		scatterColor /= 1.0 + Luminance(scatterColor);
+		
+		// Clamp history
+		//bool wasClipped;
+		//previousScatter = ClipHistory(previousScatter, scatterColor, scatterMean, scatterStdDev, wasClipped);
+		previousScatter = ClipHistory(previousScatter, scatterColor, scatterMean, scatterStdDev);
+		
+		//if (wasClipped)
+		//	oldFrameCount = 0;
+	
+		// Blend with result
+		float speed = 1.0 / (1.0 + oldFrameCount);
+		newFrameCount = min(oldFrameCount + 1.0, 16.0);
+		scatter = lerp(previousScatter, scatter, 0.05);
+		transmittance = lerp(previousTransmittance, transmittance, 0.05);
+	}
+	
+	scatter /= 1.0 - Luminance(scatter);
+	
+	_ScatterResult[id] = scatter;
+	_TransmittanceResult[id] = transmittance;
+	_NewFrameCount[id] = newFrameCount / 255.0;
+}
+
+float4 LinearEyeDepth(float4 depth, float4 zBufferParam)
+{
+	return 1.0 / (zBufferParam.z * depth + zBufferParam.w);
+}
+
+[numthreads(8, 8, 1)]
+void Upsample(int2 id : SV_DispatchThreadID)
+{
+	float depth = _Depth[id];
+	
+	float4 depths;
+	depths.x = _Depth.mips[1][clamp(id + int2(-1, -1) >> 1, 0, floor(_ScreenSize.xy * 0.5) - 1)];
+	depths.y = _Depth.mips[1][clamp(id + int2(1, -1) >> 1, 0, floor(_ScreenSize.xy * 0.5) - 1)];
+	depths.z = _Depth.mips[1][clamp(id + int2(-1, 1) >> 1, 0, floor(_ScreenSize.xy * 0.5) - 1)];
+	depths.w = _Depth.mips[1][clamp(id + int2(1, 1) >> 1, 0, floor(_ScreenSize.xy * 0.5) - 1)];
+	
+	float c = LinearEyeDepth(depth, _ZBufferParams);
+	depths = abs(c - LinearEyeDepth(depths, _ZBufferParams));
+	
+	float closestDepth = Min4(depths);
+	
+	float weights = 0;
+	float3 scatter = 0.0, transmittance = 0.0;
+	float2 uv = frac((id + 0.5) * 0.5 - 0.5);
+	
+	if (closestDepth == depths.x)
+	{
+		float weight = (1.0 - uv.x) * (1.0 - uv.y);
+		transmittance += _Transmittance[clamp((id + int2(-1, -1)) >> 1, 0, floor(_ScreenSize.xy * 0.5) - 1)] * weight;
+		scatter += _Scatter[clamp((id + int2(-1, -1)) >> 1, 0, floor(_ScreenSize.xy * 0.5) - 1)] * weight;
+		weights += weight;
+	}
+	
+	if (closestDepth == depths.y)
+	{
+		float weight = uv.x * (1.0 - uv.y);
+		transmittance += _Transmittance[clamp((id + int2(1, -1)) >> 1, 0, floor(_ScreenSize.xy * 0.5) - 1)] * weight;
+		scatter += _Scatter[clamp((id + int2(1, -1)) >> 1, 0, floor(_ScreenSize.xy * 0.5) - 1)] * weight;
+		weights += weight;
+	}
+	
+	if (closestDepth == depths.z)
+	{
+		float weight = (1.0 - uv.x) * uv.y;
+		transmittance += _Transmittance[clamp((id + int2(-1, 1)) >> 1, 0, floor(_ScreenSize.xy * 0.5) - 1)] * weight;
+		scatter += _Scatter[clamp((id + int2(-1, 1)) >> 1, 0, floor(_ScreenSize.xy * 0.5) - 1)] * weight;
+		weights += weight;
+	}
+	
+	if (closestDepth == depths.w)
+	{
+		float weight = uv.x * uv.y;
+		transmittance += _Transmittance[clamp((id + int2(1, 1)) >> 1, 0, floor(_ScreenSize.xy * 0.5) - 1)] * weight;
+		scatter += _Scatter[clamp((id + int2(1, 1)) >> 1, 0, floor(_ScreenSize.xy / 2))] * weight;
+		weights += weight;
+	}
+	
+	transmittance /= weights;
+	scatter /= weights;
+	
+	//transmittance = _Transmittance[id >> 1];
+	//scatter = _Scatter[id >> 1];
+	
+	float4 cloudCoverage = _CloudCoverage[uint2(0, 0)];
+	scatter = scatter * cloudCoverage.a + cloudCoverage.rgb;
+	
+	// Render stars just before output. This ensures it will be full res
+	float3 V = -MultiplyVector(_PixelCoordToViewDirWS, float3(id.xy + 0.5, 1.0), false);
+	float lengthV = length(V);
+	V /= lengthV;
+	
+	float2 intersections;
+	bool hasPlanetHit = IntersectRaySphere(_PlanetOffset, V, _PlanetRadius, intersections) && intersections.x >= 0.0;
+	
+	bool isSky = depth == UNITY_RAW_FAR_CLIP_VALUE;
+	if (isSky && !hasPlanetHit)
+	{
+		float3 Vx = -MultiplyVector(_PixelCoordToViewDirWS, float3(id.xy + 0.5 + float2(1.0, 0.0), 1.0), false);
+		float3 Vy = -MultiplyVector(_PixelCoordToViewDirWS, float3(id.xy + 0.5 + float2(0.0, 1.0), 1.0), false);
+		
+		float3 dx = Vx - V;
+		float3 dy = Vy - V;
+		
+		float3 stars = ApplyExposure(_StarMap.SampleGrad(_TrilinearClampSampler, V, dx, dy)) * _StarColor;
+		scatter += stars * transmittance;
+	}
+	
+	// Sample volumetric buffer, and blend with background
+	float linearDepth = LinearEyeDepth(depth, _ZBufferParams);
+	float normalizedDepth = RangeRemap(_ProjectionParams.y, _VolumeDepth, linearDepth);
+	float3 volumeUv = float3((id.xy + 0.5) * _ScreenSize.zw, normalizedDepth);
+    float3 volumetricLighting = _VolumetricLighting.SampleLevel(_LinearClampSampler, volumeUv, 0.0);
+	
+	//transmittance = 0;
+		scatter += volumetricLighting;
+	
+	//if(!isSky)
+	//scatter = volumeUv.z;
+	
+	_Result[id] = _Result[id] * transmittance + scatter;
+}

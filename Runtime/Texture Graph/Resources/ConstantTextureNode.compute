@@ -1,0 +1,21 @@
+﻿#pragma kernel Constant
+
+#pragma multi_compile _ DIMENSION_3D
+
+#ifdef DIMENSION_3D
+	RWTexture3D<float4> Result;
+#else
+	RWTexture2D<float4> Result;
+#endif
+
+float Value;
+
+[numthreads(8, 8, 1)]
+void Constant(uint3 id : SV_DispatchThreadID)
+{
+	#ifdef DIMENSION_3D
+		Result[id.xyz] = Value;
+	#else
+		Result[id.xy] = Value;
+	#endif
+}

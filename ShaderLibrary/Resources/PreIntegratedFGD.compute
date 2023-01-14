@@ -1,0 +1,174 @@
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/GgxExtensions.hlsl"
+
+#pragma kernel DirectionalAlbedo
+#pragma kernel AverageAlbedo
+#pragma kernel DirectionalAlbedoMs
+#pragma kernel AverageAlbedoMs
+#pragma kernel SpecularOcclusion
+
+RWTexture3D<float> _DirectionalAlbedoMsResult;
+RWTexture2D<float2> _DirectionalAlbedoResult;
+RWTexture2D<float> _AverageAlbedoResult, _AverageAlbedoMsResult;
+
+cbuffer GGXLookupCalculationConstants
+{
+	float2 _DirectionalAlbedoScaleOffset;
+	uint _DirectionalAlbedoSamples;
+	float _DirectionalAlbedoSamplesRcp;
+
+	float4 _DirectionalAlbedoRemap;
+	float2 _AverageAlbedoRemap;
+	float _AverageAlbedoScaleOffset;
+	uint _AverageAlbedoSamples;
+	float _AverageAlbedoSamplesRcp;
+	float _AverageAlbedoSamplesMinusOneRcp;
+
+	uint _DirectionalAlbedoMsSamples;
+	float _DirectionalAlbedoMsSamplesRcp;
+	float3 _DirectionalAlbedoMsScaleOffset;
+
+	uint _AverageAlbedoMsSamples;
+	float _AverageAlbedoMsSamplesRcp;
+	float2 _AverageAlbedoMsScaleOffset;
+	float _AverageAlbedoMsSamplesMinusOneRcp;
+}
+
+[numthreads(8, 8, 1)]
+void DirectionalAlbedo(uint2 id : SV_DispatchThreadID)
+{
+	float2 uv = id * _DirectionalAlbedoScaleOffset;
+
+	float NdotV = max(uv.x * uv.x, REAL_EPS);
+	float roughness = uv.y * uv.y;
+	float3 V = float3(SinFromCos(NdotV), 0, NdotV);
+
+	float2 result = 0.0;
+	for (uint i = 0; i < _DirectionalAlbedoSamples; i++)
+	{
+		float2 u = Hammersley2dSeq(i, _DirectionalAlbedoSamples);
+
+		float VdotH, NdotL, weightOverPdf;
+		float3 L; // Unused
+		ImportanceSampleGGX(u, V, k_identity3x3, roughness, NdotV, L, VdotH, NdotL, weightOverPdf);
+
+		if (NdotL > 0.0)
+		{
+			result.x += weightOverPdf * pow(1 - VdotH, 5);
+			result.y += weightOverPdf;
+		}
+	}
+
+	_DirectionalAlbedoResult[id] = result * _DirectionalAlbedoSamplesRcp;
+}
+
+[numthreads(32, 1, 1)]
+void AverageAlbedo(uint2 id : SV_DispatchThreadID)
+{
+	float result = 0.0;
+	float perceptualRoughness = id.x * _AverageAlbedoScaleOffset;
+
+	for (uint i = 0.0; i < _AverageAlbedoSamples; i++)
+	{
+		float NdotV = i * _AverageAlbedoSamplesMinusOneRcp;
+		result += GGXDirectionalAlbedo(NdotV, perceptualRoughness).g * NdotV;
+	}
+
+	_AverageAlbedoResult[id] = 2.0 * result * _AverageAlbedoSamplesRcp;
+}
+
+[numthreads(8, 8, 8)]
+void DirectionalAlbedoMs(uint3 id : SV_DispatchThreadID)
+{
+	float3 uv = id * _DirectionalAlbedoMsScaleOffset;
+
+	float NdotV = max(uv.x * uv.x, REAL_EPS);
+	float perceptualRoughness = uv.y;
+	float roughness = PerceptualRoughnessToRoughness(perceptualRoughness);
+	float f0 = uv.z;
+
+	float3 V = float3(SinFromCos(NdotV), 0, NdotV);
+
+	float result = 0.0;
+	for (uint i = 0; i < _DirectionalAlbedoMsSamples; i++)
+	{
+		float2 u = Hammersley2dSeq(i, _DirectionalAlbedoMsSamples);
+
+		float NdotL, NdotH, VdotH;
+		float3 L; // Unused
+		SampleGGXDir(u, V, k_identity3x3, roughness, L, NdotL, NdotH, VdotH);
+
+		if (NdotL > 0.0)
+		{
+			float F = F_Schlick(f0, VdotH);
+			float D = D_GGX(NdotH, roughness);
+			float V = V_SmithJointGGX(NdotL, NdotV, roughness);
+			float ms = GGXMultiScatter(NdotV, NdotL, perceptualRoughness, f0).r;
+
+			float weightOverPdf = 4.0 * NdotL * VdotH * (F * D * V + ms) / (D * NdotH);
+
+			result += weightOverPdf;
+		}
+	}
+
+	_DirectionalAlbedoMsResult[id] = result * _DirectionalAlbedoMsSamplesRcp;
+}
+
+[numthreads(32, 1, 1)]
+void AverageAlbedoMs(uint2 id : SV_DispatchThreadID)
+{
+	float2 uv = id * _AverageAlbedoMsScaleOffset;
+
+	float perceptualRoughness = uv.x;
+	float f0 = uv.y;
+
+	float result = 0.0;
+	for (uint i = 0.0; i < _AverageAlbedoMsSamples; i++)
+	{
+		float NdotV = i * _AverageAlbedoMsSamplesMinusOneRcp;
+		result += GGXDirectionalAlbedoMS(NdotV, perceptualRoughness, f0) * NdotV;
+	}
+
+	_AverageAlbedoMsResult[id] = 2.0 * result * _AverageAlbedoMsSamplesRcp;
+}
+
+static const uint _SpecularOcclusionSamples = 4096;
+uint _SpecularOcclusionResolution;
+RWTexture3D<float> _SpecularOcclusionResult;
+
+[numthreads(8, 8, 8)]
+void SpecularOcclusion(uint3 id : SV_DispatchThreadID)
+{
+	uint z = id.z % _SpecularOcclusionResolution;
+	uint w = id.z / _SpecularOcclusionResolution;
+
+	float4 uv = uint4(id.xy, z, w) / (_SpecularOcclusionResolution - 1.0);
+
+	float NdotV = max(REAL_EPS, uv.x);
+	float roughness = max(1e-3, uv.y);
+	
+	float alphaV = acos(sqrt(1.0 - uv.z));
+	float beta = acos(uv.w);
+	float theta = acos(NdotV);
+
+	float3 V = float3(SinFromCos(NdotV), 0, NdotV);
+	float3 B = float3(sin(beta - theta), 0.0, cos(beta - theta));
+	
+	float2 result = 0.0;
+	for (uint i = 0; i < _SpecularOcclusionSamples; i++)
+	{
+		float2 u = Hammersley2dSeq(i, _SpecularOcclusionSamples);
+
+		float VdotH, NdotL, weightOverPdf;
+		float3 L;
+		ImportanceSampleGGX(u, V, k_identity3x3, roughness, NdotV, L, VdotH, NdotL, weightOverPdf);
+
+		if (NdotL > 0.0)
+		{
+			result.x += weightOverPdf * (acos(dot(B, L)) <= alphaV);
+			result.y += weightOverPdf;
+		}
+
+		_SpecularOcclusionResult[id] = result.x / result.y;
+	}
+}

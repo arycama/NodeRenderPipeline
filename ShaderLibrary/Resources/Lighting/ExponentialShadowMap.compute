@@ -1,0 +1,56 @@
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+
+#pragma kernel ExponentialShadowMapDownsample
+#pragma kernel ExponentialShadowMapDownsample DOWNSAMPLE_2X
+#pragma kernel ExponentialShadowMapDownsample DOWNSAMPLE_4X
+#pragma kernel Blur HORIZONTAL
+#pragma kernel Blur VERTICAL
+
+RWTexture2DArray<float> _Result;
+Texture2DArray<float> _Input;
+float4 _ScaleOffset;
+float _Exponent;
+uint _MaxWidth, _MaxHeight;
+
+[numthreads(8, 8, 1)]
+void ExponentialShadowMapDownsample(uint3 id : SV_DispatchThreadID)
+{
+	float3 uv = float3(id.xy * _ScaleOffset.xy + _ScaleOffset.zw, id.z);
+    
+	#ifdef DOWNSAMPLE_2X
+		_Result[id] = dot(exp2((1.0 - _Input.GatherRed(_PointClampSampler, uv, int2(0, 0))) * _Exponent), 1.0 / 4.0);
+	#elif defined(DOWNSAMPLE_4X)
+		float4 accum = 0.0;
+		accum += exp2((1.0 - _Input.GatherRed(_PointClampSampler, uv, int2(0, 0))) * _Exponent);
+		accum += exp2((1.0 - _Input.GatherRed(_PointClampSampler, uv, int2(2, 0))) * _Exponent);
+		accum += exp2((1.0 - _Input.GatherRed(_PointClampSampler, uv, int2(0, 2))) * _Exponent);
+		accum += exp2((1.0 - _Input.GatherRed(_PointClampSampler, uv, int2(2, 2))) * _Exponent);
+		_Result[id] = dot(accum, 1.0 / 16.0);
+	#else
+		_Result[id] = exp2((1.0 - _Input[id]) * _Exponent);
+	#endif
+}
+
+[numthreads(8, 8, 1)]
+void Blur(uint3 id : SV_DispatchThreadID)
+{
+	float sum = 0.0;
+	float weightSum = 0.0;
+	
+	[unroll]
+	for (int i = -2; i <= 2; i++)
+	{
+		float weight = GaussianWeight(i, 4.0);
+		
+		#ifdef HORIZONTAL
+			sum += _Input[uint3(clamp(id.xy + int2(i, 0), 0, uint2(_MaxWidth, _MaxHeight)), id.z)] * weight;
+		#else
+			sum += _Input[uint3(clamp(id.xy + int2(0, i), 0, uint2(_MaxWidth, _MaxHeight)), id.z)] * weight;
+		#endif
+		
+		weightSum += weight;
+
+	}
+
+	_Result[id] = sum / weightSum;
+}

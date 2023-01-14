@@ -1,0 +1,175 @@
+#pragma kernel SeedPixels
+#pragma kernel JumpFlood
+#pragma kernel Resolve
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
+
+Texture2DArray<float4> _Texture0, _Texture1, _Texture2, _Texture3, _Texture4, _Texture5, _Texture6;
+RWTexture2DArray<float4> _Texture0Write, _Texture1Write, _Texture2Write, _Texture3Write, _Texture4Write, _Texture5Write, _Texture6Write, _Texture7Write;
+float _Texture0sRGB, _Texture1sRGB, _Texture2sRGB, _Texture3sRGB, _Texture4sRGB, _Texture5sRGB, _Texture6sRGB;
+
+globallycoherent RWTexture2D<float> _CombinedAlpha;
+
+Texture2DArray<float2> _Input;
+RWTexture2DArray<float2> _Result;
+int _CellSize, _Offset, _Resolution, _TextureCount;
+float _InvCellSize, _InvResolution, _MaxDistance;
+
+bool IsOutOfBounds(int2 position, int2 offset)
+{
+	int2 offsetPosition = position + offset;
+	if (any(offsetPosition < 0 || offsetPosition >= _Resolution))
+		return true;
+	
+	return false;
+
+	// Calculate cell of current and offset positions
+	float2 currentCell = floor(position * _InvCellSize);
+	float2 offsetCell = floor(offsetPosition * _InvCellSize);
+	
+	// If the cells are different, then we are out of bounds
+	return any(currentCell != offsetCell);
+}
+
+[numthreads(8, 8, 1)]
+void SeedPixels(uint3 id : SV_DispatchThreadID)
+{
+	float minDist = sqrt(2);
+	float2 minSeed = -1;
+	
+	float sourceAlpha = _Texture0[id].a;
+	bool isOpaque = sourceAlpha >= 0.5;
+	for (int y = -1; y < 2; y++)
+	{
+		for (int x = -1; x < 2; x++)
+		{
+			// Don't compare the middle value
+			if(x == 0 && y == 0)
+				continue;
+				
+			int2 uv = id.xy + int2(x, y);
+			
+			if (IsOutOfBounds(id.xy, int2(x, y)))
+				continue;
+				
+			float neighborAlpha = _Texture0[int3(uv, id.z)].a;
+			bool isNeighborOpaque = neighborAlpha >= 0.5;
+			if (isOpaque != isNeighborOpaque)
+			{
+				float factor = saturate((0.5 - sourceAlpha) / (neighborAlpha - sourceAlpha));
+				float2 midpoint = lerp(id.xy, uv, factor);
+				
+				float dist = distance(id.xy * _InvResolution, midpoint * _InvResolution);
+				if(dist < minDist)
+				{
+					minDist = dist;
+					minSeed = midpoint;
+				}
+			}
+		}
+	}
+
+	_Result[id] = minSeed;
+}
+
+[numthreads(8, 8, 1)]
+void JumpFlood(uint3 id : SV_DispatchThreadID)
+{
+	float minDist = sqrt(2);
+	float2 minSeed = -1;
+	
+	for (int y = -1; y < 2; y++)
+	{
+		for (int x = -1; x < 2; x++)
+		{
+			if (IsOutOfBounds(id.xy, int2(x, y) * _Offset))
+				continue;
+		
+			int2 uv = id.xy + int2(x, y) * _Offset;
+			float2 seed = _Input[int3(uv, id.z)];
+			if (all(seed != -1))
+			{
+				float dist = distance(seed * _InvResolution, id.xy * _InvResolution);
+				if (dist < minDist)
+				{
+					minDist = dist;
+					minSeed = seed;
+				}
+			}
+		}
+	}
+
+	_Result[id] = minSeed;
+}
+
+[numthreads(8, 8, 1)]
+void Resolve(uint3 id : SV_DispatchThreadID)
+{
+	float2 seed = _Input[id];
+	float dist = distance(seed * _InvResolution, id.xy * _InvResolution);
+
+	if (_Texture0[id].a < 0.5)
+	{
+		// Invert the distance
+		dist = -dist;
+		
+		// There's a chance the seed falls slightly on a non-opaque pixel's edge. Do a 3x3 search to ensure we get a filled pixel
+		float minDist = sqrt(2);
+		int2 minSeed = -1;
+	
+		for (int y = -1; y < 2; y++)
+		{
+			for (int x = -1; x < 2; x++)
+			{
+				if (IsOutOfBounds(seed, int2(x, y)))
+					continue;
+		
+				int2 uv = seed + int2(x, y);
+				float neighborAlpha = _Texture0[int3(uv, id.z)].a;
+				bool isNeighborOpaque = neighborAlpha >= 0.5;
+				if (isNeighborOpaque)
+				{
+					float dist = distance(seed * _InvResolution, uv * _InvResolution);
+					if (dist < minDist)
+					{
+						minDist = dist;
+						minSeed = uv;
+					}
+				}
+			}
+		}
+	
+		if (all(minSeed != -1))
+		{
+			seed = minSeed;
+		}
+	}
+	else
+	{
+		seed = id.xy;
+	}
+	
+	_Texture0Write[id] = float4(_Texture0sRGB ? LinearToSRGB(_Texture0[int3(seed, id.z)].rgb) : _Texture0[int3(seed, id.z)].rgb, _Texture0[id].a);
+	
+	_CombinedAlpha[id.xy] += _Texture0[id].a;
+	
+	// Write textures
+	if(_TextureCount > 1)
+		_Texture1Write[id] = _Texture1sRGB ? LinearToSRGB(_Texture1[int3(seed, id.z)]) : _Texture1[int3(seed, id.z)];
+	
+	if(_TextureCount > 2)
+		_Texture2Write[id] = _Texture2sRGB ? LinearToSRGB(_Texture2[int3(seed, id.z)]) : _Texture2[int3(seed, id.z)];
+	
+	if (_TextureCount > 3)
+		_Texture3Write[id] = _Texture3sRGB ? LinearToSRGB(_Texture3[int3(seed, id.z)]) : _Texture3[int3(seed, id.z)];
+	
+	if (_TextureCount > 4)
+		_Texture4Write[id] = _Texture4sRGB ? LinearToSRGB(_Texture4[int3(seed, id.z)]) : _Texture4[int3(seed, id.z)];
+	
+	if (_TextureCount > 5)
+		_Texture5Write[id] = _Texture5sRGB ? LinearToSRGB(_Texture5[int3(seed, id.z)]) : _Texture5[int3(seed, id.z)];
+	
+	if (_TextureCount > 6)
+		_Texture6Write[id] = _Texture6sRGB ? LinearToSRGB(_Texture6[int3(seed, id.z)]) : _Texture6[int3(seed, id.z)];
+}

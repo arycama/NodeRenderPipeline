@@ -1,0 +1,246 @@
+// Implementation based on https://learnopengl.com/Guest-Articles/2022/Phys.-Based-Bloom
+
+#pragma kernel Downsample FIRST
+#pragma kernel Downsample
+#pragma kernel Upsample
+#pragma kernel Upsample FINAL
+
+#pragma multi_compile _ LENS_FLARE
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+
+// This shader performs downsampling on a texture,
+// as taken from Call Of Duty method, presented at ACM Siggraph 2014.
+// This particular method was customly designed to eliminate
+// "pulsating artifacts and temporal stability issues".
+
+// Remember to add bilinear minification filter for this texture!
+// Remember to use a floating-point texture format (for HDR)!
+// Remember to use edge clamping for this texture!
+RWTexture2D<float3> _Result, _FlareResult;
+Texture2D<float3> _Input, _LensDirt, _FlareInput;
+float4 _ScaleOffset;
+
+float _Strength, _DirtStrength;
+Texture2D<float> _Starburst;
+
+float _DistortionQuality, _Distortion, _GhostCount, _GhostSpacing, _HaloWidth, _StreakStrength, _HaloStrength, _GhostStrength, _HaloRadius;
+
+float SampleWeight(float2 pos)
+{
+	float w = length(0.5 - pos) / length(float2(0.5, 0.5));
+	return pow(1.0 - w, 5.0);
+}
+
+// Cubic window; map [0, _radius] in [1, 0] as a cubic falloff from _center.
+float Window_Cubic(float _x, float _center, float _radius)
+{
+	_x = min(abs(_x - _center) / _radius, 1.0);
+	return 1.0 - _x * _x * (3.0 - 2.0 * _x);
+}
+
+float3 textureDistorted(float2 uv, float2 direction, float2 distortion)
+{
+	float3 color = 0;
+	float divisor = 1.0;
+	color.r += _Input.SampleLevel(_LinearClampSampler, uv - direction * distortion, 0.0).r;
+	color.g += _Input.SampleLevel(_LinearClampSampler, uv, 0.0).g;
+	color.b += _Input.SampleLevel(_LinearClampSampler, uv + direction * distortion, 0.0).b;
+	
+	if (_DistortionQuality == 2)
+	{
+		color.rg += _Input.SampleLevel(_LinearClampSampler, uv - direction * distortion * 0.5, 0.0).rg * float2(1.0, 0.5);
+		color.gb += _Input.SampleLevel(_LinearClampSampler, uv + direction * distortion * 0.5, 0.0).gb * float2(0.5, 1.0);
+		divisor = 2.0;
+	}
+	else if (_DistortionQuality == 3)
+	{
+		color.rg += _Input.SampleLevel(_LinearClampSampler, uv - direction * distortion * 0.667, 0.0).rg * float2(1.0, 0.333);
+		color.rg += _Input.SampleLevel(_LinearClampSampler, uv - direction * distortion * 0.333, 0.0).rg * float2(1.0, 0.667);
+		color.gb += _Input.SampleLevel(_LinearClampSampler, uv + direction * distortion * 0.333, 0.0).gb * float2(0.667, 1.0);
+		color.gb += _Input.SampleLevel(_LinearClampSampler, uv + direction * distortion * 0.667, 0.0).gb * float2(0.333, 1.0);
+		divisor = 3.0;
+	}
+	
+	return color / divisor;
+}
+
+float3 LensFlare(float2 uv)
+{
+	uv = 1.0 - uv;
+	float2 ghostVec = (0.5 - uv) * _GhostSpacing;
+	float2 direction = normalize(ghostVec);
+	
+	// Ghosts
+	float3 result = 0.0;
+	for (float i = 0.0; i < _GhostCount; i++)
+	{
+		float2 suv = frac(uv + ghostVec * i);
+		float d = distance(suv, 0.5);
+		float weight = 1.0 - smoothstep(0.0, 0.5, d); // reduce contributions from samples at the screen edge
+		float3 s = _Input.SampleLevel(_LinearClampSampler, suv, 0.0);
+		//result += s * weight * _GhostStrength;
+		
+		result += textureDistorted(suv, direction, _Distortion * weight) * weight * _GhostStrength;
+	}
+	
+	//result *= texture(lens_color, float2(length(0.5 - uv) / length(0.5), 0)).rgb;
+	
+	// Halo
+	//float aspect = _Resolution.w / _Resolution.z;
+	//float2 haloVec = 0.5 - uv;
+	//haloVec.x /= aspect;
+	//haloVec = normalize(haloVec);
+	//haloVec.x *= aspect;
+	//float2 wuv = (uv - float2(0.5, 0.0)) / float2(aspect, 1.0) + float2(0.5, 0.0);
+	//float d = distance(wuv, 0.5);
+	//float haloWeight = Window_Cubic(d, _HaloRadius, _HaloWidth); // cubic window function
+	//haloVec *= _HaloRadius;
+	
+	//haloVec = normalize(ghostVec / float2(1.0, aspect)) * float2(1.0, aspect) * _HaloWidth;
+	//result += textureDistorted(uv + haloVec, direction, _Distortion) * SampleWeight(frac(uv + haloVec)) * _HaloStrength;
+	//result += _Input.SampleLevel(_LinearClampSampler, uv + haloVec, 0.0) * haloWeight;
+	
+	float2 aspect = float2(1.0, lerp(1.0, _ScreenSize.x / _ScreenSize.y, 0.0));
+	float2 haloVec = normalize(ghostVec / aspect) * aspect * _HaloRadius;
+	float d = distance(uv + haloVec, 0.5);
+	float weight = 1.0 - smoothstep(0.0, 0.5, d);
+	//result += _Input.SampleLevel(_LinearClampSampler, uv + haloVec, 0.0) * SampleWeight(frac(uv + haloVec)) * _HaloStrength;
+	result += textureDistorted(uv + haloVec, direction, _Distortion * weight) * weight * _HaloStrength;
+	
+	// Starburst
+	float2 centerVec = uv - 0.5;
+	d = length(centerVec);
+	float radial = FastACos(centerVec.x / d);
+	
+	float starOffset = dot(_InvViewMatrix._13_23_33, 1.0);
+	float mask =
+			_Starburst.SampleLevel(_LinearRepeatSampler, float2(radial + starOffset, 0.0) * 4, 0.0) * _Starburst.SampleLevel(_LinearRepeatSampler, float2(radial + starOffset * 0.5, 0.0) * 4, 0.0);
+	mask = saturate(mask + (1.0 - smoothstep(0.0, 0.3, d)));
+	
+	result *= lerp(1.0, mask, _StreakStrength);
+	
+	return result;
+}
+
+[numthreads(8, 8, 1)]
+void Downsample(uint2 id : SV_DispatchThreadID)
+{
+	float2 uv = id * _ScaleOffset.xy + _ScaleOffset.zw;
+
+    // Take 13 samples around current texel:
+    // a - b - c
+    // - j - k -
+    // d - e - f
+    // - l - m -
+    // g - h - i
+    // === ('e' is the current texel) ===
+	float3 a = _Input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(-2, 2));
+	float3 b = _Input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(0, 2));
+	float3 c = _Input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(2, 2));
+
+	float3 d = _Input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(-2, 0));
+	float3 e = _Input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(0, 0));
+	float3 f = _Input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(2, 0));
+
+	float3 g = _Input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(-2, -2));
+	float3 h = _Input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(0, -2));
+	float3 i = _Input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(2, -2));
+
+	float3 j = _Input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(-1, 1));
+	float3 k = _Input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(1, 1));
+	float3 l = _Input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(-1, -1));
+	float3 m = _Input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(1, -1));
+
+   // Apply weighted distribution:
+	// 0.5 + 0.125 + 0.125 + 0.125 + 0.125 = 1
+	// a,b,d,e * 0.125
+	// b,c,e,f * 0.125
+	// d,e,g,h * 0.125
+	// e,f,h,i * 0.125
+	// j,k,l,m * 0.5
+	// This shows 5 square areas that are being sampled. But some of them overlap,
+	// so to have an energy preserving downsample we need to make some adjustments.
+	// The weights are the distributed, so that the sum of j,k,l,m (e.g.)
+	// contribute 0.5 to the final color output. The code below is written
+	// to effectively yield this sum. We get:
+	// 0.125*5 + 0.03125*4 + 0.0625*4 = 1
+
+	// Check if we need to perform Karis average on each block of 4 samples
+	float3 groups[5];
+	// We are writing to mip 0, so we need to apply Karis average to each block
+	// of 4 samples to prevent fireflies (very bright subpixels, leads to pulsating
+	// artifacts).
+#ifdef FIRST
+	groups[0] = (a + b + d + e) * (0.125f / 4.0f);
+	groups[1] = (b + c + e + f) * (0.125f / 4.0f);
+	groups[2] = (d + e + g + h) * (0.125f / 4.0f);
+	groups[3] = (e + f + h + i) * (0.125f / 4.0f);
+	groups[4] = (j + k + l + m) * (0.5f / 4.0f);
+	groups[0] *= rcp(1.0 + Luminance(groups[0]) * 0.25);
+	groups[1] *= rcp(1.0 + Luminance(groups[1]) * 0.25);
+	groups[2] *= rcp(1.0 + Luminance(groups[2]) * 0.25);
+	groups[3] *= rcp(1.0 + Luminance(groups[3]) * 0.25);
+	groups[4] *= rcp(1.0 + Luminance(groups[4]) * 0.25);
+	float3 downsample = groups[0] + groups[1] + groups[2] + groups[3] + groups[4];
+	_Result[id] = max(downsample, 0.0001f);
+#else
+	float3 downsample = e * 0.125;
+	downsample += (a + c + g + i) * 0.03125;
+	downsample += (b + d + f + h) * 0.0625;
+	downsample += (j + k + l + m) * 0.125;
+	
+#ifdef LENS_FLARE
+	downsample += LensFlare(uv);
+#endif
+	
+	_Result[id] = downsample;
+#endif
+}
+
+float3 UpsampleTexture(Texture2D<float3> input, float2 uv)
+{
+    // Take 9 samples around current texel:
+    // a - b - c
+    // d - e - f
+    // g - h - i
+    // === ('e' is the current texel) ===
+	float3 a = input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(-1, 1));
+	float3 b = input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(0, 1));
+	float3 c = input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(1, 1));
+
+	float3 d = input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(-1, 0));
+	float3 e = input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(0, 0));
+	float3 f = input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(1, 0));
+
+	float3 g = input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(-1, -1));
+	float3 h = input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(0, -1));
+	float3 i = input.SampleLevel(_LinearClampSampler, uv, 0.0, int2(1, -1));
+
+    // Apply weighted distribution, by using a 3x3 tent filter:
+    //  1   | 1 2 1 |
+    // -- * | 2 4 2 |
+    // 16   | 1 2 1 |
+	float3 upsample = e * 4.0;
+	upsample += (b + d + f + h) * 2.0;
+	upsample += (a + c + g + i);
+	upsample *= 1.0 / 16.0;
+	
+	return upsample;
+}
+
+[numthreads(8, 8, 1)]
+void Upsample(uint2 id : SV_DispatchThreadID)
+{
+	float2 uv = id * _ScaleOffset.xy + _ScaleOffset.zw;
+	
+	float3 result = _Result[id];
+	float3 upsample = UpsampleTexture(_Input, uv);
+	
+	float3 dirt = _LensDirt.SampleLevel(_LinearClampSampler, uv, 0.0);
+	dirt = lerp(1.0, dirt, _DirtStrength);
+	
+	result = lerp(result, upsample, _Strength * dirt);
+	
+	_Result[id] = result;
+}

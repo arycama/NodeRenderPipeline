@@ -1,0 +1,23 @@
+﻿#pragma kernel TessellationError
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+
+Texture2D Input;
+RWTexture2D<float> Result;
+int _MipLevel;
+
+[numthreads(8,8,1)]
+void TessellationError(uint2 id : SV_DispatchThreadID)
+{
+	float4 heights;
+	heights.x = Input.Load(int3(id * 2, _MipLevel), int2(0, 0)).r;
+	heights.y = Input.Load(int3(id * 2, _MipLevel), int2(1, 0)).r;
+	heights.z = Input.Load(int3(id * 2, _MipLevel), int2(0, 1)).r;
+	heights.w = Input.Load(int3(id * 2, _MipLevel), int2(1, 1)).r;
+
+    // Store min and max heights
+	float minHeight = Min4(heights);
+	float maxHeight = Max4(heights);
+
+	Result[id] = abs(maxHeight - minHeight);
+}

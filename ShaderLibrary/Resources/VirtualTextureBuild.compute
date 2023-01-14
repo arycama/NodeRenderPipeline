@@ -1,0 +1,217 @@
+#pragma kernel VirtualTextureBuild
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Terrain.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
+
+RWTexture2D<float4> _AlbedoSmoothness, _NormalMetalOcclusion;
+RWTexture2D<float> _Heights;
+
+Texture2DArray<float4> _TerrainSplatArray, _TerrainNormalArray, _TerrainMaskArray;
+Texture2D<uint> _TerrainControlMap;
+
+Buffer<float4> _ScaleOffsets;
+Buffer<uint> _DstOffsets;
+float4 _TexelSize;
+float2 _Resolution;
+uint _Width;
+
+[numthreads(8, 8, 1)]
+void VirtualTextureBuild(uint2 id : SV_DispatchThreadID)
+{
+	uint dataOffset = id.x / _Width;
+	uint2 localId = uint2(id.x - dataOffset * _Width, id.y);
+	
+	float4 scaleOffset = _ScaleOffsets[dataOffset];
+	float2 uv = (localId + 0.5) / _Resolution * scaleOffset.xy + scaleOffset.zw;
+	float2 terrainUv = (uv * (_TexelSize.zw - 1.0) + 0.5) * _TexelSize.xy;
+	
+	float2 dx = float2(scaleOffset.x / _Resolution.x, 0);
+	float2 dy = float2(0, scaleOffset.y / _Resolution.y);
+	
+	uint4 terrainData = _TerrainControlMap.Gather(_PointClampSampler, floor(terrainUv * _TexelSize.zw - 0.5) * _TexelSize.xy);
+	float checker = frac(dot(floor(terrainUv * _TexelSize.zw - 0.5), 0.5));
+	
+	float2 localUv = frac(terrainUv * _TexelSize.zw - 0.5);
+	float triMask = checker ? (localUv.x - localUv.y < 0.0) : (localUv.x + localUv.y > 1);
+
+	float3 weights;
+	float2 offsets[3]; 
+	if(checker)
+	{
+		offsets[0] = triMask ? float2(0, 1) : float2(1, 0);
+		offsets[1] = float2(1, 1);
+		offsets[2] = float2(0, 0);
+		
+		weights.x = abs(localUv.y - localUv.x);
+		weights.y = min(localUv.x, localUv.y);
+		weights.z = min(1 - localUv.x, 1 - localUv.y);
+	}
+	else
+	{
+		offsets[0] = float2(0, 1);
+		offsets[1] = triMask ? float2(1, 1) : float2(0, 0);
+		offsets[2] = float2(1, 0);
+		
+		weights = float3(min(1 - localUv, localUv.yx), abs(localUv.x + localUv.y - 1)).xzy;
+	}
+	
+	float heights[6] = { 0, 0, 0, 0, 0, 0 };
+	float layerWeights[6] = { 0, 0, 0, 0, 0, 0 };
+	uint layerIndices[6] = { 0, 0, 0, 0, 0, 0 };
+	uint idIndices[6] = { 255, 255, 255, 255, 255, 255 };
+	float transition = 0.0;
+	
+	float4 albedoSmoothnesses[6], masks[6];
+	float2 derivatives[6];
+
+	float maxHeight = 0.0;
+	
+	[unroll]
+	for (uint i = 0; i < 6; i++)
+	{
+		uint wi = i >> 1;
+		uint index;
+		if(checker)
+			index = wi == 0 ? (triMask ? 0 : 2) : (wi == 2 ? 3 : wi);
+		else
+			index = wi == 1 ? (triMask ? 1 : 3) : wi;
+		
+		// Layer0
+		uint data = terrainData[index];
+		float blend = ((data >> 26) & 0xF) / 15.0;
+		
+		uint id0 = ((data >> 0) & 0xF);
+		uint id1 = ((data >> 13) & 0xF);
+		
+		// remap blend if layers do not match
+		if(id0 != id1)
+			blend = Remap(blend, 0.0, 1.0, 1.0 / 33.0, 15.0 / 33.0);
+		
+		uint layerIndex;
+		float offsetX, offsetY, rotation, layerWeight;
+		if(i & 1)
+		{
+			layerIndex = ((data >> 13) & 0xF);
+			offsetX = ((data >> 17) & 0x3) / 3.0;
+			offsetY = ((data >> 19) & 0x3) / 3.0;
+			rotation = ((data >> 21) & 0x1F) / 31.0;
+			layerWeight = blend;
+		}
+		else
+		{
+			layerIndex = ((data >> 0) & 0xF);
+			offsetX = ((data >> 4) & 0x3) / 3.0;
+			offsetY = ((data >> 6) & 0x3) / 3.0;
+			rotation = ((data >> 8) & 0x1F) / 31.0;
+			layerWeight = 1.0 - blend;
+		}
+		
+		layerWeight *= weights[i >> 1];
+		transition += layerWeight * max(1e-2, _TerrainLayerData[layerIndex].Blending);
+				
+		// Center of texel in control map space
+		float2 controlCenter = (floor(uv * (_TexelSize.zw - 1.0)) + 0.5 + offsets[i >> 1]) * _TexelSize.xy;
+	
+		// Center in terrain layer space
+		float2 center = (floor(controlCenter * _TerrainLayerData[layerIndex].Scale) + 0.5) / _TerrainLayerData[layerIndex].Scale;
+	
+		float2 localDx = dx * _TerrainLayerData[layerIndex].Scale;
+		float2 localDy = dy * _TerrainLayerData[layerIndex].Scale;
+		float2 localUv = uv * _TerrainLayerData[layerIndex].Scale;
+
+		// Rotate around control point center
+		float s, c;
+		sincos(rotation * TWO_PI, s, c);
+		float2x2 rotationMatrix = float2x2(c, -s, s, c);
+		
+		float3 sampleUv = float3(mul(localUv - center, rotationMatrix) + center + float2(offsetX, offsetY), layerIndex);
+		localDx = mul(localDx, rotationMatrix);
+		localDy = mul(localDy, rotationMatrix);
+		
+		float4 albedoSmoothness = _TerrainSplatArray.SampleGrad(_TrilinearRepeatSampler, sampleUv, localDx, localDy);
+		float4 mask = _TerrainMaskArray.SampleGrad(_TrilinearRepeatSampler, sampleUv, localDx, localDy);
+		float4 normalData = _TerrainNormalArray.SampleGrad(_TrilinearRepeatSampler, sampleUv, localDx, localDy);
+		
+		float3 unpackedNormal = UnpackNormal(normalData);
+		float2 d0 = unpackedNormal.xy / unpackedNormal.z;
+		float2 derivative = mul(rotationMatrix, d0);
+		
+		albedoSmoothnesses[i] = albedoSmoothness * layerWeight;
+		masks[i] = mask * layerWeight;
+		derivatives[i] = derivative * layerWeight;
+		
+		layerWeights[i] = layerWeight;
+		layerIndices[i] = layerIndex;
+		
+		uint dstIndex = 0;
+		for (uint j = 0; j < 6; j++)
+		{
+			if (idIndices[j] != layerIndex)
+			{
+				if (idIndices[j] == 255)
+				{
+					idIndices[j] = layerIndex;
+					dstIndex = j;
+					break;
+				}
+				else
+				{
+					continue;
+				}
+			}
+			else
+			{
+				dstIndex = j;
+				break;
+			}
+		}
+		
+		float height = heights[dstIndex] + layerWeight + mask.b * weights[i >> 1];
+		heights[dstIndex] = height;
+		maxHeight = max(maxHeight, height);
+	}
+	
+	float4 albedoSmoothness = 0.0, mask = 0.0;
+	float2 derivativeSum = 0.0;
+	float weightSum = 0;
+	
+	[unroll]
+	for (i = 0; i < 6; i++)
+	{
+		uint layerIndex = layerIndices[i];
+		float weight = 0.0;
+		
+		[unroll]
+		for (uint j = 0; j < 6; j++)
+		{
+			if (idIndices[j] == layerIndex)
+			{
+				weight = max(0.0, heights[j] + transition - maxHeight);
+				break;
+			}
+		}
+		
+		albedoSmoothness += albedoSmoothnesses[i] * weight;
+		mask += masks[i] * weight;
+		derivativeSum += derivatives[i] * weight;
+		
+		weightSum += layerWeights[i] * weight;
+	}
+	
+	albedoSmoothness /= weightSum;
+	albedoSmoothness.rgb = LinearToSRGB(albedoSmoothness.rgb);
+	_AlbedoSmoothness[id] = albedoSmoothness;
+	
+	mask /= weightSum;
+	_Heights[id] = mask.b;
+	
+	derivativeSum /= weightSum;
+	
+	float3 normal = GetTerrainNormal(uv, dx, dy);
+	float3 tangent = normalize(cross(normal, float3(0, 0, 1)));
+	float3 binormal = cross(tangent, normal);
+	float3x3 tangentToWorld = float3x3(tangent, binormal, normal);
+	float3 normalTS = normalize(float3(derivativeSum, 1.0));
+	float3 normalWS = 0.5 * normalize(mul(normalTS, tangentToWorld)) + 0.5;
+	_NormalMetalOcclusion[id] = float4(mask.r, normalWS.z, mask.g, normalWS.x);
+}

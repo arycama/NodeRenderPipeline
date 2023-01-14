@@ -1,0 +1,181 @@
+#pragma kernel Scatter
+#pragma kernel Integrate
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Lighting.hlsl"
+
+RWTexture3D<float3> _Result;
+Texture3D<float3> _Input, _History;
+Texture2D<float> _MaxZ;
+uint _VolumeTileSize;
+float4x4 _PixelCoordToViewDirWS;
+
+[numthreads(8, 8, 1)]
+void Scatter(uint3 id : SV_DispatchThreadID)
+{
+	//float offset = InterleavedGradientNoise(id.xy, 0);// BlueNoise1D(id.xy);
+	float offset = BlueNoise1D(id.xy);
+	
+	// Early exit if this froxel is behind the max depth sample
+	uint mip = log2(_VolumeTileSize);
+	float maxDepth = _MaxZ.mips[mip][id.xy];
+	
+	float normalizedDepth = (id.z + offset) / _VolumeSlices;
+	float linearDepth = lerp(_ProjectionParams.y, _VolumeDepth, normalizedDepth);
+	float deviceDepth = EyeToDeviceDepth(linearDepth, _ZBufferParams);
+	
+	if(maxDepth > deviceDepth)
+	{
+		_Result[id] = 0.0;
+		return;
+	}
+	
+	float2 positionNdc = float2(id.xy + 0.5) * _VolumeTileSize;
+	float3 positionWS = PixelToWorld(float3(positionNdc, deviceDepth));
+    
+	float3 rayDirection = normalize(positionWS);
+	float3 luminance = 0.0;
+	
+	for (uint j = 0; j < _DirectionalLightCount; j++)
+	{
+		DirectionalLightData lightData = _DirectionalLightData[j];
+		
+		float attenuation = 1.0;
+		if (j == 0)
+			attenuation *= CloudTransmittanceLevelZero(positionWS);
+
+		if (lightData.ShadowIndex != UINT_MAX)
+			attenuation *= DirectionalLightShadow(positionWS, lightData.ShadowIndex);
+		
+		//luminance += AtmosphereLightFull(positionWS + _PlanetOffset, rayDirection, lightData.Direction, _LinearClampSampler, attenuation) * ApplyExposure(lightData.Color);
+	}
+	
+	// Clustered lighting
+	float4 positionNdc1 = WorldToPixel(positionWS);
+        
+	uint3 clusterIndex;
+	clusterIndex.xy = positionNdc1.xy / _TileSize;
+	clusterIndex.z = log2(positionNdc1.w) * _ClusterScale + _ClusterBias;
+
+	uint2 lightOffsetAndCount = _LightClusterIndices[clusterIndex];
+	uint startOffset = lightOffsetAndCount.x;
+	uint lightCount = min(lightOffsetAndCount.y, 32);
+
+	for (uint k = 0; k < lightCount; k++)
+	{
+		int index = _LightClusterList[startOffset + k];
+		LightData lightData = _LightData[index];
+		LightCommon light = GetLightColor(lightData, positionWS, 0.5, false);
+            
+            // Bit more work for line/area lights
+		if (lightData.lightType == 5 || lightData.lightType == 6)
+		{
+			float3 n = normalize(lightData.positionWS - positionWS);
+			float3x3 orthoBasisViewNormal = GetOrthoBasisViewNormal(-rayDirection, n, dot(-rayDirection, n));
+                
+	        // Translate the light s.t. the shaded point is at the origin of the coordinate system.
+			lightData.positionWS -= positionWS;
+
+			if (lightData.lightType == 5)
+			{
+		            // TODO: some of this could be precomputed.
+		            // Rotate the endpoints into the local coordinate system.
+				float3 P1 = mul(orthoBasisViewNormal, lightData.positionWS - lightData.right * lightData.size.x);
+				float3 P2 = mul(orthoBasisViewNormal, lightData.positionWS + lightData.right * lightData.size.x);
+
+		            // Compute the binormal in the local coordinate system.
+				float3 B = normalize(cross(P1, P2));
+
+				light.color *= LTCEvaluate(P1, P2, B, k_identity3x3);
+			}
+			else
+			{
+		            // TODO: some of this could be precomputed.
+				float4x3 lightVerts;
+				lightVerts[0] = lightData.positionWS - lightData.right * lightData.size.x - lightData.up * lightData.size.y; // LL
+				lightVerts[1] = lightData.positionWS - lightData.right * lightData.size.x + lightData.up * lightData.size.y; // UL
+				lightVerts[2] = lightData.positionWS + lightData.right * lightData.size.x + lightData.up * lightData.size.y; // UR
+				lightVerts[3] = lightData.positionWS + lightData.right * lightData.size.x - lightData.up * lightData.size.y; // LR
+
+                    // Rotate the endpoints into the local coordinate system.
+				lightVerts = mul(lightVerts, transpose(orthoBasisViewNormal));
+                    
+		            // Evaluate the diffuse part
+		            // Polygon irradiance in the transformed configuration.
+				float4x3 LD = mul(lightVerts, k_identity3x3);
+
+				float3 formFactorD = PolygonFormFactor(LD);
+				light.color *= PolygonIrradianceFromVectorFormFactor(formFactorD);
+			}
+		}
+		
+		float3 P = positionWS + _PlanetOffset;
+		float3 V = rayDirection;
+		float3 L = light.direction;
+		
+		float angle = dot(V, L);
+		float4 atmosphereScatter = AtmosphereScatter(length(P));
+		float3 scatterColor = atmosphereScatter.xyz * RayleighPhaseFunction(angle);
+		scatterColor += atmosphereScatter.w * CornetteShanksPhasePartVarying(_MiePhase, angle) * _MiePhaseConstant;
+		
+		luminance += scatterColor * light.color;
+	}
+	
+	// Calculate previous volume position
+	float3 previousClip = PerspectiveDivide(WorldToClipPrevious(positionWS)).xyw;
+	previousClip.xy = previousClip.xy * 0.5 + 0.5;
+	previousClip.z = RangeRemap(_ProjectionParams.y, _VolumeDepth, previousClip.z);
+	
+	if (all(previousClip >= 0.0 && previousClip <= 1.0))
+	{
+		previousClip *= float3(_ScreenSize.xy, _VolumeSlices);
+		previousClip.xy /= _VolumeTileSize;
+		float3 uv = ((previousClip) ) / float3(_VolumeWidth, _VolumeHeight, _VolumeSlices);
+		float3 history = _History.SampleLevel(_LinearClampSampler, uv, 0.0);
+		history = _History[previousClip];
+		luminance = lerp(history, luminance, 0.05);
+	}
+	
+	_Result[id] = luminance;
+}
+
+[numthreads(8, 8, 1)]
+void Integrate(uint3 id : SV_DispatchThreadID)
+{
+	float offset = BlueNoise1D(id.xy);
+	
+	float normalizedDepth = (id.z + offset) / _VolumeSlices;
+	float linearDepth = lerp(_ProjectionParams.y, _VolumeDepth, normalizedDepth);
+	float deviceDepth = EyeToDeviceDepth(linearDepth, _ZBufferParams);
+	
+	float2 positionNdc = float2(id.xy + 0.5) * _VolumeTileSize;
+	float3 positionWS = PixelToWorld(float3(positionNdc, deviceDepth));
+	float3 V = -MultiplyVector(_PixelCoordToViewDirWS, float3((id.xy + 0.5) * _VolumeTileSize, 1.0), false);
+	float lengthV = length(V);
+	
+	float3 rayOrigin = positionWS + _PlanetOffset + V * _ProjectionParams.y;
+	float3 rayDirection = normalize(positionWS);
+
+	float ds = _VolumeDepth / _VolumeSlices;
+	float3 rayStep = rayDirection * ds;
+	
+	// Early exit if this froxel is behind the max depth sample
+	uint mip = log2(_VolumeTileSize);
+	float maxDepth = LinearEyeDepth(_MaxZ.mips[mip][id.xy], _ZBufferParams);
+
+	float3 luminance = 0.0, transmittance = 1.0;
+	for (float i = offset; i < _VolumeSlices; i++)
+	{
+		//if (i * ds > maxDepth)
+		//	break;
+		
+		float3 P = rayOrigin + i * rayStep;
+		float3 extinction = AtmosphereOpticalDepth(length(P));
+		
+		float3 stepLuminance = _Input[uint3(id.xy, i)];
+		
+		luminance += transmittance * stepLuminance * (1.0 - exp(-extinction * ds)) / extinction;
+		transmittance *= exp(-extinction * ds);
+		
+		_Result[uint3(id.xy, i)] = luminance;
+	}
+}

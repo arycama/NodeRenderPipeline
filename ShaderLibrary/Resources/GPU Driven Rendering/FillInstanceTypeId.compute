@@ -1,0 +1,21 @@
+#pragma kernel FillData
+
+uint _Offset, _Count;
+
+RWStructuredBuffer<uint> _InstanceTypeIds;
+RWStructuredBuffer<float3x4> _PositionsResult;
+RWStructuredBuffer<float> _LodFadesResult;
+
+StructuredBuffer<float3x4> _PositionsInput;
+Buffer<uint> _InstanceTypeIdsInput;
+
+[numthreads(1024, 1, 1)]
+void FillData(uint id : SV_DispatchThreadID)
+{
+	if (id >= _Count)
+		return;
+	
+	_InstanceTypeIds[_Offset + id] = _InstanceTypeIdsInput[id];
+	_PositionsResult[_Offset + id] = _PositionsInput[id];
+	_LodFadesResult[id] = 0;
+}

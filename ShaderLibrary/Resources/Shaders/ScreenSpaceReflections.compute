@@ -1,0 +1,265 @@
+#pragma kernel Intersect
+#pragma kernel Temporal
+#pragma kernel Upsample
+
+#pragma multi_compile _ VOXEL_GI_ON
+
+#define SSR_TRACE_EPS               0.000488281f // 2^-11, should be good up to 4K
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Deferred.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Lighting.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/GGXExtensions.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/ReflectionProbe.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
+
+RWTexture2D<float> _HitResult, _FrameCountResult;
+RWTexture2D<float4> _Result;
+Texture2D<float4> _HitInput, _Input, _History;
+Texture2D<uint> _MotionVectors;
+Texture2D<float> _PrevFrameCount, _Depth, _FrameCountPrevious, _PreviousDepth;
+float4x4 _PixelCoordToViewDirWS;
+float2 _Resolution, _ResolutionMinusOne;
+float _Thickness, _BrdfBias, _StdDevFactor, _Sharpness, _BlurRadius;
+uint _MaxMip, _MaxSteps;
+
+float FFX_SSSR_LoadDepth(int2 current_mip_position, int current_mip)
+{
+	return _Depth.mips[current_mip][current_mip_position];
+}
+
+float3 FFX_SSSR_LoadWorldSpaceNormal(int2 pixel_coordinate)
+{
+	return GBufferNormal(pixel_coordinate);
+}
+
+float3 FFX_SSSR_ScreenSpaceToViewSpace(float3 screen_space_position)
+{
+	screen_space_position.y = (1 - screen_space_position.y);
+	screen_space_position.xy = 2 * screen_space_position.xy - 1;
+	float4 projected = mul(_InvViewProjMatrix, float4(screen_space_position, 1));
+	projected.xyz /= projected.w;
+	return MultiplyPoint3x4(_ViewMatrix, projected.xyz);
+}
+
+#define FFX_SSSR_INVERTED_DEPTH_RANGE
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/ffx_sssr.hlsl"
+
+float3 InvProjectPosition(float3 coord, float4x4 mat)
+{
+	//coord.y = (1 - coord.y);
+	coord.xy = 2 * coord.xy - 1;
+	float4 projected = mul(mat, float4(coord, 1));
+	projected.xyz /= projected.w;
+	return projected.xyz;
+}
+
+float3 ScreenSpaceToWorldSpace(float3 screen_space_position)
+{
+	return InvProjectPosition(screen_space_position, _InvViewProjMatrix);
+}
+
+float3 ScreenToWorld(float3 position)
+{
+	return MultiplyPointProj(_InvViewProjMatrix, float3(position.xy * 2.0 - 1.0, position.z)).xyz;
+}
+
+[numthreads(8, 8, 1)]
+void Intersect(uint2 id : SV_DispatchThreadID)
+{
+	float2 pixel = id * 2 + 0.5;
+	
+	float depth = _Depth.mips[1][id];
+	if(depth == UNITY_RAW_FAR_CLIP_VALUE)
+	{
+		_Result[id] = 0;
+		_HitResult[id] = 0;
+		return;
+	}
+	
+	float2 u = _BlueNoise2D[id % 128];
+	
+	float3 V = MultiplyVector(_PixelCoordToViewDirWS, float3(pixel, 1.0), true);
+	
+	float3 N = GBufferNormal(id << 1);
+	float3x3 localToWorld = GetLocalFrame(N);
+	
+	float roughness = max(1e-3, ConvertAnisotropicPerceptualRoughnessToRoughness(GBufferPerceptualRoughness(id << 1)));
+	
+	float3 localV, localH;
+	float VdotH;
+	SampleGGXVisibleNormal(u, V, localToWorld, roughness, localV, localH, VdotH);
+
+    // Compute the reflection direction
+	float3 localR = reflect(-localV, localH);
+	float3 R = mul(localR, localToWorld);
+  
+    // We start tracing from the center of the current pixel, and do so up to the far plane.
+	float3 positionWS = ScreenToWorld(float3((id + 0.5) / _Resolution, depth));
+	
+	float3 rayOrigin = float3((id + 0.5) / _Resolution, depth);
+	float3 reflPosSS = MultiplyPointProj(_ViewProjMatrix, positionWS + R);
+	reflPosSS.xy = 0.5 * reflPosSS.xy + 0.5;
+	reflPosSS.y = 1.0 - reflPosSS.y;
+	
+	float3 rayDir = reflPosSS - rayOrigin;
+
+	bool validHit;
+	float3 hit = FFX_SSSR_HierarchicalRaymarch(rayOrigin, rayDir, true, _ScreenSize.xy, 1, 0, _MaxSteps, validHit);
+	
+	float3 world_space_origin = ScreenSpaceToWorldSpace(rayOrigin);
+	float3 world_space_hit = ScreenSpaceToWorldSpace(hit);
+	float3 world_space_ray = world_space_hit - world_space_origin.xyz;
+	
+	float2 uv = (id + 0.5) / _Resolution;
+	float confidence = validHit ? FFX_SSSR_ValidateHit(hit, uv, world_space_ray, _ScreenSize.xy, _Thickness) : 0;
+
+	if (confidence > 0.0)
+	{
+		_HitResult[id] = length(world_space_ray);
+		_Result[id] = float4(_Input[hit.xy * _ScreenSize.xy].rgb, confidence);
+	}
+	else
+	{
+		_HitResult[id] = 0.0;
+		_Result[id] = 0.0;
+	}
+}
+
+[numthreads(8, 8, 1)]
+void Temporal(uint2 id : SV_DispatchThreadID)
+{
+	float4 mean = 0.0, stdDev = 0.0;
+	
+	[unroll]
+	for (uint y = 0; y < 3; y++)
+	{
+		[unroll]
+		for (uint x = 0; x < 3; x++)
+		{
+			uint2 coord = clamp(id + uint2(x, y) - 1, 0, _Resolution);
+			
+			float4 colorSample = _Input[coord];
+			colorSample.rgb /= 1.0 + Luminance(colorSample.rgb);
+			
+			mean += colorSample;
+			stdDev += Square(colorSample);
+		}
+	}
+	
+	mean /= 9.0;
+	stdDev = sqrt(abs(stdDev / 9.0 - Square(mean)));
+	
+	float3 velocity = UnpackVelocity(_MotionVectors[id << 1]);
+	
+	float hitData = _HitInput[id];
+	float depth = _Depth.mips[1][id];
+	float3 positionWS = ScreenToWorld(float3((id + 0.5) / floor(_ScreenSize.xy / 2.0), depth));
+	float3 V = MultiplyVector(_PixelCoordToViewDirWS, float3((id + 0.5) / floor(_ScreenSize.xy / 2.0) * _ScreenSize.xy, 1.0), true);
+	float3 worldHitPosition = positionWS - V * hitData;
+	float2 previousUv = WorldToNdcPrevious(worldHitPosition).xy * _Resolution;
+	
+	float2 previousCoord = floor(previousUv - 0.5);
+	float2 previousFrac = frac(previousUv - 0.5);
+	
+	float4 history = 0.0;
+	float weightSum = 0.0, accumSpeed = 0.0;
+	float currentDepth = Linear01ToDeviceDepth(Linear01Depth(_Depth.mips[1][id], _ZBufferParams) - velocity.z, _ZBufferParams);
+	
+	float3 Xprev = MultiplyPointProj(_PrevInvViewProjMatrix, float3((previousUv / _Resolution) * 2 - 1, currentDepth)).xyz;
+	float invDistToPoint = rcp(LinearEyeDepth(_Depth.mips[1][id], _ZBufferParams));
+	
+	float _DepthRejection = 5.0, _VelocityRejection = 10.0;
+	
+	[unroll]
+	for (y = 0; y < 2; y++)
+	{
+		[unroll]
+		for (int x = 0; x < 2; x++)
+		{
+			float2 coord = clamp(previousCoord + float2(x, y), 0.0, _ResolutionMinusOne);
+			
+			float previousDepth = _PreviousDepth.mips[1][coord];
+			float3 previousPositionWS = MultiplyPointProj(_PrevInvViewProjMatrix, float3(((coord + 0.5) / _Resolution) * 2 - 1, previousDepth)).xyz;
+			
+			float bilinearWeight = abs(x - 1.0 + previousFrac.x) * abs(y - 1.0 + previousFrac.y);
+			float weight = saturate(1.0 - abs(distance(Xprev, previousPositionWS)) * _DepthRejection * invDistToPoint);
+			weight *= saturate(1.0 - abs(length(velocity.xy)) * _VelocityRejection);
+			weight *= bilinearWeight;
+			
+			float4 historySample = _History[coord];
+			historySample.rgb /= 1.0 + Luminance(historySample.rgb);
+			history += historySample * weight;
+			weightSum += weight;
+			
+			accumSpeed += _FrameCountPrevious[coord] * weight;
+		}
+	}
+	
+	if (weightSum > 0.0)
+		history /= weightSum;
+	
+	float _AccumFrameCount = 32.0;
+	float _MinStdDev = 1.5;
+	float _MaxStdDev = 3.5;
+	float _StdDevFrameCount = 32.0;
+	
+	accumSpeed *= 255.0;
+	accumSpeed = min(accumSpeed + 1.0, _AccumFrameCount);
+	float speed = 1.0 / (1.0 + accumSpeed);
+	
+	// Expand bounding box based on accumulated frame count
+	float factor = lerp(_MinStdDev, _MaxStdDev, saturate(accumSpeed / _StdDevFrameCount));
+	float4 minValue = mean - stdDev * factor;
+	float4 maxValue = mean + stdDev * factor;
+	history = clamp(history, minValue, maxValue);
+	
+	float4 result = _Input[id];
+	result.rgb /= 1.0 + Luminance(result.rgb);
+	result = lerp(history, result, speed);
+	result.rgb /= 1.0 - Luminance(result.rgb);
+	
+	_Result[id] = result;
+	_FrameCountResult[id] = accumSpeed / 255.0;
+}
+
+float4 LinearEyeDepth(float4 depth, float4 zBufferParam)
+{
+	return 1.0 / (zBufferParam.z * depth + zBufferParam.w);
+}
+
+[numthreads(8, 8, 1)]
+void Upsample(uint2 id : SV_DispatchThreadID)
+{
+	float depth = _Depth[id];
+	
+	float4 depths;
+	depths.x = _Depth.mips[1][clamp((id + int2(-1, 1)) >> 1, 0, _ResolutionMinusOne)];
+	depths.y = _Depth.mips[1][clamp((id + int2(1, 1)) >> 1, 0, _ResolutionMinusOne)];
+	depths.z = _Depth.mips[1][clamp((id + int2(1, -1)) >> 1, 0, _ResolutionMinusOne)];
+	depths.w = _Depth.mips[1][clamp((id + int2(-1, -1)) >> 1, 0, _ResolutionMinusOne)];
+	
+	float c = LinearEyeDepth(depth, _ZBufferParams);
+	depths = LinearEyeDepth(depths, _ZBufferParams);
+	
+	float4 input0 = _Input[clamp((id + int2(-1, 1)) >> 1, 0, _ResolutionMinusOne)];
+	float4 input1 = _Input[clamp((id + int2(1, 1)) >> 1, 0, _ResolutionMinusOne)];
+	float4 input2 = _Input[clamp((id + int2(1, -1)) >> 1, 0, _ResolutionMinusOne)];
+	float4 input3 = _Input[clamp((id + int2(-1, -1)) >> 1, 0, _ResolutionMinusOne)];
+	
+	float2 uv = frac((id + 0.5) * 0.5 - 0.5);
+	float4 weights = float4(1.0 - uv.x, uv.x, uv.x, 1.0 - uv.x) * float4(uv.y, uv.y, 1.0 - uv.y, 1.0 - uv.y);
+	
+	float x = dot(pow(depths, 1.0), weights);
+	float x2 = dot(pow(depths, 2.0), weights);
+	float4 y = (input0 * weights.x + input1 * weights.y + input2 * weights.z + input3 * weights.w);
+	float4 xy = (input0 * depths.x * weights.x + input1 * depths.y * weights.y + input2 * depths.z * weights.z + input3 * depths.w * weights.w);
+	
+	float4 cyx = (xy - x * y);
+	float4 vx1 = x2 - x * x;
+	
+	float4 beta1 = cyx / (vx1 + 0.0001);
+	float4 alpha = y - beta1 * x;
+	_Result[id] = beta1 * c + alpha;
+	_Result[id] = _Input[id >> 1];
+}

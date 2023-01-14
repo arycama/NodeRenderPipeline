@@ -1,0 +1,9 @@
+#pragma kernel MotionBlur
+
+RWTexture2D<float4> Result;
+
+[numthreads(8, 8, 1)]
+void MotionBlur(uint3 id : SV_DispatchThreadID)
+{
+	
+}

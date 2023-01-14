@@ -1,0 +1,100 @@
+#pragma kernel Luminance
+#pragma kernel Blend
+#pragma kernel BlendLaplacian
+#pragma kernel FinalCombinePass
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
+
+RWTexture2D<float3> _Result, _LuminanceResult, _WeightsResult;
+RWTexture2D<float> _WeightResult;
+Texture2D<float3> _Original, _Diffuse, _OriginalMip, _Weights, _Exposures, _ExposuresCoarser;
+Texture2D<float> _AccumSoFar;
+float4 _MipPixelSize, _ScaleOffset;
+float _Shadows, _Highlights, _Mip, _SigmaSq, _BoostLocalContrast, _Compensation;
+uint _MaxWidth, _MaxHeight;
+
+[numthreads(8, 8, 1)]
+void Luminance(uint2 id : SV_DispatchThreadID)
+{
+	 // Tonemap three syntetic exposures and produce their luminances.
+	float3 color = _Original[id] * _Compensation;
+	float highlights = Luminance(AcesTonemap(unity_to_ACES(color * _Highlights)));
+	float midtones = Luminance(AcesTonemap(unity_to_ACES(color)));
+	float shadows = Luminance(AcesTonemap(unity_to_ACES(color * _Shadows)));
+	_LuminanceResult[id] = float3(highlights, midtones, shadows);
+	
+	float3 diff = float3(highlights, midtones, shadows) - 0.5;
+	float3 weights = exp(-0.5 * diff * diff * _SigmaSq);
+	weights /= dot(weights, 1.0) + 0.00001;
+	_WeightsResult[id] = weights;
+}
+
+[numthreads(8, 8, 1)]
+void Blend(uint2 id : SV_DispatchThreadID)
+{
+	 // Blend the exposures based on the blend weights.
+	float3 weights = _Weights.mips[_Mip][id];
+	float3 exposures = _Exposures.mips[_Mip][id];
+	weights /= dot(weights, 1.0) + 0.0001;
+	_WeightResult[id] = dot(exposures * weights, 1.0);
+}
+
+[numthreads(8, 8, 1)]
+void BlendLaplacian(uint2 id : SV_DispatchThreadID)
+{
+	float2 uv = id * _ScaleOffset.xy + _ScaleOffset.zw;
+	
+	// Blend the Laplacians based on exposure weights.
+	float accumSoFar = _AccumSoFar.SampleLevel(_LinearClampSampler, uv, 0.0).r;
+	
+	float3 laplacians = _Exposures.mips[_Mip - 1][id] - _Exposures.SampleLevel(_LinearClampSampler, uv, _Mip);
+	float3 weights = _Weights.mips[_Mip - 1][id] * (_BoostLocalContrast > 0.0 ? abs(laplacians) + 0.00001 : 1.0);
+	weights /= dot(weights, 1.0) + 0.00001;
+	float laplac = dot(laplacians * weights, 1.0);
+	_WeightResult[id] = accumSoFar + laplac;
+}
+
+[numthreads(8, 8, 1)]
+void FinalCombinePass(uint2 id : SV_DispatchThreadID)
+{
+	float2 uv = id * _ScaleOffset.xy + _ScaleOffset.zw;
+	
+	// Guided upsampling.
+    // See https://bartwronski.com/2019/09/22/local-linear-models-guided-filter/
+	float momentX = 0.0;
+	float momentY = 0.0;
+	float momentX2 = 0.0;
+	float momentXY = 0.0;
+	float ws = 0.0;
+	
+	[unroll]
+	for (int dy = -1; dy <= 1; dy += 1)
+	{
+		[unroll]
+		for (int dx = -1; dx <= 1; dx += 1)
+		{
+			float x = _OriginalMip.SampleLevel(_LinearClampSampler, uv + float2(dx, dy) * _MipPixelSize.zw, _Mip).y;
+			float y = _Diffuse.SampleLevel(_LinearClampSampler, uv + float2(dx, dy) * _MipPixelSize.zw, 0.0).x;
+			float w = exp(-0.5 * float(dx * dx + dy * dy) / (0.7 * 0.7));
+			momentX += x * w;
+			momentY += y * w;
+			momentX2 += x * x * w;
+			momentXY += x * y * w;
+			ws += w;
+		}
+	}
+	
+	momentX /= ws;
+	momentY /= ws;
+	momentX2 /= ws;
+	momentXY /= ws;
+	
+	float A = (momentXY - momentX * momentY) / (max(momentX2 - momentX * momentX, 0.0) + 0.00001);
+	float B = momentY - A * momentX;
+	
+    // Apply local exposure adjustment as a crude multiplier on all RGB channels.
+	float3 input = unity_to_ACES(_Result[id] * _Compensation);
+	float3 tonemappedInput = AcesTonemap(input);
+	_Result[id] = max(0.0, _Diffuse.SampleLevel(_LinearClampSampler, uv, 0.0).x) / (Luminance(tonemappedInput) + 0.0001) * tonemappedInput;
+}

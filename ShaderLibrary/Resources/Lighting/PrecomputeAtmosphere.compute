@@ -1,0 +1,98 @@
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Lighting.hlsl"
+
+#pragma kernel Transmittance KERNEL=Transmittance TRANSMITTANCE
+#pragma kernel MultiScatter KERNEL=MultiScatter MULTI_SCATTER
+
+RWTexture2D<float3> Result;
+float4 _ScaleOffset;
+uint _SampleCount;
+
+static const uint _ThreadCount = 64;
+
+groupshared float3 MultiScatterShared[_ThreadCount], ScatterShared[_ThreadCount];
+
+[numthreads(_ThreadCount, 1, 1)]
+void KERNEL(uint2 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
+{
+	#ifdef TRANSMITTANCE
+		float2 uv = id * _ScaleOffset.xy + _ScaleOffset.zw;
+		float2 skyParams = UvToSkyParams(uv);
+		float3 rayOrigin = float3(0.0, skyParams.y, 0.0);
+		float3 V = float3(SinFromCos(skyParams.x), skyParams.x, 0.0);
+		float3 L = 0.0;
+		bool checkPlanetHit = false;
+	#else
+		float2 uv = groupId * _ScaleOffset.xy + _ScaleOffset.zw;
+		float2 skyParams = UvToSkyParams(uv);
+		float3 rayOrigin = float3(0.0, skyParams.y, 0.0);
+		float3 L = float3(SinFromCos(skyParams.x), skyParams.x, 0.0);
+		float2 u = Hammersley2dSeq(groupIndex, _ThreadCount);
+		float3 V = SampleSphereUniform(u.x, u.y);
+		bool checkPlanetHit = true;
+	#endif
+	
+	float3 luminance = 0.0, multiScatter = 0.0, transmittance = 1.0;
+	
+	float rayDistance;
+	float2 intersections;
+	bool hasPlanetHit = IntersectRaySphere(rayOrigin, V, _PlanetRadius, intersections) && intersections.x >= 0.0;
+	if (checkPlanetHit && hasPlanetHit)
+	{
+		rayDistance = intersections.x;
+	}
+	else
+	{
+		rayDistance = IntersectRaySphereSimple(rayOrigin, V, _TopRadius);
+	}
+	
+	float ds = rayDistance / _SampleCount;
+	float3 rayStep = V * ds;
+
+	for (float i = 0.5; i < _SampleCount; i++)
+	{
+		float3 P = rayOrigin + i * rayStep;
+		float3 opticalDepth = AtmosphereOpticalDepth(length(P));
+		
+		float3 lighting = AtmosphereLight(P, V, L, _LinearClampSampler);
+		luminance += transmittance * lighting * (1.0 - exp(-opticalDepth * ds)) / opticalDepth;
+		
+		float4 opticalDepthSumScatter = AtmosphereScatter(length(P));
+		multiScatter += transmittance * (opticalDepthSumScatter.xyz + opticalDepthSumScatter.w) * (1.0 - exp(-opticalDepth * ds)) / opticalDepth;
+		
+		transmittance *= exp(-opticalDepth * ds);
+	}
+	
+	if(hasPlanetHit)
+	{
+		// Account for bounced light off the earth
+		float3 P = rayOrigin + V * rayDistance;
+		float3 N = P / _PlanetRadius;
+        
+		float NdotL = dot(N, L);
+		float3 sunTransmittance = TransmittanceToAtmosphere(_PlanetRadius, NdotL, _LinearClampSampler);
+		luminance += sunTransmittance * transmittance * saturate(NdotL) * _GroundColor / PI;
+	}
+	
+	#ifdef TRANSMITTANCE
+		Result[id] = transmittance;
+	#endif
+	
+	#ifdef MULTI_SCATTER
+		ScatterShared[groupIndex] = luminance;
+		MultiScatterShared[groupIndex] = multiScatter;
+
+		for (uint s = 32; s > 0; s >>= 1)
+		{
+			GroupMemoryBarrierWithGroupSync();
+		
+			if (groupIndex < s)
+			{
+				ScatterShared[groupIndex] = (ScatterShared[groupIndex] + ScatterShared[groupIndex + s]) * 0.5;
+				MultiScatterShared[groupIndex] = (MultiScatterShared[groupIndex] + MultiScatterShared[groupIndex + s]) * 0.5;
+			}
+		}
+	
+		if (groupIndex == 0)
+			Result[groupId] = ScatterShared[0] / (1.0 - MultiScatterShared[0] / (4.0 * PI)) * 4.0 * PI;
+	#endif
+}

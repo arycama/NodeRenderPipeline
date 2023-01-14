@@ -1,0 +1,95 @@
+﻿#pragma kernel ClusteredLighting
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/LightingCommon.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GeometricTools.hlsl"
+
+RWStructuredBuffer<uint> _LightCounter, _LightClusterListWrite;
+RWTexture3D<uint2> _LightClusterIndicesWrite;
+
+groupshared uint _LightIndices[64][64];
+float _RcpClusterDepth;
+
+[numthreads(64, 1, 1)]
+void ClusteredLighting(uint3 id : SV_DispatchThreadId, uint groupIndex : SV_GroupIndex)
+{
+	float3 minBounds = 0.0, maxBounds = 0.0;
+    
+	[unroll]
+	for (uint z = 0; z < 2; z++)
+	{
+		[unroll]
+		for (uint y = 0; y < 2; y++)
+		{
+			[unroll]
+			for (uint x = 0; x < 2; x++)
+			{
+				float near = _ProjectionParams.y;
+				float far = _ProjectionParams.z;
+				
+				float eyeDepth = near * pow(far / near, (id.z + z) * _RcpClusterDepth);
+                
+				float3 positionSS;
+				positionSS.x = (id.x + x) * _TileSize;
+				positionSS.y = (id.y + y) * _TileSize;
+				positionSS.z = (1.0 - eyeDepth * _ZBufferParams.w) / (eyeDepth * _ZBufferParams.z);
+                
+				float3 positionWS = PixelToWorld(positionSS);
+                
+				if (x == 0 && y == 0 && z == 0)
+				{
+					minBounds = maxBounds = positionWS;
+				}
+				else
+				{
+					minBounds = min(minBounds, positionWS);
+					maxBounds = max(maxBounds, positionWS);
+				}
+			}
+		}
+	}
+    
+    // Multiple iterations for > threadCount lights
+	uint lightCount = 0;
+	for (uint i = 0; i < _LightCount; i++)
+	{
+		LightData lightData = _LightData[i];
+
+        // For spotlights, modify their culling sphere
+		float radius = lightData.range;
+		float3 centerWS = lightData.positionWS;
+		if (lightData.lightType == 2) // 5 is box, so could just be an OBB test
+		{
+			float spotLightConeHalfAngleCos = -lightData.angleOffset / lightData.angleScale;
+			radius *= 0.5f / (spotLightConeHalfAngleCos * spotLightConeHalfAngleCos);
+			centerWS += lightData.forward * radius;
+		}
+
+		if (lightData.lightType == 5)
+		{
+			radius += lightData.size.x;
+		}
+		else if (lightData.lightType == 6)
+		{
+			radius *= sqrt(3.0);
+		}
+
+		if (!IntersectSphereAABB(centerWS, radius, minBounds, maxBounds))
+			continue;
+
+		_LightIndices[groupIndex][lightCount++] = i;
+	}
+
+	uint lightOffset = 0;
+	if (lightCount > 0)
+	{
+		InterlockedAdd(_LightCounter[0], lightCount, lightOffset);
+
+		for (i = 0; i < lightCount; i++)
+		{
+			_LightClusterListWrite[lightOffset + i] = _LightIndices[groupIndex][i];
+		}
+	}
+	
+	_LightClusterIndicesWrite[id] = uint2(lightOffset, lightCount);
+}

@@ -1,0 +1,103 @@
+#pragma kernel HiZ MIN FIRST 
+#pragma kernel HiZ MIN 
+#pragma kernel HiZ MAX FIRST 
+#pragma kernel HiZ MAX 
+#pragma kernel HiZ CHECKER FIRST 
+#pragma kernel HiZ CHECKER
+
+SamplerState _LinearClampSampler;
+Texture2D<float> _Input;
+RWTexture2D<float> _Result0, _Result1, _Result2, _Result3, _Result4, _Result5;
+uint _Width, _Height, _MaxMip;
+
+static const uint _GroupSize = 32;
+
+// We use 1 extra row/column to support non-pow2 resolutions
+groupshared float _DepthShared[_GroupSize * 2][_GroupSize * 2];
+
+float CompareZ(float input, float ref, uint2 coord)
+{
+	#ifdef MIN
+		return max(input, ref);
+	#elif defined(MAX)
+		return min(input, ref);
+	#else
+		bool check = (coord.x + (coord.y & 1)) & 1;
+		return check ? min(input, ref) : max(input, ref);
+	#endif
+}
+
+[numthreads(_GroupSize, _GroupSize, 1)]
+void HiZ(uint2 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId : SV_GroupThreadID, uint2 groupId : SV_GroupID)
+{
+	RWTexture2D<float> results[6] = { _Result0, _Result1, _Result2, _Result3, _Result4, _Result5 };
+	
+	// Each thread reads 2x2 values and writes them into shared memory. 
+	#ifdef FIRST
+		uint2 coord = groupId * _GroupSize + groupThreadId * 2;
+		results[0][dispatchThreadId] = _Input[dispatchThreadId];
+	
+		float2 uv = (coord + 0.5) / float2(_Width, _Height);
+	
+		float4 depths = _Input.Gather(_LinearClampSampler, uv);
+		_DepthShared[groupThreadId.y * 2 + 0][groupThreadId.x * 2 + 0] = depths.x;
+		_DepthShared[groupThreadId.y * 2 + 0][groupThreadId.x * 2 + 1] = depths.y;
+		_DepthShared[groupThreadId.y * 2 + 1][groupThreadId.x * 2 + 1] = depths.z;
+		_DepthShared[groupThreadId.y * 2 + 1][groupThreadId.x * 2 + 0] = depths.w;
+	#else
+		// Can't use gather as we need to read from the last mip of the previous pass, which must be a RW texture for us to read and write at the same time
+		uint2 coord = groupId * _GroupSize + groupThreadId * 2;
+		_DepthShared[groupThreadId.y * 2 + 0][groupThreadId.x * 2 + 0] = _Result0[clamp(coord + uint2(0, 0), 0, uint2(_Width, _Height) - 1)];
+		_DepthShared[groupThreadId.y * 2 + 0][groupThreadId.x * 2 + 1] = _Result0[clamp(coord + uint2(1, 0), 0, uint2(_Width, _Height) - 1)];
+		_DepthShared[groupThreadId.y * 2 + 1][groupThreadId.x * 2 + 1] = _Result0[clamp(coord + uint2(1, 1), 0, uint2(_Width, _Height) - 1)];
+		_DepthShared[groupThreadId.y * 2 + 1][groupThreadId.x * 2 + 0] = _Result0[clamp(coord + uint2(0, 1), 0, uint2(_Width, _Height) - 1)];
+	#endif
+
+	[unroll]
+	for (uint i = 1; i < 6; i++)
+	{
+		GroupMemoryBarrierWithGroupSync();
+		
+		float maxDepth;
+		
+		uint2 maxThread = (_GroupSize >> (i - 1)) - 1;
+		uint2 maxGroupThread = _GroupSize >> i;
+		uint2 dstCoord = groupId * maxGroupThread + groupThreadId;
+		
+		if (all(groupThreadId < maxThread))
+		{
+			// Read 2x2
+			maxDepth = _DepthShared[2 * groupThreadId.y + 0][2 * groupThreadId.x + 0];
+			maxDepth = CompareZ(maxDepth, _DepthShared[2 * groupThreadId.y + 0][2 * groupThreadId.x + 1], dstCoord);
+			maxDepth = CompareZ(maxDepth, _DepthShared[2 * groupThreadId.y + 1][2 * groupThreadId.x + 0], dstCoord);
+			maxDepth = CompareZ(maxDepth, _DepthShared[2 * groupThreadId.y + 1][2 * groupThreadId.x + 1], dstCoord);
+		
+			// Read additional row, column, or both, if previous level was odd in that dimension
+			uint2 resolution = uint2(_Width, _Height) >> (i - 1);
+			if (resolution.x & 1)
+			{
+				maxDepth = CompareZ(maxDepth, _DepthShared[2 * groupThreadId.y + 0][2 * groupThreadId.x + 2], dstCoord);
+				maxDepth = CompareZ(maxDepth, _DepthShared[2 * groupThreadId.y + 1][2 * groupThreadId.x + 2], dstCoord);
+			}
+		
+			if (resolution.y & 1)
+			{
+				maxDepth = CompareZ(maxDepth, _DepthShared[2 * groupThreadId.y + 2][2 * groupThreadId.x + 0], dstCoord);
+				maxDepth = CompareZ(maxDepth, _DepthShared[2 * groupThreadId.y + 2][2 * groupThreadId.x + 1], dstCoord);
+			}
+		
+			if (all(resolution & 1))
+				maxDepth = CompareZ(maxDepth, _DepthShared[2 * groupThreadId.y + 2][2 * groupThreadId.x + 2], dstCoord);
+		
+			// Write result to main memory, for all except the last thread, as it's only used for border dta
+			if (all(groupThreadId < maxGroupThread))
+				results[i][dstCoord] = maxDepth;
+		}
+		
+		GroupMemoryBarrierWithGroupSync();
+		
+		// Write result to shared memory
+		if (all(groupThreadId < maxThread))
+			_DepthShared[groupThreadId.y][groupThreadId.x] = maxDepth;
+	}
+}

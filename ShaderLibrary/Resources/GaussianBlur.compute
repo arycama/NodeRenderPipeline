@@ -1,0 +1,35 @@
+#pragma kernel CSMain
+#pragma multi_compile _ SRGB
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+
+RWTexture2D<float4> Result;
+Texture2D<float4> Input;
+float4 ScaleOffset, TexelSize;
+float2 Direction;
+float Radius, Sigma;
+
+[numthreads(8, 8, 1)]
+void CSMain (uint2 id : SV_DispatchThreadID)
+{
+	float2 uv = id * ScaleOffset.xy + ScaleOffset.zw;
+	
+	float weightSum = 1.0;
+	float4 color = Input.SampleLevel(_LinearClampSampler, uv, 0.0) * weightSum;
+	
+	for (float i = -Radius; i <= Radius; i++)
+	{
+		float2 offset = Direction * TexelSize.xy * i;
+		float weight = exp2(-i * i * Sigma);
+		color += Input.SampleLevel(_LinearClampSampler, uv + offset, 0.0) * weight;
+		weightSum += weight;
+	}
+	
+	color /= weightSum;
+	
+#ifdef SRGB
+	// Convert to avoid needing to convert in the shader
+	color = LinearToSRGB(saturate(color));
+#endif
+	
+	Result[id] = color;
+}

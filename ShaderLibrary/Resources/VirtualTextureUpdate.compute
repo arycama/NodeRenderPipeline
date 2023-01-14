@@ -1,0 +1,112 @@
+﻿#pragma kernel CopyTilesToUnmap
+#pragma kernel MapNewData
+#pragma kernel VirtualTextureUpdate
+#pragma kernel ClearBuffer
+#pragma kernel ClearTexture
+
+// Stores data to be added to the IndirectionTexture/TileCache
+// (tileCache x/y, mip, isMapped) 
+Buffer<uint> TileRequests, DestPixels;
+
+// Stores which Indirection Texels are mapped.
+// Stores X, Y
+RWBuffer<uint> MappedTiles;
+
+// Stores temporary indices that must be unmapped.
+RWBuffer<uint> TilesToUnmap;
+
+// Source pixels (Not sure if this has to be RW, but it's going to be the same texture as the destination, 
+// So we might need to Ensure that only one mip can be read at a time.
+RWTexture2D<uint> SourceMip, DestMip;
+RWTexture2D<float> _IndirectionTextureMap;
+
+uint CurrentMip, _MaxIndex;
+
+[numthreads(64, 1, 1)]
+void CopyTilesToUnmap(uint id : SV_DispatchThreadID)
+{
+	if (id < _MaxIndex)
+	{
+		// Get the currently mapped tile at the current position, and mark it for removal
+		TilesToUnmap[id] = MappedTiles[TileRequests[id] & 0xFFFF];
+	}
+}
+
+// Copies the new data to the relevant section, and marks the modified area of the texture for updating
+[numthreads(64, 1, 1)]
+void MapNewData(uint id : SV_DispatchThreadID)
+{
+	if (id >= _MaxIndex)
+	{
+		return;
+	}
+	
+	// Unmap pending data if required 
+	uint3 unmapData = (TilesToUnmap[id] >> uint3(0, 12, 24)) & uint2(0xFFF, 0xFF).xxy;
+	if (unmapData.z == CurrentMip)
+	{
+		bool isMapped = _IndirectionTextureMap[unmapData.xy];
+		if (isMapped)
+		{
+			DestMip[unmapData.xy] = 0;
+			_IndirectionTextureMap[unmapData.xy] = 0;
+		}
+	}
+	
+	// Get the current data from the mip
+	uint2 data = (TileRequests[id] >> uint2(0, 16)) & 0xFFFF;
+	if (data.y != CurrentMip)
+	{
+		return;
+	}
+	
+	uint result = data.x & 0x7FF;
+	result |= (data.y & 0x1F) << 11;
+		
+	// Unpack the first data into an X and Y coordinate
+	uint2 destCoords = (DestPixels[id] >> uint2(0, 16)) & 0xFFFF;
+		
+	DestMip[destCoords] = result;
+	_IndirectionTextureMap[destCoords] = 1;
+
+	// Update the MappedData with the location of this indirection texel
+	// Pack into (12, 12, 4, 4), as we don't need many mips for the latter data
+	uint mappedData = (destCoords.x & 0xFFF) << 0; // x coord
+	mappedData |= (destCoords.y & 0xFFF) << 12; // y coord
+	mappedData |= (data.y & 0xFF) << 24; // mip
+		
+	// Write to the new mip
+	MappedTiles[data.x] = mappedData;
+}
+
+// Copies Texels from a lower mip to a higher mip, except for when the higher mip texels are mapped. (Eg their alpha is not 0)
+// TODO: Could use shared memory and fill 8 mips at once
+[numthreads(8, 8, 1)]
+void VirtualTextureUpdate(uint2 id : SV_DispatchThreadID)
+{
+	// Return if out of bounds
+	if (any(id >= _MaxIndex))
+	{
+		return;
+	}
+	
+	// Return if this pixel is already mapped
+	if (_IndirectionTextureMap[id])
+	{
+		return;
+	}
+	
+	DestMip[id] = SourceMip[id >> 1];
+}
+
+[numthreads(64, 1, 1)]
+void ClearBuffer(uint id : SV_DispatchThreadID)
+{
+	MappedTiles[id] = 0;
+}
+
+[numthreads(8, 8, 1)]
+void ClearTexture(uint2 id : SV_DispatchThreadID)
+{
+	DestMip[id] = 0;
+}

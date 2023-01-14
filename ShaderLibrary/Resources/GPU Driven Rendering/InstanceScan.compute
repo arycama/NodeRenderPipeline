@@ -1,0 +1,133 @@
+﻿#pragma kernel Scan
+
+RWBuffer<uint> _MemoryCounter, _RendererInstanceIndexOffsets, _DrawCallArgs, _RendererCounts;
+Buffer<uint2> _SubmeshOffsetLengths;
+uint _Count;
+
+// Determines the final destination of each renderer ID. 
+// One thread ID per renderer "type"
+[numthreads(64, 1, 1)]
+void Scan(uint id : SV_DispatchThreadID)
+{
+	if (id >= _Count)
+	{
+		return;
+	}
+	
+	// Get the number of visible instances of this renderer
+	uint instanceCount = _RendererCounts[id];
+	
+	// Reset for next frame (Avoids having to explicitly clear)
+	//_RendererCounts[id] = 0;
+	
+	uint2 submeshStartCount = _SubmeshOffsetLengths[id];
+	uint submeshStart = submeshStartCount.x;
+	uint submeshCount = submeshStartCount.y;
+	
+	uint memoryStart = 0;
+	
+	bool hasVisibleInstances;
+	if(instanceCount == 0)
+	{
+		hasVisibleInstances = false;
+	}
+	else
+	{
+		hasVisibleInstances = true;
+		
+		// If at least once instance is visible, we need to allocate the total space for all indexes of that instance
+		InterlockedAdd(_MemoryCounter[0], instanceCount, memoryStart);
+	}
+	
+	// Write out the starting point for this instance for the compact pass
+	_RendererInstanceIndexOffsets[id] = memoryStart;
+	
+	for (uint i = 0; i < submeshCount; i++)
+	{
+		uint argsIndex = (submeshStart + i) * 5;
+		_DrawCallArgs[argsIndex + 1] = instanceCount;
+		
+		// We also need to write the start offset
+		// Dest is n+4, argsIndex is already n+1, so just add 3
+		// This doesn't actually work for some reason, I think it's a DX11 issue
+		if (hasVisibleInstances)
+		{
+			//_DrawCallArgs[argsIndex + 4] = memoryStart;
+		}
+	}
+}
+
+// Based on Parallel Prefix Sum (Scan) with CUDA by Mark Harris
+//groupshared uint temp[2048];
+ 
+//[numthreads(1024, 1, 1)]
+//void streamcompaction(uint3 threadID : SV_DispatchThreadID)
+//{
+//	uint NoofInstances;
+//	CullResults.GetDimensions(NoofInstances);
+	
+//	int tID = threadID.x;
+ 
+//	int offset = 1;
+//	temp[2 * tID] = CullResults[2 * tID]; // load input into shared memory
+//	temp[2 * tID + 1] = CullResults[2 * tID + 1];
+ 
+//    //perform reduction
+//	for (int d = NoofInstances >> 1; d > 0; d >>= 1)
+//	{
+//		GroupMemoryBarrierWithGroupSync();
+ 
+//		if (tID < d)
+//		{
+//			int ai = offset * (2 * tID + 1) - 1;
+//			int bi = offset * (2 * tID + 2) - 1;
+//			temp[bi] += temp[ai];
+//		}
+//		offset *= 2;
+//	}
+ 
+//    // clear the last element
+//	if (tID == 0)
+//		temp[NoofInstances - 1] = 0;
+ 
+//    //perform downsweep and build scan
+//	for (int d = 1; d < NoofInstances; d *= 2)
+//	{
+//		offset >>= 1;
+ 
+//		GroupMemoryBarrierWithGroupSync();
+ 
+//		if (tID < d)
+//		{
+//			int ai = offset * (2 * tID + 1) - 1;
+//			int bi = offset * (2 * tID + 2) - 1;
+//			int t = temp[ai];
+//			temp[ai] = temp[bi];
+//			temp[bi] += t;
+//		}
+//	}
+ 
+//	GroupMemoryBarrierWithGroupSync();
+ 
+//    //scatter results
+//	if (CullResults[2 * tID] == true)
+//	{
+//		instanceDataOut[temp[2 * tID]] = CullResults[2 * tID].world;
+//	}
+ 
+//	if (CullResults[2 * tID + 1] == true)
+//	{
+//		instanceDataOut[temp[2 * tID + 1]] = CullResults[2 * tID + 1].world;
+//	}
+ 
+//	if (tID == 0)
+//	{
+//        //patch up the visible instance counts per prop type, could possible be done in a different compute shader
+//		for (int k = 1; k < NoofPropTypes; k++)
+//		{
+//			instanceCounts[k * 5 + 4] = instanceCounts[(k - 1) * 5 + 4] + //previous prop type offset
+//                                        instanceCounts[(k - 1) * 5 + 1]; //previous prop type number of instances
+//		}
+//	}
+ 
+//}

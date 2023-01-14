@@ -1,0 +1,223 @@
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Terrain.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/IndirectRendering.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Tessellation.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
+
+#pragma kernel InstanceCull
+#pragma kernel IndirectArgs
+#pragma kernel CalculateLod
+
+#pragma multi_compile _ HI_Z_CULL
+#pragma multi_compile _ NO_HEIGHTS
+#pragma multi_compile _ FIRST
+#pragma multi_compile _ FINAL
+
+#ifdef __INTELLISENSE__
+	#define FIRST
+	#define FINAL
+#endif
+
+globallycoherent RWBuffer<uint>_IndirectArgs;
+globallycoherent RWBuffer<uint> _PatchDataWrite;
+globallycoherent RWTexture2D<uint> _LodResult, _TempResultWrite;
+Buffer<uint> _IndirectArgsInput;
+Texture2D<float2> _TerrainHeights;
+Texture2D<uint> _LodInput, _TempResult;
+
+float4x4 _WorldToScreen;
+float4 _TerrainPositionOffset;
+float _EdgeLength;
+int _MipCount, _PassCount, _PassOffset, _TotalPassCount, _CellCount;
+
+static const int _ThreadCount = 32;
+
+groupshared int _CellLods[_ThreadCount][_ThreadCount];
+groupshared int _CellData[_ThreadCount * _ThreadCount];
+groupshared uint _CellCounter, _WriteOffset;
+
+[numthreads(_ThreadCount, _ThreadCount, 1)]
+void InstanceCull(uint2 groupThreadId : SV_GroupThreadID, uint groupIndex : SV_GroupIndex, uint2 dispatchThreadId : SV_DispatchThreadID, uint2 groupId : SV_GroupID)
+{
+	// Initialize the shared cell counter to zero
+	if (groupIndex == 0)
+		_CellCounter = 0;
+	
+	GroupMemoryBarrierWithGroupSync();
+	
+	for (int i = 0; i < _PassCount; i++)
+	{
+		#ifdef FIRST
+			uint maxThread = 1 << i;
+		#else
+			uint maxThread = 1 << (i + (6 - _PassCount));
+		#endif
+		
+		int lod = 0;
+
+		if (all(groupThreadId < maxThread))
+		{
+			uint2 coord = groupId * (1 << (i + (6 - _PassCount))) + groupThreadId;
+			
+			#ifdef FIRST
+				lod = i == 0 ? 0 : _CellLods[groupThreadId.x][groupThreadId.y];
+			#else
+				lod = i == 0 ? _TempResult[coord >> 1] : _CellLods[groupThreadId.x][groupThreadId.y];
+			#endif
+			
+			if (lod == 0)
+			{
+				float2 heightmapUv = (coord + 0.5) * exp2(-(i + _PassOffset));
+				
+				#ifdef NO_HEIGHTS
+					float2 heights = -_WorldSpaceCameraPos.y;
+				#else
+					float2 heights = _TerrainHeights.SampleLevel(_PointClampSampler, heightmapUv, _MipCount - (i + _PassOffset)).gr - _WorldSpaceCameraPos.y;
+				#endif
+				
+				float2 patchSize = _TerrainPositionOffset.xy * exp2(-(i + _PassOffset));
+				float3 center = float3((coord + 0.5) * patchSize + _TerrainPositionOffset.zw, 0.5 * (heights.y + heights.x)).xzy;
+				float3 extents = float3(patchSize, heights.y - heights.x).xzy * 0.5;
+				
+				#ifdef HI_Z_CULL
+					if(!HiZCull(center - extents, extents * 2, _ScreenSize.xy, _WorldToScreen))
+						return false;
+				#endif
+				
+				if (FrustumCull(center, extents))
+				{
+					float factor = ProjectedSphereRadius(length(extents), center) * _ScreenSize.x * 0.5 / _EdgeLength;
+					if (factor <= 1.0 || i + _PassOffset == _TotalPassCount - 1)
+					{
+						// If equal to or smaller than the target size, write the lod data.
+						int offset;
+						InterlockedAdd(_CellCounter, 1, offset);
+						
+						int packedData = (coord.x & 0x3FF) << 0;
+						packedData |= (coord.y & 0x3FF) << 10;
+						packedData |= (((_TotalPassCount - 1) - (i + _PassOffset)) & 0xF) << 20;
+						_CellData[offset] = packedData;
+						
+						// Lod is the max pass minus the current pass index. (Eg lod0 corresponds to the highest divided cell)
+						lod = (_TotalPassCount - 1) - (i + _PassOffset);
+					}
+				}
+			}
+		}
+			
+		GroupMemoryBarrierWithGroupSync();
+		
+		if (all(groupThreadId < maxThread))
+		{
+			if (i < _PassCount - 1)
+			{
+				_CellLods[groupThreadId.x * 2 + 0][groupThreadId.y * 2 + 0] = lod;
+				_CellLods[groupThreadId.x * 2 + 1][groupThreadId.y * 2 + 0] = lod;
+				_CellLods[groupThreadId.x * 2 + 0][groupThreadId.y * 2 + 1] = lod;
+				_CellLods[groupThreadId.x * 2 + 1][groupThreadId.y * 2 + 1] = lod;
+			}
+			else
+			{
+				// At finest level, write directly. 
+				_CellLods[groupThreadId.x][groupThreadId.y] = lod;
+			}
+		}
+		
+		GroupMemoryBarrierWithGroupSync();
+	}
+	
+	// For non-final pass, write out the data from this cell to a temp texture so it can be read in the next pass
+	int tempLod = _CellLods[groupThreadId.x][groupThreadId.y];
+	#ifndef FINAL
+		_TempResultWrite[dispatchThreadId] = tempLod;
+	#elif !defined(FIRST)
+		// If final pass, and not first pass, write out lods to a temp texture
+		_LodResult[dispatchThreadId] = tempLod;
+	#endif
+	
+	if(groupIndex == 0)
+        InterlockedAdd(_IndirectArgs[1], _CellCounter, _WriteOffset);
+	
+	GroupMemoryBarrierWithGroupSync();
+	
+	if(groupIndex >= _CellCounter)
+		return;
+	
+	// Each thread writes one cell data to global memory
+	uint cellData = _CellData[groupIndex];
+	
+	// If there is only one pass, calculate lod factors. Otherwise it must be done in a seperate pass
+	#if defined(FIRST) && defined(FINAL)
+		uint lod = (cellData >> 20) & 0xF;
+		int offset = 1 << lod;
+	
+		uint dataColumn = ((cellData.x >> 0) & 0x3FF) * offset;
+		uint dataRow = ((cellData.x >> 10) & 0x3FF) * offset;
+	
+		int2 right = int2(dataColumn + offset, dataRow + 0);
+		int2 up = int2(dataColumn + 0, dataRow + offset);
+		int2 left = int2(dataColumn - offset, dataRow + 0);
+		int2 down = int2(dataColumn + 0, dataRow - offset);
+	
+		if (all(right >= 0 && right < _ThreadCount))
+			cellData |= (max(0, (int)_CellLods[right.x][right.y] - lod) & 0x3) << 24;
+	
+		if (all(up >= 0 && up < _ThreadCount))
+			cellData |= (max(0, (int)_CellLods[up.x][up.y] - lod) & 0x3) << 26;
+	
+		if (all(left >= 0 && left < _ThreadCount))
+			cellData |= (max(0, (int)_CellLods[left.x][left.y] - lod) & 0x3) << 28;
+	
+		if (all(down >= 0 && down < _ThreadCount))
+			cellData |= (max(0, (int)_CellLods[down.x][down.y] - lod) & 0x3) << 30;
+	#endif
+	
+	_PatchDataWrite[_WriteOffset + groupIndex] = cellData;
+}
+
+[numthreads(1, 1, 1)]
+void IndirectArgs(uint2 id : SV_DispatchThreadID)
+{
+	// Read input from the indirect args buffer
+	uint threadCount = _IndirectArgsInput[1];
+	_IndirectArgs[0] = (threadCount + 64 - 1) / 64;
+	_IndirectArgs[1] = 1;
+	_IndirectArgs[2] = 1;
+}
+
+[numthreads(64, 1, 1)]
+void CalculateLod(uint id : SV_DispatchThreadID)
+{
+	// Ensure we're not out of bounds
+	uint threadCount = _IndirectArgs[1];
+	if(id >= threadCount)
+		return;
+	
+	// Each thread writes one cell data to global memory
+	int cellData = _PatchDataWrite[id];
+	
+	// If there is only one pass, calculate lod factors. Otherwise it must be done in a seperate pass
+	int lod = (cellData >> 20) & 0xF;
+	int offset = 1 << lod;
+	
+	int dataColumn = ((cellData >> 0) & 0x3FF) * offset;
+	int dataRow = ((cellData >> 10) & 0x3FF) * offset;
+	
+	int2 right = int2(dataColumn + offset, dataRow + 0);
+	int2 up = int2(dataColumn + 0, dataRow + offset);
+	int2 left = int2(dataColumn - offset, dataRow + 0);
+	int2 down = int2(dataColumn + 0, dataRow - offset);
+	
+	if (all(right >= 0 && right < _CellCount))
+		cellData |= (max(0, int(_LodInput[right]) - lod) & 0x3) << 24;
+	
+	if (all(up >= 0 && up < _CellCount))
+		cellData |= (max(0, int(_LodInput[up]) - lod) & 0x3) << 26;
+	
+	if (all(left >= 0 && left < _CellCount))
+		cellData |= (max(0, int(_LodInput[left]) - lod) & 0x3) << 28;
+	
+	if (all(down >= 0 && down < _CellCount))
+		cellData |= (max(0, int(_LodInput[down]) - lod) & 0x3) << 30;
+	
+	_PatchDataWrite[id] = cellData;
+}

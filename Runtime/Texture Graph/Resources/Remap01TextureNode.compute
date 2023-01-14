@@ -1,0 +1,30 @@
+﻿#pragma kernel Math
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+
+#pragma multi_compile _ DIMENSION_3D
+
+#ifdef DIMENSION_3D
+	typedef uint3 IdType;
+	typedef RWTexture3D<float> OutputType;
+	typedef Texture3D<float> InputType;
+#else
+typedef uint2 IdType;
+typedef RWTexture2D<float> OutputType;
+typedef Texture2D<float> InputType;
+#endif
+
+OutputType Result;
+InputType Value, OldMin, OldMax, NewMin, NewMax;
+
+[numthreads(8, 8, 1)]
+void Math(IdType id : SV_DispatchThreadID)
+{
+    float valueInput = Value[id];
+    float oldMin = OldMin[id];
+    float oldMax = OldMax[id];
+	float newMin = NewMin[id];
+	float newMax = NewMax[id];
+
+	Result[id] = saturate(Remap(valueInput, oldMin, oldMax, newMin, newMax));
+}

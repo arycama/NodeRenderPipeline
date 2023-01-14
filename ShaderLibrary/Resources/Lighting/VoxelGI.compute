@@ -1,0 +1,116 @@
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Lighting.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GeometricTools.hlsl"
+
+#pragma kernel Clear
+#pragma kernel VoxelAO
+#pragma kernel Debug
+
+RWTexture3D<float> _ResultX, _ResultY, _ResultZ, _OcclusionResult;
+Texture3D<float> _VoxelOpacity;
+float _Samples, _Smoothing;
+
+[numthreads(1,1,1)]
+void Clear(uint3 id : SV_DispatchThreadID)
+{
+	
+}
+
+float3 mod(float3 x, float3 y)
+{
+	return x - y * floor(x / y);
+}
+
+[numthreads(8,8,8)]
+void VoxelAO(uint3 id : SV_DispatchThreadID, uint groupId : SV_GroupIndex)
+{
+	float2 u = Hammersley2dSeq(groupId, 8 * 8 * 8);
+	u = frac(u + _FrameIndex * GOLDEN_RATIO);
+	
+	float3 direction = SampleSphereUniform(u.x, u.y);
+	
+	float3 position = mod(id - _VoxelOffset, _VoxelResolution);
+	float3 rayStep = direction >= 0 ? 1 : -1;
+	float3 tDelta = rayStep / direction;
+	float3 tMax = tDelta;
+	
+	float result = 1.0;
+	for (float i = 0; i < _Samples; i++)
+	{
+		// Increment the volume. This causes the first sample to be outside the initial point, which is what we want.
+		// Otherwise opaque cells will never receive shading
+		float minT = Min3(tMax);
+		position += rayStep * (tMax == minT);
+		tMax += tDelta * (tMax == minT);
+		
+		// If out of bounds, assume we have reached the sky
+		if (any(position < 0.0 || position >= _VoxelResolution))
+		{
+			break;
+		}
+		
+		// Re-add the volume offset now that we know we are in bounds
+		float3 volumeUv = mod(position + _VoxelOffset, _VoxelResolution);
+		float opacity = _VoxelOpacity[volumeUv];
+		if(opacity > 0.5)
+		{
+			result = 0.0;
+			break;
+		}
+	}
+	
+	float4 previous;
+	previous.x = _ResultX[id + uint3(0, 0, _VoxelResolution * (direction.x < 0))];
+	previous.y = _ResultY[id + uint3(0, 0, _VoxelResolution * (direction.y < 0))];
+	previous.z = _ResultZ[id + uint3(0, 0, _VoxelResolution * (direction.z < 0))];
+	previous.w = _OcclusionResult[id];
+	
+	float4 dirResult = result;
+	
+	// Remove very small values (Allows to reach fully black or white
+	dirResult = dirResult < 1e-2 ? 0.0 : (dirResult > 1.0 - 1e2 ? 1.0 : dirResult);
+	
+	// Weigh result by direction, so that firing rays in one direction won't affect unrelated directions
+	dirResult.xyz = lerp(previous.xyz, dirResult.xyz, Square(direction));
+	
+	dirResult = lerp(previous, dirResult, _Smoothing);
+	
+	// Remove very small values (Allows to reach fully black or white
+	//dirResult = dirResult < 1e-2 ? 0.0 : (dirResult > 1.0 - 1e2 ? 1.0 : dirResult);
+
+	_ResultX[id + uint3(0, 0, _VoxelResolution * (direction.x < 0))] = dirResult.x;
+	_ResultY[id + uint3(0, 0, _VoxelResolution * (direction.y < 0))] = dirResult.y;
+	_ResultZ[id + uint3(0, 0, _VoxelResolution * (direction.z < 0))] = dirResult.z;
+	_OcclusionResult[id] = lerp(previous.w, result, _Smoothing);
+}
+
+float _Steps, _Range, _Opacity;
+RWTexture2D<float3> _DebugResult;
+Texture2D<float> _Depth;
+
+[numthreads(8, 8, 1)]
+void Debug(uint2 id : SV_DispatchThreadID)
+{
+	float3 positionWS = PixelToWorld(id + 0.5, UNITY_NEAR_CLIP_VALUE);
+	float3 rayStart = positionWS;
+	float3 dir = normalize(rayStart);
+	
+	float depth = LinearEyeDepth(_Depth[id], _ZBufferParams);
+	
+	float3 rayEnd = rayStart + dir * min(depth, _Range);
+	float3 rayStep = (rayEnd - rayStart) / _Steps;
+	float ds = length(rayStep); // range/steps
+	
+	float transmittance = 1.0;
+	for (float i = 0.5; i < _Steps; i++)
+	{
+		float3 position = rayStart + rayStep * i;
+		float4 voxelPos = MultiplyPoint(_WorldToVoxel, position);
+		
+		if(all(voxelPos.xyz > 0 && voxelPos.xyz < 1))
+		{
+			transmittance *= exp(-_VoxelOpacity.SampleLevel(_PointClampSampler, voxelPos.xyz, 0.0) * _Opacity * ds);
+		}
+	}
+	
+	_DebugResult[id] = lerp(float3(0, 1, 0), _DebugResult[id], transmittance);
+}

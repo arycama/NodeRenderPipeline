@@ -1,0 +1,184 @@
+#pragma kernel SeedPixels
+#pragma kernel JumpFlood
+#pragma kernel FindDistances
+#pragma kernel Resolve
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
+
+RWTexture2D<float4> _Result;
+RWTexture2D<float2> _SeedResult;
+Texture2D<float2> _Input;
+Texture2D<float> _Source;
+
+int _Offset;
+float _InvResolution, _Cutoff;
+
+globallycoherent RWBuffer<int> _Distances;
+
+[numthreads(8, 8, 1)]
+void SeedPixels(uint2 id : SV_DispatchThreadID)
+{
+	float minDist = sqrt(2);
+	float2 minSeed = -1;
+
+	float height = _Source.SampleLevel(_LinearClampSampler, (id + 0.5) * _InvResolution, 0.0);
+	bool isOpaque = height >= _Cutoff;
+	for (int y = -1; y < 2; y++)
+	{
+		for (int x = -1; x < 2; x++)
+		{
+			// Don't compare the middle value
+			if (x == 0 && y == 0)
+				continue;
+
+			int2 uv = id + int2(x, y);
+
+			float neighborAlpha = _Source.SampleLevel(_LinearClampSampler, (uv + 0.5) * _InvResolution, 0.0);
+			bool isNeighborOpaque = neighborAlpha >= _Cutoff;
+			if (isOpaque != isNeighborOpaque)
+			{
+				float factor = saturate((_Cutoff - height) / (neighborAlpha - height));
+				float2 midpoint = lerp(id, uv, factor);
+
+				float dist = distance(id * _InvResolution, midpoint * _InvResolution);
+				if (dist < minDist)
+				{
+					minDist = dist;
+					minSeed = midpoint;
+				}
+			}
+		}
+	}
+
+	_SeedResult[id] = minSeed;
+}
+
+[numthreads(8, 8, 1)]
+void JumpFlood(uint2 id : SV_DispatchThreadID)
+{
+	float minDist = sqrt(2);
+	float2 minSeed = -1;
+
+	for (int y = -1; y < 2; y++)
+	{
+		for (int x = -1; x < 2; x++)
+		{
+			int2 uv = id + int2(x, y) * _Offset;
+			float2 seed = _Input[uv];
+			if (all(seed != -1))
+			{
+				float dist = distance(seed * _InvResolution, id * _InvResolution);
+				if (dist < minDist)
+				{
+					minDist = dist;
+					minSeed = seed;
+				}
+			}
+		}
+	}
+
+	_SeedResult[id] = minSeed;
+}
+
+[numthreads(8, 8, 1)]
+void FindDistances(uint2 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID)
+{
+	// Get the input value
+	float2 seed = _Input[id];
+
+	// Normalize the distance to the resolution
+	//float dist = distance(seed * _InvResolution, id * _InvResolution);
+	float dist = distance(seed * _InvResolution, id * _InvResolution);
+	int distanceInt = asint(dist);
+
+	// Write the data
+	float height = _Source.SampleLevel(_LinearClampSampler, (id + 0.5) * _InvResolution, 0.0);
+	if (height < _Cutoff)
+	{
+		InterlockedMax(_Distances[0], distanceInt);
+	}
+	else
+	{
+		InterlockedMax(_Distances[0], distanceInt);
+	}
+}
+
+float GetDistance(uint2 uv)
+{
+	float2 seed = _Input[uv];
+	float dist = distance(seed * _InvResolution, uv * _InvResolution);
+
+	float height = _Source.SampleLevel(_LinearClampSampler, (uv + 0.5) * _InvResolution, 0.0);
+	if (height > _Cutoff)
+	{
+		dist *= -1.0;
+	}
+
+	return dist;
+}
+
+[numthreads(8, 8, 1)]
+void Resolve(uint2 id : SV_DispatchThreadID)
+{
+	float2 seed = _Input[id];
+	float dist = distance(seed * _InvResolution, id * _InvResolution);
+
+	float height = _Source.SampleLevel(_LinearClampSampler, (id + 0.5) * _InvResolution, 0.0);
+	if (height < _Cutoff)
+	{
+		// Invert the distance
+		dist = -dist;
+
+		// There's a chance the seed falls slightly on a non-opaque pixel's edge. Do a 3x3 search to ensure we get a filled pixel
+		float minDist = sqrt(2);
+		int2 minSeed = -1;
+
+		for (int y = -1; y < 2; y++)
+		{
+			for (int x = -1; x < 2; x++)
+			{
+				int2 uv = seed + int2(x, y);
+				float neighborAlpha = _Input[uv].r;
+				bool isNeighborOpaque = neighborAlpha >= _Cutoff;
+				if (isNeighborOpaque)
+				{
+					float dist = distance(seed * _InvResolution, uv * _InvResolution);
+					if (dist < minDist)
+					{
+						minDist = dist;
+						minSeed = uv;
+					}
+				}
+			}
+		}
+
+		if (all(minSeed != -1))
+		{
+			seed = minSeed;
+		}
+	}
+	else
+	{
+		seed = id;
+	}
+
+	float normalizedDepth = saturate(1 - height / _Cutoff);
+
+	// Direction from central difference
+	float right = GetDistance(id + int2(1, 0));
+	float up = GetDistance(id + int2(0, 1));
+	float left = GetDistance(id + int2(-1, 0));
+	float down = GetDistance(id + int2(0, -1));
+
+	float dx = right - left;
+	float dy = up - down;
+
+	float2 direction = normalize(float2(dx, dy)) * 0.5 + 0.5;
+
+	float maxDistance = asfloat(_Distances[0]);
+	//float maxDistance = asfloat(_Distances[1]);
+	float signedDistance = dist / maxDistance * 0.5 + 0.5;
+
+	_Result[id] = float4(normalizedDepth, signedDistance, direction);
+}

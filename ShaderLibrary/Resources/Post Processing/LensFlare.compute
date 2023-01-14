@@ -1,0 +1,114 @@
+#pragma kernel CSMain
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+
+Texture2D<float3> _Input;
+Texture2D<float> _Starburst;
+RWTexture2D<float3> _Result;
+
+float4 _ScaleOffset;
+float _GhostSpacing, _GhostCount, _GhostThreshold, _HaloRadius, _HaloThickness, _AspectRatio, _StarburstOffset;
+
+float3 ApplyThreshold(in float3 _rgb, in float _threshold)
+{
+	return max(_rgb - _threshold, 0.0);
+}
+
+float Window_Cubic(float _x, float _center, float _radius)
+{
+	_x = min(abs(_x - _center) / _radius, 1.0);
+	return 1.0 - _x * _x * (3.0 - 2.0 * _x);
+}
+
+[numthreads(8,8,1)]
+void CSMain (uint2 id : SV_DispatchThreadID)
+{
+	// Ghosts
+	float2 uv = id * _ScaleOffset.xy + _ScaleOffset.zw;
+	float3 ret = (0.0);
+	float2 ghostVec = ((0.5) - uv) * _GhostSpacing;
+	for (int i = 0; i < _GhostCount; ++i)
+	{
+		float2 suv = frac(uv + ghostVec * i);
+		float d = distance(suv, (0.5));
+		float weight = 1.0 - smoothstep(0.0, 0.75, d); // reduce contributions from samples at the screen edge
+		float3 s = _Input.SampleLevel(_LinearClampSampler, suv, 0.0);
+		s = ApplyThreshold(s, _GhostThreshold);
+		ret += s * weight;
+	}
+	
+	// Halos
+	float2 haloVec = (0.5) - uv;
+	haloVec.x /= _AspectRatio;
+	haloVec = normalize(haloVec);
+	haloVec.x *= _AspectRatio;
+	float2 wuv = (uv - float2(0.5, 0.0)) / float2(_AspectRatio, 1.0) + float2(0.5, 0.0);
+	float d = distance(wuv, (0.5));
+	float haloWeight = Window_Cubic(d, _HaloRadius, _HaloThickness); // cubic window function
+	haloVec *= _HaloRadius;
+	
+	// Starburst
+	float2 centerVec = uv - (0.5);
+	float d1 = length(centerVec);
+	float radial = acos(centerVec.x / d1);
+	float mask =
+	  _Starburst.SampleLevel(_LinearClampSampler, float2(radial + _StarburstOffset * 1.0, 0.0), 0.0)
+	* _Starburst.SampleLevel(_LinearClampSampler, float2(radial - _StarburstOffset * 0.5, 0.0), 0.0); // rotate in the opposite direction at a different rate
+	mask = saturate(mask + (1.0 - smoothstep(0.0, 0.3, d1))); // fade the starburst towwards the center
+	
+	_Result[id] = ret;
+}
+
+//const static float4 vPurple = float4(0.7f, 0.2f, 0.9f, 1.0f);
+//const static float4 vOrange = float4(0.7f, 0.4f, 0.2f, 1.0f);
+//const static float fThreshold = 0.1f;
+ 
+//float4 LensFlarePS(in float2 in_vTexCoord : TEXCOORD0,
+// uniform int NumSamples,
+// uniform float4 vTint,
+// uniform float fTexScale,
+// uniform float fBlurScale) : COLOR0
+//{
+// // The flare should appear on the opposite side of the screen as the
+// // source of the light, so first we mirror the texture coordinate.
+// // Then we normalize so we can apply a scaling factor.
+//	float2 vMirrorCoord = float2(1.0f, 1.0f) - in_vTexCoord;
+//	float2 vNormalizedCoord = vMirrorCoord * 2.0f - 1.0f;
+//	vNormalizedCoord *= fTexScale;
+ 
+// // We'll blur towards the center of screen, and also away from it.
+ 
+//	float2 vTowardCenter = normalize(-vNormalizedCoord);
+//	float2 fBlurDist = fBlurScale * NumSamples;
+//	float2 vStartPoint = vNormalizedCoord + ((vTowardCenter / g_vSourceDimensions) * fBlurDist);
+//	float2 vStep = -(vTowardCenter / g_vSourceDimensions) * 2 * fBlurDist;
+ 
+// // Do the blur and sum the samples
+//	float4 vSum = 0;
+//	float2 vSamplePos = vStartPoint;
+//	for (int i = 0; i < NumSamples; i++)
+//	{
+//		float2 vSampleTexCoord = vSamplePos * 0.5f + 0.5f;
+ 
+// // Don't add in samples past texture border
+//		if (vSampleTexCoord.x >= 0 && vSampleTexCoord.x <= 1.0f
+// && vSampleTexCoord.y >= 0 && vSampleTexCoord.y <= 1.0f)
+//		{
+//			float4 vSample = tex2D(PointSampler0, vSampleTexCoord);
+//			vSum += max(0, vSample - fThreshold) * vTint;
+//		}
+ 
+//		vSamplePos += vStep;
+//	}
+ 
+//	return vSum / NumSamples;
+//}
+ 
+//float4 CombinePS(in float2 in_vTexCoord : TEXCOORD0) : COLOR0
+//{
+//	float4 vColor = tex2D(PointSampler0, in_vTexCoord);
+//	vColor += tex2D(PointSampler1, in_vTexCoord);
+//	vColor += tex2D(PointSampler2, in_vTexCoord);
+//	return vColor;
+//}
+ 

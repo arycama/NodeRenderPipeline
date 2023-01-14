@@ -1,0 +1,78 @@
+﻿#pragma kernel NoiseTexture
+
+#pragma multi_compile _ DIMENSION_3D
+#pragma multi_compile _ SIMPLEX WORLEY PERLIN
+#pragma multi_compile _ FBM BILLOW RIDGED
+
+#include "Packages/com.arycama.webglnoiseunity/Noise.hlsl"
+
+#ifdef DIMENSION_3D
+	RWTexture3D<float> _Result;
+#else
+	RWTexture2D<float> _Result;
+#endif
+
+float _Frequency, _Gain, _Lacunarity, _Octaves;
+
+[numthreads(8, 8, 1)]
+void NoiseTexture(uint3 id : SV_DispatchThreadID)
+{
+	float result = 0;
+	float sum = 0;
+
+	#ifdef DIMENSION_3D
+		float3 size;
+		_Result.GetDimensions(size.x, size.y, size.z);
+		float3 position = (id + 0.5) / size;
+	#else
+		float2 size;
+		_Result.GetDimensions(size.x, size.y);
+		float2 position = (id.xy + 0.5) / size;
+	#endif
+
+    for (float i = 0; i < _Octaves; i++)
+    {
+        float amp = pow(_Gain, i);
+        float freq = _Frequency * pow(_Lacunarity, i);
+
+        #if defined(SIMPLEX) || defined(PERLIN)
+			result += SimplexNoise(position * freq, freq) * amp;
+        #endif
+
+        #ifdef WORLEY
+	    	#ifdef DIMENSION_3D
+				result += CellularNoise(position * freq, freq).x * amp;
+			#else
+				result += CellularNoise(position * freq, freq).x * amp;
+    		#endif
+        #endif
+
+        sum += amp;
+    }
+
+    result /= sum;
+
+    #ifdef WORLEY
+		#ifdef BILLOW
+			result = abs(result);
+		#endif
+
+	    #ifdef RIDGED
+			result = 1 - result;
+	    #endif
+    #else
+	    #ifdef FBM
+			result = result * 0.5 + 0.5;
+	    #elif defined(BILLOW)
+			result = abs(result);
+	    #elif defined(RIDGED)
+			result = 1 - abs(result);
+	    #endif
+    #endif
+
+	#ifdef DIMENSION_3D
+		_Result[id] = result;
+	#else
+		_Result[id.xy] = result;
+	#endif
+}

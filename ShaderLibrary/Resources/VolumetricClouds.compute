@@ -1,0 +1,110 @@
+﻿#pragma kernel CloudCoverage
+#pragma kernel CloudShadow
+#pragma kernel Cloud
+
+#pragma multi_compile _ LIGHT_COUNT_ONE LIGHT_COUNT_TWO
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/CloudCommon.hlsl"
+
+RWTexture2D<float4> _Result;
+RWTexture2D<float3> ShadowResult, _ScreenResult;
+RWTexture2D<float> _DepthResult;
+Texture2D<float4> _Input, _History;
+Texture2D<float> _Depth, _CloudDepth;
+
+float4x4 _InvViewProjMatrixCloudShadow, _PixelCoordToViewDirWS;
+float4 _ScreenSizeCloudShadow;
+
+#define GROUP_SIZE 1024
+
+RWTexture2D<float4> _CloudCoverageResult;
+groupshared float4 sharedTransmittance[GROUP_SIZE];
+
+[numthreads(GROUP_SIZE, 1, 1)]
+void CloudCoverage(uint id : SV_DispatchThreadId, uint groupIndex : SV_GroupIndex)
+{
+	float2 u = Hammersley2d(id.x, GROUP_SIZE);
+	float3 V = SampleHemisphereCosine(u.x, u.y).xzy;
+
+	float depth = UNITY_RAW_FAR_CLIP_VALUE;
+	bool isSky = true;
+	float sceneDepth = 0.0;
+	float cloudDepth;
+	float4 result = RenderCloud(0.0, V, id.xx, depth, sceneDepth, cloudDepth, false);
+	result.a = RangeRemap(_TransmittanceThreshold, 1.0, result.a);
+	
+	sharedTransmittance[groupIndex] = result;
+
+    // This loop will perform a weighted count of the luminance range
+	for (uint cutoff = (GROUP_SIZE >> 1); cutoff > 0; cutoff >>= 1)
+	{
+		GroupMemoryBarrierWithGroupSync();
+		
+		if (groupIndex < cutoff)
+		{
+			sharedTransmittance[groupIndex] += sharedTransmittance[groupIndex + cutoff];
+		}
+	}
+
+	if (groupIndex == 0)
+	{
+    	_CloudCoverageResult[uint2(0, 0)] = sharedTransmittance[0] / GROUP_SIZE;
+		_CloudCoverageResult[uint2(0, 0)] = float4(0, 0, 0, 1);
+	}
+}
+
+[numthreads(8, 8, 1)]
+void CloudShadow(uint2 id : SV_DispatchThreadID)
+{
+	float3 P = MultiplyPointProj(_InvViewProjMatrixCloudShadow, float3(2.0 * (id + 0.5) * _ScreenSizeCloudShadow.zw - 1.0, 0.0)).xyz;
+	float3 V = -_DirectionalLightData[0].Direction;
+	
+	// Check for intersection with planet
+
+	// Early exit if we miss the planet
+	float2 outerIntersections;
+	if (!IntersectRaySphere(P + _PlanetOffset, V, _PlanetRadius + _Height + _Thickness, outerIntersections))
+	{
+		ShadowResult[id] = 0;
+		return;
+	}
+
+	float startDistance = outerIntersections.x;
+	float endDistance = outerIntersections.y;
+	
+	float2 innerIntersections;
+	if (IntersectRaySphere(P + _PlanetOffset, V, _PlanetRadius + _Height, innerIntersections))
+		endDistance = innerIntersections.x;
+
+	float stepLength = (endDistance - startDistance) / _ShadowSamples;
+	float start = startDistance + stepLength * 0.5;
+	float cloudDepth;
+	float4 cloudResult = SampleCloud(P, V, start, stepLength, _ShadowSamples, cloudDepth);
+	
+	float maxExtinction = RangeRemap(_TransmittanceThreshold, 1.0, cloudResult.a);
+	ShadowResult[id] = float3(cloudDepth * _CloudDepthScale, -log(cloudResult.a) / _ShadowSamples, maxExtinction);
+}
+
+[numthreads(8, 8, 1)]
+void Cloud(uint2 id : SV_DispatchThreadID)
+{
+	float3 P = 0.0;
+	float3 V = -MultiplyVector(_PixelCoordToViewDirWS, float3((id.xy + 0.5) * 2.0, 1.0), false);
+	float lengthV = length(V);
+	V /= lengthV;
+	bool noise = true;
+	
+	float depth = _Depth.mips[1][id];
+	float sceneDepth = lengthV * LinearEyeDepth(depth, _ZBufferParams);
+
+	float cloudDepth;
+	float4 cloudResult = RenderCloud(P, V, id, depth, sceneDepth, cloudDepth, noise);
+	
+	// Adjust max cloud depth based on alpha
+	float maxDistance = IntersectRaySphereSimple(P + _PlanetOffset, V, _TopRadius);
+	cloudDepth = lerp(cloudDepth, maxDistance, cloudResult.a);
+	cloudResult.a = RangeRemap(_TransmittanceThreshold, 1.0, cloudResult.a);
+	
+	_Result[id] = cloudResult;
+	_DepthResult[id] = cloudDepth / _MaxDistance / lengthV;
+}

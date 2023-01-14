@@ -1,0 +1,9 @@
+﻿#pragma kernel ClearBuffer
+
+RWStructuredBuffer<uint> _Result;
+
+[numthreads(1024, 1 ,1)]
+void ClearBuffer(uint id : SV_DispatchThreadID)
+{
+	_Result[id] = 0;
+}

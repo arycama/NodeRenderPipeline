@@ -1,0 +1,59 @@
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+
+#pragma kernel ConvertAndBlur
+
+Texture2DArray<float> _Input;
+RWTexture2DArray<float2> _Result;
+
+float _Exponent, _BlurSigma;
+float4 _ScaleOffset;
+
+groupshared float _DepthShared[16][16];
+
+[numthreads(8, 8, 1)]
+void ConvertAndBlur(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId : SV_GroupThreadID)
+{
+	// Load 16x16 region into shared memory.
+	[unroll]
+	for (int y = 0; y < 2; y++)
+	{
+		[unroll]
+		for (int x = 0; x < 2; x++)
+		{
+			uint2 offset = uint2(x, y) * 8;
+			uint2 src = dispatchThreadId.xy - 4 + offset; // 1 + 3 => additional band + left band
+			uint2 dst = groupThreadId + offset;
+			float4 depths = 1.0 - _Input.Gather(_PointClampSampler, float3(src * _ScaleOffset.xy + _ScaleOffset.zw, dispatchThreadId.z));
+			float depth = dot(depths, 0.25);
+			_DepthShared[dst.y][dst.x] = exp2((2.0 * depth - 1.0) * _Exponent);
+		}
+	}
+	
+	GroupMemoryBarrierWithGroupSync();
+	
+	// 9x9 blur
+	float2 result = 0.0;
+	float weightSum = 0.0;
+	
+	float weights[5] = { 0.1531703, 0.1448929, 0.1226492, 0.0929025, 0.06297021 };
+	
+	[unroll]
+	for (y = -4; y <= 4; y++)
+	{
+		[unroll]
+		for (int x = -4; x <= 4; x++)
+		{
+			int2 coords = groupThreadId + 4 + int2(x, y);
+			float weight = exp2(-SqrLength(coords) * _BlurSigma);
+			
+			weight = weights[abs(x)] * weights[abs(y)];
+			
+			float depth = _DepthShared[coords.y][coords.x];
+			result += float2(depth, depth * depth) * weight;
+			weightSum += weight;
+		}
+	}
+	
+	result /= weightSum;
+	_Result[dispatchThreadId] = clamp(result, HALF_MIN, HALF_MAX);
+}

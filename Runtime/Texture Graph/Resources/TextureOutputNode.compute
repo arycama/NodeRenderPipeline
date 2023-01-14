@@ -1,0 +1,22 @@
+﻿#pragma kernel TextureOutput
+
+#pragma multi_compile _ DIMENSION_3D
+
+#ifdef DIMENSION_3D
+	typedef uint3 IdType;
+	typedef RWTexture3D<float4> OutputType;
+	typedef Texture3D<float4> InputType;
+#else
+	typedef uint2 IdType;
+	typedef RWTexture2D<float4> OutputType;
+	typedef Texture2D<float4> InputType;
+#endif
+
+OutputType Result;
+InputType InputR, InputG, InputB;
+
+[numthreads(8, 8, 1)]
+void TextureOutput(IdType id : SV_DispatchThreadID)
+{
+	Result[id] = float4(InputR[id].r, InputG[id].r, InputB[id].r, 1.0);
+}

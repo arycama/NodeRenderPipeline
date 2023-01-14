@@ -1,0 +1,31 @@
+﻿#pragma kernel PreviewTextureNode
+
+#pragma multi_compile _ DIMENSION_3D
+
+#ifdef DIMENSION_3D
+	typedef Texture3D<float4> InputType;
+#else
+	typedef Texture2D<float4> InputType;
+#endif
+
+RWTexture2D<float4> Result;
+InputType Input;
+float2 Resolution;
+SamplerState _LinearClampSampler;
+
+[numthreads(8, 8, 1)]
+void PreviewTextureNode(uint2 id : SV_DispatchThreadID)
+{
+	float2 uv = (id + 0.5) / Resolution;
+	float2 uvX = (id + uint2(1, 0) + 0.5) / Resolution;
+	float2 uvY = (id + uint2(0, 1) + 0.5) / Resolution;
+
+	float2 dx = uvX - uv;
+	float2 dy = uvY - uv;
+
+	#ifdef DIMENSION_3D
+		Result[id] = float4(Input.SampleGrad(_LinearClampSampler, float3(uv, 0), float3(dx, 0), float3(dy, 0)).rrr, 1.0);
+	#else
+		Result[id] = float4(Input.SampleGrad(_LinearClampSampler, uv, dx, dy).rrr, 1.0);
+	#endif
+}

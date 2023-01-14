@@ -1,0 +1,104 @@
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+
+#pragma kernel AmbientProbeConvolution
+#pragma kernel AmbientProbeConvolution PROBE
+
+#ifdef __INTELLISENSE__
+    #define PROBE
+#endif
+
+RWBuffer<float4> _AmbientProbeOutputBuffer;
+TextureCube<float3> _AmbientProbeInputCubemap;
+
+static const uint _SampleCount = 256;
+static const uint _ShCoeffCount = 9;
+
+// Allocate space for parallel reduction (so half the number of samples.
+groupshared float3 outputSHCoeffsLDS[_ShCoeffCount * _SampleCount / 2];
+
+uint _DstOffset;
+
+[numthreads(_SampleCount, 1, 1)]
+void AmbientProbeConvolution(uint dispatchThreadId : SV_DispatchThreadID)
+{
+    float2 cubeSize;
+    _AmbientProbeInputCubemap.GetDimensions(cubeSize.x, cubeSize.y);
+
+    // Prefiltered importance sampling
+    // Use lower MIP-map levels for fetching samples with low probabilities
+    // in order to reduce the variance.
+    // Ref: http://http.developer.nvidia.com/GPUGems3/gpugems3_ch20.html
+    //
+    // - OmegaS: Solid angle associated with the sample
+    // - OmegaP: Solid angle associated with the texel of the cubemap
+    float invOmegaP = (6.0 * cubeSize.x * cubeSize.y) / FOUR_PI;
+    float pdf = 1.0 / FOUR_PI; // Solid angle of the sphere is 4*PI
+    float omegaS = rcp(_SampleCount) * rcp(pdf);
+    float mipLevel = 0.5 * log2(omegaS * invOmegaP);
+
+    float2 u = Hammersley2d(dispatchThreadId, _SampleCount);
+    float3 n = SampleSphereUniform(u.x, u.y);
+
+    // Sample once per thread
+    float weight = 4.0 * PI / _SampleCount;
+    float3 value = _AmbientProbeInputCubemap.SampleLevel(_LinearClampSampler, n, mipLevel) * weight;
+
+    float3 outputSHCoeffs[_ShCoeffCount];
+
+    outputSHCoeffs[0] = value * 1.0 / (2.0 * sqrt(PI));
+    outputSHCoeffs[1] = value * sqrt(3.0) / (2.0 * sqrt(PI)) * n.y;
+    outputSHCoeffs[2] = value * sqrt(3.0) / (2.0 * sqrt(PI)) * n.z;
+    outputSHCoeffs[3] = value * sqrt(3.0) / (2.0 * sqrt(PI)) * n.x;
+    outputSHCoeffs[4] = value * sqrt(15.0) / (2.0 * sqrt(PI)) * n.y * n.x;
+    outputSHCoeffs[5] = value * sqrt(15.0) / (2.0 * sqrt(PI)) * n.y * n.z;
+    outputSHCoeffs[6] = value * sqrt(5.0) / (4.0 * sqrt(PI)) * (3.0 * n.z * n.z - 1.0);
+    outputSHCoeffs[7] = value * sqrt(15.0) / (2.0 * sqrt(PI)) * n.x * n.z;
+    outputSHCoeffs[8] = value * sqrt(15.0) / (4.0 * sqrt(PI)) * (n.x * n.x - n.y * n.y);
+
+    // Parallel reduction of all threads result.
+	for (uint k = 0; k < (uint) log2(_SampleCount); ++k)
+    {
+        // Each loop iteration, even threads store their result in LDS, odd threads sum them up back to local VGPR until all results are summed up.
+        if ((dispatchThreadId & ((2 << k) - 1)) == (1 << k))
+        {
+            uint index = dispatchThreadId >> (k + 1);
+            for (uint coeff = 0; coeff < _ShCoeffCount; ++coeff)
+            {
+                outputSHCoeffsLDS[index * _ShCoeffCount + coeff] = outputSHCoeffs[coeff];
+            }
+        }
+
+        GroupMemoryBarrierWithGroupSync();
+
+        if ((dispatchThreadId & ((2 << k) - 1)) == 0)
+        {
+            uint index = dispatchThreadId >> (k + 1);
+            for (uint coeff = 0; coeff < _ShCoeffCount; ++coeff)
+            {
+                outputSHCoeffs[coeff] += outputSHCoeffsLDS[index * _ShCoeffCount + coeff];
+            }
+        }
+
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    // Write to memory
+    if (dispatchThreadId == 0)
+    {
+        #ifdef PROBE
+		    float3 l0 = outputSHCoeffs[0];
+		    float3 l1 = outputSHCoeffs[1];
+		    float3 l2 = outputSHCoeffs[2];
+		    float3 l3 = outputSHCoeffs[3];
+        
+		    _AmbientProbeOutputBuffer[_DstOffset + 0] = float4(l0.r, l1.r, l2.r, l3.r);
+		    _AmbientProbeOutputBuffer[_DstOffset + 1] = float4(l0.g, l1.g, l2.g, l3.g);
+		    _AmbientProbeOutputBuffer[_DstOffset + 2] = float4(l0.b, l1.b, l2.b, l3.b);
+        #else
+            for (uint i = 0; i < _ShCoeffCount; ++i)
+            {
+                _AmbientProbeOutputBuffer[i] = float4(outputSHCoeffs[i], 1.0);
+            }
+        #endif
+    }
+}

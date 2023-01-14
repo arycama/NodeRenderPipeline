@@ -1,0 +1,222 @@
+#pragma kernel LuminanceHistogram
+#pragma kernel AverageLuminance
+
+#pragma multi_compile_local _ FIRST
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/PhysicalCamera.hlsl"
+
+#define GROUP_SIZE 256
+#define HISTOGRAM_BINS 256
+
+// Our two inputs, the read-only HDR color image, and the histogramBuffer
+RWTexture2D<float3> _Input;
+RWTexture2D<float3> _Output;
+RWBuffer<uint> _Histogram;
+RWBuffer<float> _DebugExposure;
+RWTexture2D<float> _Result;
+Texture2D<float> _Lookup, _ExposureCompensation;
+uint _PixelCount;
+float _EvRange, _MinEv, _MaxEv, _AdaptationSpeed;
+float _ExposureMultiplier;
+
+float4 _HistogramExposureParams, _ExposureParams, _ExposureCompensationRemap;
+
+#define ParamEV100                      _ExposureParams.y
+#define ParamExposureCompensation       _ExposureParams.x
+#define ParamAperture                   _ExposureParams.y
+#define ParamShutterSpeed               _ExposureParams.z
+#define ParamISO                        _ExposureParams.w
+//#define ParamSpeedLightToDark           _AdaptationParams.x
+//#define ParamSpeedDarkToLight           _AdaptationParams.y
+#define ParamExposureLimitMin           _ExposureParams.y
+#define ParamExposureLimitMax           _ExposureParams.z
+
+#define _HistogramRangeScale     _HistogramExposureParams.x
+#define _HistogramRangeBias      _HistogramExposureParams.y
+#define _HistogramMinPercentile  _HistogramExposureParams.z
+#define _HistogramMaxPercentile  _HistogramExposureParams.w
+
+// Shared histogram buffer used for storing intermediate sums for each work group
+groupshared uint histogramShared[256];
+
+float ExposureToEV100(float exposure)
+{
+	return -log2(1.2 * exposure);
+}
+
+// For a given color and luminance range, return the histogram bin index
+uint colorToBin(float3 hdrColor)
+{
+	// Convert our RGB value to Luminance, see note for RGB_TO_LUM macro above
+	float luminance = Luminance(RemoveExposure(hdrColor));
+
+	// Avoid taking the log of zero
+	if (luminance == 0)
+		return 0;
+
+	float ev = ComputeEV100FromAvgLuminance(luminance);
+
+	// Calculate the log_2 luminance and express it as a value in [0.0, 1.0]
+	// where 0.0 represents the minimum luminance, and 1.0 represents the max.
+	float logLum = RangeRemap(_MinEv, _MaxEv, ev);
+
+	// Map [0, 1] to [1, 255]. The zeroth bin is handled by the epsilon check above.
+	return uint(logLum * 254.0 + 1.0);
+}
+
+// Because atomics are only on uint and we need a weighted value, we need to convert.
+// If we multiply the weight by 2048, we get somewhat ok precision and we support up to
+// the equivalent of 1920x1080 image in one bin. (Note, we run this at half res, so equivalent of 4k image)
+uint PackWeight(float weight)
+{
+	return uint(weight * 2048);
+}
+
+float UnpackWeight(uint val)
+{
+	return val * rcp(2048.0f);
+}
+
+float GetFractionWithinHistogram(float value)
+{
+	return ComputeEV100FromAvgLuminance(value) * _HistogramRangeScale + _HistogramRangeBias;
+}
+
+uint GetHistogramBinLocation(float value)
+{
+	return uint(saturate(GetFractionWithinHistogram(value)) * (HISTOGRAM_BINS - 1));
+}
+
+uint EVToBinLocation(float ev)
+{
+	return uint((ev * _HistogramRangeScale + _HistogramRangeBias) * (HISTOGRAM_BINS - 1));
+}
+
+float BinLocationToEV(uint binIdx)
+{
+	return (binIdx * rcp(float(HISTOGRAM_BINS - 1)) - _HistogramRangeBias) / _HistogramRangeScale;
+}
+
+
+// 16 * 16 * 1 threads per group
+[numthreads(16, 16, 1)]
+void LuminanceHistogram(uint2 dispatchThreadId : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
+{
+	// Initialize the bin for this thread to 0
+	histogramShared[groupIndex] = 0;
+	GroupMemoryBarrierWithGroupSync();
+
+	uint2 dim;
+	_Input.GetDimensions(dim.x, dim.y);
+
+	// Ignore threads that map to areas beyond the bounds of our HDR image
+	if (all(dispatchThreadId < dim))
+	{
+		// Undo the pre-exposure
+		float luminance = Luminance(RemoveExposure(_Input[dispatchThreadId]));
+
+		// Center-weighted
+		float screenDiagonal = 0.5f * (_ScreenSize.x + _ScreenSize.y);
+		const float2 kCenter = _ScreenSize.xy * 0.5f;
+		float weight = 1.0 - saturate(pow(length(kCenter - dispatchThreadId) / screenDiagonal, 1.0));
+
+		uint bin = GetHistogramBinLocation(luminance);
+		InterlockedAdd(histogramShared[bin], PackWeight(weight));
+	}
+
+	// Wait for all threads in the work group to reach this point before adding our
+	// local histogram to the global one
+	GroupMemoryBarrierWithGroupSync();
+
+	if (all(dispatchThreadId < dim))
+	{
+		// Technically there's no chance that two threads write to the same bin here,
+		// but different work groups might! So we still need the atomic add.
+		InterlockedAdd(_Histogram[groupIndex], histogramShared[groupIndex]);
+	}
+}
+
+groupshared float gs_partialSums[HISTOGRAM_BINS];
+groupshared float gs_values[HISTOGRAM_BINS];
+
+void ProcessBin(uint binIndex, inout float2 extremesSums, inout float evSum, inout float totalWeight)
+{
+	float histVal = gs_values[binIndex];
+	float binEV = BinLocationToEV(binIndex);
+
+    // Shadows
+	float off = min(extremesSums.x, histVal);
+	extremesSums -= off;
+	histVal -= off;
+    // Highlights
+	histVal = min(extremesSums.y, histVal);
+	extremesSums.y -= histVal;
+
+	evSum += histVal * binEV;
+	totalWeight += histVal;
+}
+
+[numthreads(HISTOGRAM_BINS, 1, 1)]
+void AverageLuminance(uint threadID : SV_GroupIndex)
+{
+	// Get the count from the histogram buffer
+	float histogramVal = UnpackWeight(_Histogram[threadID]);
+	gs_values[threadID] = histogramVal;
+	gs_partialSums[threadID] = histogramVal;
+
+	GroupMemoryBarrierWithGroupSync();
+
+	// Reset the count stored in the buffer in anticipation of the next pass
+	_Histogram[threadID] = 0;
+
+	// This loop will perform a weighted count of the luminance range
+	for (uint i = (HISTOGRAM_BINS >> 1u); i > 0u; i >>= 1u)
+	{
+		if (threadID < i)
+			gs_partialSums[threadID] += gs_partialSums[threadID + i];
+
+		GroupMemoryBarrierWithGroupSync();
+	}
+
+	float sum = gs_partialSums[0];
+	float2 extremesSums = float2(_HistogramMinPercentile, _HistogramMaxPercentile) * sum;
+
+    // TODO: Can we be a bit more parallel here?
+	if (threadID == 0)
+	{
+		float evProcessedSum = 0;
+		float w = 0;
+
+		for (int i = 0; i < HISTOGRAM_BINS; ++i)
+		{
+			ProcessBin(i, extremesSums, evProcessedSum, w);
+		}
+
+		w = max(w, 1e-4f);
+		float avgEV = evProcessedSum * rcp(w);
+		
+		_DebugExposure[0] = avgEV;
+
+		float minExposure = ParamExposureLimitMin;
+		float maxExposure = ParamExposureLimitMax;
+		//if (ParamEvaluateMode == 2)
+		{
+			float2 uv = RangeRemap(minExposure, maxExposure, avgEV);
+			uv = uv * _ExposureCompensationRemap.xy + _ExposureCompensationRemap.zw;
+			avgEV -= _ExposureCompensation.SampleLevel(_LinearClampSampler, float2(uv.x, 0.5), 0.0);
+		}
+
+		float previousEV = ExposureToEV100(_Exposure[uint2(0, 0)]);
+		
+		#ifdef FIRST
+			float exposure = avgEV;
+		#else
+			float exposure = ComputeLuminanceAdaptation(previousEV, avgEV - ParamExposureCompensation, _AdaptationSpeed, _AdaptationSpeed, unity_DeltaTime.x);
+		#endif
+		exposure = clamp(exposure, minExposure, maxExposure);
+
+		_Result[uint2(0, 0)] = ConvertEV100ToExposure(exposure);
+	}
+}

@@ -1,0 +1,62 @@
+﻿#pragma kernel StreamCompaction
+
+struct InstanceTypeData
+{
+	float3 localReferencePoint;
+	float radius;
+	uint lodCount, lodSizeBufferPosition, instanceCount, lodRendererOffset;
+};
+
+struct InstanceTypeLodData
+{
+	uint rendererStart, rendererCount, instancesStart, pad;
+};
+
+RWStructuredBuffer<uint> _FinalRendererCounts, _VisibleRendererInstanceIndices;
+StructuredBuffer<InstanceTypeData> _InstanceTypeData;
+StructuredBuffer<InstanceTypeLodData> _InstanceTypeLodData;
+Buffer<uint> _RendererInstanceIDs, _RendererInstanceIndexOffsets, _InstanceTypeIds;
+uint _RendererInstanceIDsCount;
+
+// Checks each renderer of each instance for visbility. If visible, it writes the index of the instance matrix to a buffer.
+// One thread per instance.
+[numthreads(1024, 1, 1)]
+void StreamCompaction(uint id : SV_DispatchThreadID)
+{
+	// Check that we're not out of bounds
+	if (id >= _RendererInstanceIDsCount)
+		return;
+	
+	// First, get the ID for this instance type. There is one of these for every instance.
+	uint instanceType = _InstanceTypeIds[id]; // Eventually this will just be id, no position offet needed
+	
+	InstanceTypeData instanceTypeData = _InstanceTypeData[instanceType];
+	
+	for (uint i = 0; i < instanceTypeData.lodCount; i++)
+	{
+		// Index/length into the buffer of renderers for this lod, so that we can check their visibility
+		InstanceTypeLodData instanceTypeLodData = _InstanceTypeLodData[instanceTypeData.lodRendererOffset + i];
+		
+		for (uint j = 0; j < instanceTypeLodData.rendererCount; j++)
+		{
+			// Get the stored Instance ID, ensure it is not 0/invisible
+			// There is one uint per renderer per instance, and one  thread per instance. ThreadID*rendererCoutn + rendererOffset gives us the destination
+			uint dstIndex = instanceTypeLodData.instancesStart + j * instanceTypeData.instanceCount + id;
+			
+			// Get the stored Instance ID, ensure it is not 0/invisible
+			uint instanceID = _RendererInstanceIDs[dstIndex];
+			if (instanceID == 0)
+				continue;
+
+			// We need the ID of the renderer this thread is for, hmm.
+			uint dstStart = _RendererInstanceIndexOffsets[instanceTypeLodData.rendererStart + j];
+	
+			uint dstOffset;
+			InterlockedAdd(_FinalRendererCounts[instanceTypeLodData.rendererStart + j], 1, dstOffset);
+	
+			// Write the final destination index
+			// -1, as we +1 when initially writing so that 0 can be used for culled renderers
+			_VisibleRendererInstanceIndices[dstStart + dstOffset] = instanceID - 1;
+		}
+	}
+}

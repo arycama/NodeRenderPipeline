@@ -1,0 +1,58 @@
+﻿#pragma kernel Deferred
+
+#pragma multi_compile _ SCREENSPACE_REFLECTIONS_ON
+#pragma multi_compile _ VOXEL_GI_ON
+#pragma multi_compile _ REFLECTION_PROBE_RENDERING
+
+#ifdef REFLECTION_PROBE_RENDERING
+	#undef VOXEL_GI_ON
+	#undef SCREENSPACE_REFLECTIONS_ON
+	#define NO_SHADOWS
+#endif
+
+#ifdef __INTELLISENSE__
+	#define REFLECTION_PROBE_RENDERING
+#endif
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Brdf.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Deferred.hlsl"
+
+RWTexture2D<float3> Result;
+Texture2D<float> Depth;
+float4x4 _PixelCoordToViewDirWS;
+
+[numthreads(8, 8, 1)]
+void Deferred (uint2 id : SV_DispatchThreadID)
+{	
+	float depth = Depth[id];
+	if(depth == UNITY_RAW_FAR_CLIP_VALUE)
+	{
+		#ifdef REFLECTION_PROBE_RENDERING
+			float3 V = -MultiplyVector(_PixelCoordToViewDirWS, float3(id + 0.5, 1.0), false);
+			Result[id] = _SkyReflection.SampleLevel(_LinearClampSampler, V, 0.0);
+		#else
+			Result[id] = 0;
+		#endif
+		
+		return;
+	}
+
+	// Pixel to world
+	SurfaceData surface = SurfaceDataFromGBuffer(id);
+	float linearEyeDepth = LinearEyeDepth(depth, _ZBufferParams);
+	
+	PbrInput input = SurfaceDataToPbrInput(surface);
+	float3x3 frame = GetLocalFrame(surface.Normal);
+	float3 tangentWS = frame[0] * dot(surface.tangentWS, frame[0]) + frame[1] * dot(surface.tangentWS, frame[1]);
+	
+	// Apply exposure for reflection emission, as we don't apply exposure when it is captured
+	#ifdef REFLECTION_PROBE_RENDERING
+		surface.Emission = ApplyExposure(surface.Emission);
+	#else
+	Result[id] = surface.Occlusion;
+	return;
+	#endif
+
+	float4 positionCS = float4(id + 0.5, depth, linearEyeDepth);
+	Result[id] = GetLighting(positionCS, surface.Normal, tangentWS, input) + surface.Emission;
+}

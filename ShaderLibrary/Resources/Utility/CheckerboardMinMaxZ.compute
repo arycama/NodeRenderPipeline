@@ -1,0 +1,10 @@
+#pragma kernel CheckerboardMinMaxZ
+
+RWTexture2D<float> _Result, _MinZ, _MaxZ;
+
+[numthreads(8, 8, 1)]
+void CheckerboardMinMaxZ(uint2 id : SV_DispatchThreadID)
+{
+	bool check = (id.x + (id.y & 1)) & 1;
+	_Result[id] = check ? _MinZ[id] : _MaxZ[id];
+}
