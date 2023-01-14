@@ -31,7 +31,7 @@ Buffer<uint> _PatchData;
 
 cbuffer UnityPerMaterial
 {
-	float _Test, _Smoothness;
+	float _Smoothness;
 	float _ShoreWaveHeight;
 	float _ShoreWaveSteepness;
 	float _ShoreWaveLength;
@@ -408,9 +408,6 @@ FragmentOutput Fragment(FragmentInput input)
 	}
 	
 	smoothness = LengthToSmoothness(smoothness);
-	
-	if(_Test)
-		smoothness = _Smoothness;
 	
 	float3 B = cross(T, N);
 	float3x3 tangentToWorld = float3x3(T, B, N);
