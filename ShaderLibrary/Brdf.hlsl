@@ -121,7 +121,7 @@ float3 LtcLight(PbrInput input, float3 positionWS, LightData lightData, bool isL
 	// Translate the light s.t. the shaded point is at the origin of the coordinate system.
 	lightData.positionWS -= positionWS;
 
-	if(isLine)
+	if (isLine)
 	{
 		// TODO: some of this could be precomputed.
 		// Rotate the endpoints into the local coordinate system.
@@ -156,7 +156,7 @@ float3 LtcLight(PbrInput input, float3 positionWS, LightData lightData, bool isL
 		float4x3 LD = mul(lightVerts, k_identity3x3);
 
 		float3 formFactorD = PolygonFormFactor(LD);
-		float3 result = PolygonIrradianceFromVectorFormFactor(formFactorD) * input.albedo* input.opacity;
+		float3 result = PolygonIrradianceFromVectorFormFactor(formFactorD) * input.albedo * input.opacity;
 		
 		#ifdef REFLECTION_PROBE_RENDERING
 			return result;
@@ -168,6 +168,16 @@ float3 LtcLight(PbrInput input, float3 positionWS, LightData lightData, bool isL
 		float3 formFactorS = PolygonFormFactor(LS);
 		return result + PolygonIrradianceFromVectorFormFactor(formFactorS) * specularFGD * input.f0;
 	}
+}
+
+// Note this is for disney diffuse, so won't be accurate for our ggx diffuse
+float3 GetDiffuseDominantDir(float3 N, float3 V, float NdotV, float roughness)
+{
+	float a = 1.02341 * roughness - 1.51174;
+	float b = -0.511705 * roughness + 0.755868;
+	float lerpFactor = saturate((NdotV * a + b) * roughness);
+	// The result is not normalized as we fetch in a cubemap
+	return lerp(N, V, lerpFactor);
 }
 
 float3 GetLighting(float4 positionCS, float3 N, float3 T, PbrInput input, out float3 illuminance, out float3 transmittance)
@@ -199,16 +209,19 @@ float3 GetLighting(float4 positionCS, float3 N, float3 T, PbrInput input, out fl
 	float3 kD = input.albedo * input.opacity * Edss;
 	float3 bkD = input.translucency * input.opacity * Edss;
 	
-	float3 ambient = AmbientLight(input.bentNormal, input.albedo * input.opacity, input.occlusion);
-	float3 backAmbient = AmbientLight(-input.bentNormal, input.translucency * input.opacity, input.occlusion);
+	float3 ambientR = GetDiffuseDominantDir(input.bentNormal, V, NdotV, perceptualRoughness * perceptualRoughness);
+	float3 ambient = AmbientLight(ambientR, input.albedo * input.opacity, input.occlusion);
+	float3 backAmbient = AmbientLight(-ambientR, input.translucency * input.opacity, input.occlusion);
 	
 	float3 irradiance, backIrradiance;
+	
+	float3 iblR = GetSpecularDominantDir(N, R, perceptualRoughness, NdotV);
 	float iblMipLevel = PerceptualRoughnessToMipmapLevel(perceptualRoughness, NdotV);
-	float4 probe = SampleReflectionProbe(positionWS, R, iblMipLevel, input.bentNormal, input.albedo * input.opacity, input.occlusion, irradiance);
+	float4 probe = SampleReflectionProbe(positionWS, iblR, iblMipLevel, ambientR, input.albedo * input.opacity, input.occlusion, irradiance);
 	float3 radiance = probe.rgb;
-	if(probe.a < 1.0)
+	if (probe.a < 1.0)
 	{
-		float3 skyRadiance = _SkyReflection.SampleLevel(_TrilinearClampSampler, R, iblMipLevel);
+		float3 skyRadiance = _SkyReflection.SampleLevel(_TrilinearClampSampler, iblR, iblMipLevel);
 		radiance = lerp(skyRadiance, probe.rgb, probe.a);
 		irradiance = lerp(ambient, irradiance, probe.a);
 		backIrradiance = lerp(backAmbient, irradiance, probe.a);
@@ -272,9 +285,9 @@ float3 GetLighting(float4 positionCS, float3 N, float3 T, PbrInput input, out fl
 			case 3: // Pyramid
 			case 4: // Box
 			{
-				luminance += EvaluateLight(input, T, B, N, light.direction, V, input.bentNormal, illum) * light.color;
-				break;
-			}
+					luminance += EvaluateLight(input, T, B, N, light.direction, V, input.bentNormal, illum) * light.color;
+					break;
+				}
 			case 5: // Tube
 			case 6: // Rectangle
 				luminance += LtcLight(input, positionWS, lightData, lightData.lightType == 5, N) * light.color;

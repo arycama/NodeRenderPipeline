@@ -41,7 +41,8 @@ struct FragmentInput
 
 Buffer<uint> _PatchData;
 float4 _PatchScaleOffset;
-float _VerticesPerEdge, _RcpVerticesPerEdge, _VerticesPerEdgeMinusOne, _RcpVerticesPerEdgeMinusOne, _InvCellCount;
+float _RcpVerticesPerEdge, _RcpVerticesPerEdgeMinusOne, _InvCellCount;
+uint _VerticesPerEdge, _VerticesPerEdgeMinusOne;
 SamplerState _TrilinearClampSamplerAniso4;
 
 cbuffer UnityPerMaterial
@@ -56,8 +57,8 @@ cbuffer UnityPerMaterial
 
 HullInput Vertex(VertexInput input)
 {
-	float column = input.vertexID % _VerticesPerEdge;
-	float row = floor(input.vertexID * _RcpVerticesPerEdge);
+	uint column = input.vertexID % _VerticesPerEdge;
+	uint row = input.vertexID / _VerticesPerEdge;
 	float x = column * _RcpVerticesPerEdgeMinusOne;
 	float y = row * _RcpVerticesPerEdgeMinusOne;
 	
@@ -68,16 +69,16 @@ HullInput Vertex(VertexInput input)
 	int4 diffs = (cellData >> uint4(24, 26, 28, 30)) & 0x3;
 	
 	if (column == _VerticesPerEdgeMinusOne)
-		y = (floor(row * exp2(-diffs.x)) + (frac(floor(row) * exp2(-diffs.x)) >= 0.5)) * exp2(diffs.x) * _RcpVerticesPerEdgeMinusOne;
+		y = (floor(row * exp2(-diffs.x)) + (frac(row * exp2(-diffs.x)) >= 0.5)) * exp2(diffs.x) * _RcpVerticesPerEdgeMinusOne;
 
 	if (row == _VerticesPerEdgeMinusOne)
-		x = (floor(column * exp2(-diffs.y)) + (frac(floor(column) * exp2(-diffs.y)) >= 0.5)) * exp2(diffs.y) * _RcpVerticesPerEdgeMinusOne;
+		x = (floor(column * exp2(-diffs.y)) + (frac(column * exp2(-diffs.y)) >= 0.5)) * exp2(diffs.y) * _RcpVerticesPerEdgeMinusOne;
 	
 	if (column == 0)
-		y = (floor(row * exp2(-diffs.z)) + (frac(floor(row) * exp2(-diffs.z)) > 0.5)) * exp2(diffs.z) * _RcpVerticesPerEdgeMinusOne;
+		y = (floor(row * exp2(-diffs.z)) + (frac(row * exp2(-diffs.z)) > 0.5)) * exp2(diffs.z) * _RcpVerticesPerEdgeMinusOne;
 	
 	if (row == 0)
-		x = (floor(column * exp2(-diffs.w)) + (frac(floor(column) * exp2(-diffs.w)) > 0.5)) * exp2(diffs.w) * _RcpVerticesPerEdgeMinusOne;
+		x = (floor(column * exp2(-diffs.w)) + (frac(column * exp2(-diffs.w)) > 0.5)) * exp2(diffs.w) * _RcpVerticesPerEdgeMinusOne;
 	
 	float2 positionOS = float2(dataColumn + x, dataRow + y) * exp2(lod);
 	float2 uv = positionOS * _InvCellCount;

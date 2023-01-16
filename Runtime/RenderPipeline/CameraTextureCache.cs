@@ -21,13 +21,13 @@ public class CameraTextureCache : IDisposable
         {
             var textureA = new RenderTexture(descriptor)
             {
-                name = $"{name} 0",
+                name = $"{name} {camera.name} 0",
                 hideFlags = HideFlags.HideAndDontSave
             }.Created();
 
             var textureB = new RenderTexture(descriptor)
             {
-                name = $"{name} 1",
+                name = $"{name} {camera.name} 1",
                 hideFlags = HideFlags.HideAndDontSave
             }.Created();
 

@@ -19,7 +19,7 @@ Texture2D<float> _Depth, _CloudDepth, _PrevFrameCount;
 
 float4x4 _PixelCoordToViewDirWS;
 float4 _ScaleOffset;
-float3 _StarColor, _LightColor0, _LightDirection0, _LightColor1, _LightDirection1;
+float3 _StarColor;
 
 #ifdef __INTELLISENSE__
 	#define LIGHT_COUNT_ONE 

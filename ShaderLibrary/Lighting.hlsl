@@ -283,9 +283,9 @@ float3 DirectionalLightColor(uint index, float3 positionWS, bool softShadows = f
 	    color *= TransmittanceToAtmosphere(positionWS + _PlanetOffset, lightData.Direction, _LinearClampSampler);
     
     // Earth shadow 
-	//float2 intersections;
-	//if (IntersectRaySphere(positionRWS + _PlanetOffset, lightData.Direction, _PlanetRadius, intersections) && (max(intersections.x, intersections.y) >= 0.0))
-	//	color = 0;
+	float2 intersections;
+	if (IntersectRaySphere(positionWS + _PlanetOffset, lightData.Direction, _PlanetRadius, intersections) && (max(intersections.x, intersections.y) >= 0.0))
+		color = 0;
 
     if(applyShadow && index == 0)
     {

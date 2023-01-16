@@ -234,14 +234,14 @@ void surf(inout FragmentData input, inout SurfaceData surface)
 	surface.Occlusion = extra.b * input.color.r;
 
 	// Hue varation
-	float3 shiftedColor = lerp(surface.Albedo, _HueVariationColor.rgb, input.color.g);
-	surface.Albedo = saturate(shiftedColor * (Max3(surface.Albedo) / Max3(shiftedColor) * 0.5 + 0.5));
+	//float3 shiftedColor = lerp(surface.Albedo, _HueVariationColor.rgb, input.color.g);
+	//surface.Albedo = saturate(shiftedColor * (Max3(surface.Albedo) / Max3(shiftedColor) * 0.5 + 0.5));
 
 	if (_Subsurface)
 	{
 		surface.Translucency = _SubsurfaceTex.Sample(_LinearRepeatSampler, input.uv0);
-		shiftedColor = lerp(surface.Translucency, _HueVariationColor.rgb, input.color.g);
-		surface.Translucency = saturate(shiftedColor * (Max3(surface.Translucency) / Max3(shiftedColor) * 0.5 + 0.5));
+	//	shiftedColor = lerp(surface.Translucency, _HueVariationColor.rgb, input.color.g);
+	//	surface.Translucency = saturate(shiftedColor * (Max3(surface.Translucency) / Max3(shiftedColor) * 0.5 + 0.5));
 	}
 
 	// Flip normal on backsides

@@ -28,8 +28,6 @@ float4 _HistogramExposureParams, _ExposureParams, _ExposureCompensationRemap;
 #define ParamAperture                   _ExposureParams.y
 #define ParamShutterSpeed               _ExposureParams.z
 #define ParamISO                        _ExposureParams.w
-//#define ParamSpeedLightToDark           _AdaptationParams.x
-//#define ParamSpeedDarkToLight           _AdaptationParams.y
 #define ParamExposureLimitMin           _ExposureParams.y
 #define ParamExposureLimitMax           _ExposureParams.z
 
@@ -44,26 +42,6 @@ groupshared uint histogramShared[256];
 float ExposureToEV100(float exposure)
 {
 	return -log2(1.2 * exposure);
-}
-
-// For a given color and luminance range, return the histogram bin index
-uint colorToBin(float3 hdrColor)
-{
-	// Convert our RGB value to Luminance, see note for RGB_TO_LUM macro above
-	float luminance = Luminance(RemoveExposure(hdrColor));
-
-	// Avoid taking the log of zero
-	if (luminance == 0)
-		return 0;
-
-	float ev = ComputeEV100FromAvgLuminance(luminance);
-
-	// Calculate the log_2 luminance and express it as a value in [0.0, 1.0]
-	// where 0.0 represents the minimum luminance, and 1.0 represents the max.
-	float logLum = RangeRemap(_MinEv, _MaxEv, ev);
-
-	// Map [0, 1] to [1, 255]. The zeroth bin is handled by the epsilon check above.
-	return uint(logLum * 254.0 + 1.0);
 }
 
 // Because atomics are only on uint and we need a weighted value, we need to convert.
@@ -115,7 +93,13 @@ void LuminanceHistogram(uint2 dispatchThreadId : SV_DispatchThreadID, uint group
 	if (all(dispatchThreadId < dim))
 	{
 		// Undo the pre-exposure
-		float luminance = Luminance(RemoveExposure(_Input[dispatchThreadId]));
+		float exposure = _Exposure[uint2(0, 0)];
+	
+		float3 input = _Input[dispatchThreadId];
+		if (exposure != 0.0)
+			input /= exposure;
+		
+		float luminance = Luminance(input);
 
 		// Center-weighted
 		float screenDiagonal = 0.5f * (_ScreenSize.x + _ScreenSize.y);
@@ -208,7 +192,7 @@ void AverageLuminance(uint threadID : SV_GroupIndex)
 			avgEV -= _ExposureCompensation.SampleLevel(_LinearClampSampler, float2(uv.x, 0.5), 0.0);
 		}
 
-		float previousEV = ExposureToEV100(_Exposure[uint2(0, 0)]);
+		float previousEV = ExposureToEV100(_Result[uint2(0, 0)]);
 		
 		#ifdef FIRST
 			float exposure = avgEV;

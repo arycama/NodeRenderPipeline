@@ -13,12 +13,12 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
     [SerializeField, Input] private bool isEnabled = true;
 
     [Header("Appareance")]
-    [SerializeField] private bool debugNoise;
-    [SerializeField, Range(1f, 32f)] private float worldRadius = 5f;
-    [SerializeField, Range(0.5f, 8f)] private float strength = 1.5f;
+    [Input, SerializeField] private bool debugNoise;
+    [Input, SerializeField, Range(1f, 32f)] private float worldRadius = 5f;
+    [Input, SerializeField, Range(0.5f, 8f)] private float strength = 1.5f;
     [SerializeField, Range(0f, 1f)] private float falloff = 0.75f;
     [SerializeField, Range(0f, 0.2f)] private float thinOccluderCompensation = 0.05f;
-    [SerializeField, Range(0f, 1f)] private float maxScreenRadius = 0.125f;
+    [Input, SerializeField, Range(0f, 1f)] private float maxScreenRadius = 0.125f;
     [SerializeField, Range(1e-3f, 5f)] private float sampleDistributionPower = 2f;
     [SerializeField, Range(0f, 30f)] private float depthMipSamplingOffset = 3.3f;
     [SerializeField, Range(1, 16)] private int directionCount = 1;
@@ -32,9 +32,10 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
     [SerializeField, Range(1, 64)] private int frameCount = 20;
 
     [Header("Spatial Denoising")]
-    [SerializeField] private float blurRadius = 4f;
-    [SerializeField, Range(1, 32)] private int blurSamples = 8;
-    [SerializeField] private float blurDepthWeight = 1f;
+    [Input, SerializeField, Range(1, 32)] private int blurSamples = 8;
+    [Input, SerializeField] private float distanceWeight = 1f;
+    [Input, SerializeField] private float normalWeight = 1f;
+    [Input, SerializeField] private float tangentWeight = 1f;
 
     [Input] private RenderTargetIdentifier gbuffer1;
     [Input] private RenderTargetIdentifier depth;
@@ -45,7 +46,8 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
 
     [Input, Output] private NodeConnection connection;
 
-    private CameraTextureCache aoCache, frameCountCache;
+    private CameraTextureCache aoCache;
+    private CameraTextureCache frameCountCache;
 
     private static readonly int aoTempId0 = Shader.PropertyToID("_AoTemp0"), aoTempId1 = Shader.PropertyToID("_AoTemp1");
 
@@ -116,9 +118,11 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
         scope.Command.SetComputeTextureParam(computeShader, spatialKernel, "_FrameCount", currentFrameCount);
         scope.Command.SetComputeTextureParam(computeShader, spatialKernel, "_Depth", depth);
 
-        scope.Command.SetComputeFloatParam(computeShader, "_BlurRadius", blurRadius);
-        scope.Command.SetComputeFloatParam(computeShader, "_BlurDepthWeight", blurDepthWeight);
+        scope.Command.SetComputeFloatParam(computeShader, "_DistanceWeight", distanceWeight);
+        scope.Command.SetComputeFloatParam(computeShader, "_NormalWeight", normalWeight);
+        scope.Command.SetComputeFloatParam(computeShader, "_TangentWeight", tangentWeight);
         scope.Command.SetComputeIntParam(computeShader, "_BlurSamples", blurSamples);
+        scope.Command.SetComputeFloatParam(computeShader, "_WorldRadius", worldRadius);
 
         using (var profilerScope = scope.Command.ProfilerScope("Spatial"))
             scope.Command.DispatchNormalized(computeShader, spatialKernel, camera.pixelWidth, camera.pixelHeight, 1);
@@ -141,7 +145,7 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
         var tanHalfFovX = tanHalfFovY * camera.aspect;
         command.SetComputeVectorParam(computeShader, "_UvToView", new Vector4(tanHalfFovX * 2f, tanHalfFovY * 2f, -tanHalfFovX, -tanHalfFovY));
 
-        command.SetComputeFloatParam(computeShader, "_Radius", worldRadius * camera.pixelHeight / tanHalfFovY * 0.25f);
+        command.SetComputeFloatParam(computeShader, "_Radius", worldRadius * camera.pixelHeight / tanHalfFovY * 0.5f);
         command.SetComputeFloatParam(computeShader, "_FalloffScale", falloff == 1f ? 0f : 1f / (worldRadius * falloff - worldRadius));
         command.SetComputeFloatParam(computeShader, "_FalloffBias", falloff == 1f ? 1f : 1f / (1f - falloff));
 

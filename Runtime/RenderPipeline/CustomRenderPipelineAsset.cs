@@ -4,32 +4,13 @@ using UnityEngine.Rendering;
 [CreateAssetMenu(menuName = "Data/Graphics/Render Pipeline Asset")]
 public class CustomRenderPipelineAsset : RenderPipelineAsset
 {
-    [Header("Reflection Probes")]
-    [SerializeField, Pow2(32, 512)]
-    private int reflectionProbeResolution = 256;
+    [SerializeField] private bool useSRPBatcher = true;
+    [SerializeField] private RenderPipelineGraph graph = null;
+    [SerializeField] private DefaultPipelineMaterials defaultMaterials = new();
+    [SerializeField] private DefaultPipelineShaders defaultShaders = new();
+    [SerializeField] private string[] renderingLayerNames = new string[32];
 
-    [SerializeField]
-    private bool enableDynamicBatching = false;
-
-    [SerializeField]
-    private bool useSRPBatcher = true;
-
-    [SerializeField]
-    private RenderPipelineGraph graph = null;
-
-    [SerializeField]
-    private DefaultPipelineMaterials defaultMaterials = new();
-
-    [SerializeField]
-    private DefaultPipelineShaders defaultShaders = new();
-
-    [SerializeField]
-    private string[] renderingLayerNames = new string[32];
-
-    public int ReflectionProbeResolution => reflectionProbeResolution;
-    public bool EnableDynamicBatching => enableDynamicBatching;
     public bool UseSRPBatcher => useSRPBatcher;
-
     public RenderPipelineGraph Graph => graph;
 
     public override Material defaultMaterial => defaultMaterials.DefaultMaterial ?? base.defaultMaterial;
@@ -51,8 +32,6 @@ public class CustomRenderPipelineAsset : RenderPipelineAsset
     public override Shader terrainDetailGrassShader => defaultShaders.TerrainDetailGrassShader ?? base.terrainDetailGrassShader;
     public override Shader terrainDetailLitShader => defaultShaders.TerrainDetailLitShader ?? base.terrainDetailLitShader;
     public override string[] renderingLayerMaskNames => renderingLayerNames;
-
-    protected override void OnValidate() { }
 
     protected override RenderPipeline CreatePipeline()
     {

@@ -102,7 +102,7 @@ SamplerComparisonState _PointClampCompareSampler, _LinearClampCompareSampler;
 
 // Non builtin
 Texture2D<float3> _CameraOpaqueTexture;
-Texture2D<float> _PreviousExposure, _Exposure, _CameraMaxZTexture;
+Texture2D<float> _Exposure, _CameraMaxZTexture;
 float _ExposureValue, _ExposureValueRcp;
 
 // Instancing

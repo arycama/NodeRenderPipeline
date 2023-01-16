@@ -41,6 +41,7 @@ Shader "Nature/Terrain/Lit Terrain"
         {
             ColorMask 0
             ZClip [_ZClip]
+            Cull Off
 
             Name "ShadowCaster"
             Tags { "LightMode" = "ShadowCaster"}

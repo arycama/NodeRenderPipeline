@@ -131,5 +131,5 @@ void Temporal(uint2 groupThreadID : SV_GroupThreadID, uint2 groupID : SV_GroupID
 	
 	// Output final result
 	_Result[screenCoord] = result;
-	//_Result[screenCoord] = _Input[screenCoord];
+	_Result[screenCoord] = _Input[screenCoord];
 }

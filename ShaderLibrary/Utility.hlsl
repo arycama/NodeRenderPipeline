@@ -68,17 +68,6 @@ float3 ApplyExposure(float3 color)
 	#endif
 }
 
-float3 RemoveExposure(float3 color)
-{
-	#ifdef REFLECTION_PROBE_RENDERING
-		float rcpExposure = _ExposureValueRcp;
-	#else
-		float rcpExposure = _Exposure[uint2(0, 0)];
-	#endif
-	
-	return color * rcp(rcpExposure + (rcpExposure == 0.0));
-}
-
 float Remap(float v, float pMin, float pMax, float nMin, float nMax) { return nMin + (v - pMin) / (pMax - pMin) * (nMax - nMin); }
 float2 Remap(float2 v, float2 pMin, float2 pMax, float2 nMin, float2 nMax) { return nMin + (v - pMin) / (pMax - pMin) * (nMax - nMin); }
 float3 Remap(float3 v, float3 pMin, float3 pMax, float3 nMin, float3 nMax) { return nMin + (v - pMin) / (pMax - pMin) * (nMax - nMin); }
