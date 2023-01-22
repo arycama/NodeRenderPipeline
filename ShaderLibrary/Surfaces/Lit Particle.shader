@@ -3,12 +3,13 @@
     Properties
     {
         [Toggle] _Test("Test", Float) = 0
-        _Color("Color", Color) = (0.5, 0.5, 0.5, 0.5)
-        _MainTex("Albedo", 2D) = "white" {}
-        _BumpMap("Normal Map", 2D) = "bump" {}
+        _Color("Color", Color) = (1.0, 1.0, 1.0, 1.0)
+        _MainTex("Albedo", 2D) = "black" {}
+        [NoScaleOffset] _BumpMap("Normal Map", 2D) = "bump" {}
 
-        [HDR] _Emission("Emission", Color) = (0, 0, 0, 0)
-        _EmissiveExposureWeight("Exposure Weight", Range(0.0, 1.0)) = 1.0
+        _EmissiveExposureWeight("Emission Exposure Weight", Range(0.0, 1.0)) = 1.0
+        [HDR] _EmissionColor("Emission Color", Color) = (0, 0, 0)
+        [NoScaleOffset] _EmissionMap("Emission", 2D) = "white" {}
 
         _Translucency("Translucency", Range(0, 1)) = 0.5
         _Curvature("Curvature", Range(0, 1)) = 0.5
@@ -24,7 +25,7 @@
 
         Pass
         {
-            Blend SrcAlpha OneMinusSrcAlpha
+            Blend One OneMinusSrcAlpha
             Name "Forward"
             ZWrite Off
 

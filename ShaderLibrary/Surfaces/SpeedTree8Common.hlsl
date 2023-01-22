@@ -32,6 +32,7 @@
 
 Texture2D<float4> _MainTex, _BumpMap;
 Texture2D<float3> _ExtraTex, _SubsurfaceTex;
+SamplerState _TrilinearRepeatAniso4Sampler;
 float _WindEnabled;
 
 cbuffer UnityPerMaterial
@@ -138,7 +139,7 @@ void vert(inout VertexData data)
     #endif
 	
     // wind
-	//if (_WindEnabled <= 0.0)
+	if (_WindEnabled <= 0.0)
 		return;
 
 	float3 rotatedWindVector = normalize(mul(_ST_WindVector.xyz, (float3x3) GetObjectToWorld(data.instanceID)));
@@ -203,16 +204,18 @@ void vert(inout VertexData data)
 	data.worldNormal = ObjectToWorldNormal(data.normal, data.instanceID, false);
 
 	// Previous position
-	float3 rotatedBranchAnchorPrevious = normalize(mul(_ST_WindBranchAnchor_Previous.xyz, (float3x3) GetObjectToWorld(data.instanceID))) * _ST_WindBranchAnchor_Previous.w;
+	//float3 rotatedBranchAnchorPrevious = normalize(mul(_ST_WindBranchAnchor_Previous.xyz, (float3x3) GetObjectToWorld(data.instanceID))) * _ST_WindBranchAnchor_Previous.w;
 
-	windyPositionPrevious = BranchWind(_IsPalm, windyPositionPrevious, treePos, float4(data.uv0.zw, 0, 0), rotatedWindVectorPrevious, rotatedBranchAnchorPrevious, _ST_WindBranchAdherences_Previous, _ST_WindBranchTwitch_Previous, _ST_WindBranch_Previous, _ST_WindBranchWhip_Previous, _ST_WindTurbulences_Previous, _ST_WindVector_Previous, _ST_WindAnimation_Previous);
+	//windyPositionPrevious = BranchWind(_IsPalm, windyPositionPrevious, treePos, float4(data.uv0.zw, 0, 0), rotatedWindVectorPrevious, rotatedBranchAnchorPrevious, _ST_WindBranchAdherences_Previous, _ST_WindBranchTwitch_Previous, _ST_WindBranch_Previous, _ST_WindBranchWhip_Previous, _ST_WindTurbulences_Previous, _ST_WindVector_Previous, _ST_WindAnimation_Previous);
 
 	//data.positionOS = GlobalWind(windyPositionPrevious, treePos, true, rotatedWindVectorPrevious, _ST_WindGlobal_Previous.x, _ST_WindGlobal_Previous, _ST_WindBranchAdherences_Previous);
 }
 
 void surf(inout FragmentData input, inout SurfaceData surface)
 {
-	float4 color = _MainTex.Sample(_LinearRepeatSampler, input.uv0);
+	input.uv0.xy = UnjitterTextureUV(input.uv0.xy);
+	
+	float4 color = _MainTex.Sample(_TrilinearRepeatAniso4Sampler, input.uv0);
 	color.a *= input.color.a;
 	
     #ifdef _CUTOUT_ON
@@ -223,9 +226,9 @@ void surf(inout FragmentData input, inout SurfaceData surface)
 		return;
 	#else
 	
-	float4 normalData = _BumpMap.Sample(_LinearRepeatSampler, input.uv0);
-	float3 normalMap = UnpackNormal(normalData);
-	float3 extra = _ExtraTex.Sample(_LinearRepeatSampler, input.uv0);
+	float4 normalData = _BumpMap.Sample(_TrilinearRepeatAniso4Sampler, input.uv0);
+	float3 normalMap = normalize(2.0 * normalData.xyz - 1.0);
+	float3 extra = _ExtraTex.Sample(_TrilinearRepeatAniso4Sampler, input.uv0);
 
 	surface.Albedo = color.rgb;
 	surface.Normal = normalMap;
@@ -234,14 +237,14 @@ void surf(inout FragmentData input, inout SurfaceData surface)
 	surface.Occlusion = extra.b * input.color.r;
 
 	// Hue varation
-	//float3 shiftedColor = lerp(surface.Albedo, _HueVariationColor.rgb, input.color.g);
-	//surface.Albedo = saturate(shiftedColor * (Max3(surface.Albedo) / Max3(shiftedColor) * 0.5 + 0.5));
+	float3 shiftedColor = lerp(surface.Albedo, _HueVariationColor.rgb, input.color.g);
+	surface.Albedo = saturate(shiftedColor * (Max3(surface.Albedo) / Max3(shiftedColor) * 0.5 + 0.5));
 
 	if (_Subsurface)
 	{
-		surface.Translucency = _SubsurfaceTex.Sample(_LinearRepeatSampler, input.uv0);
-	//	shiftedColor = lerp(surface.Translucency, _HueVariationColor.rgb, input.color.g);
-	//	surface.Translucency = saturate(shiftedColor * (Max3(surface.Translucency) / Max3(shiftedColor) * 0.5 + 0.5));
+		surface.Translucency = _SubsurfaceTex.Sample(_TrilinearRepeatAniso4Sampler, input.uv0);
+		shiftedColor = lerp(surface.Translucency, _HueVariationColor.rgb, input.color.g);
+		surface.Translucency = saturate(shiftedColor * (Max3(surface.Translucency) / Max3(shiftedColor) * 0.5 + 0.5));
 	}
 
 	// Flip normal on backsides

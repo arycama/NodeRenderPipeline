@@ -43,7 +43,7 @@ float3 EvaluateLight(PbrInput input, float3 T, float3 B, float3 N, float3 L, flo
 
 	// Diffuse
 	float perceptualRoughness = ConvertAnisotropicRoughnessToPerceptualRoughness(input.roughness);
-	float diffuseTerm = GGXDiffuse(abs(NdotL), NdotV, perceptualRoughness, Max3(input.f0));
+	float diffuseTerm = GGXDiffuse(saturate(NdotL), NdotV, perceptualRoughness, Max3(input.f0));
 
 	#ifdef THIN_SURFACE_BSDF
 		if (!t)
@@ -57,16 +57,23 @@ float3 EvaluateLight(PbrInput input, float3 T, float3 B, float3 N, float3 L, flo
 	// Impl from Cod WWII, but with bent NdotL
 	float microShadow = saturate(Sq(dot(bentNormal, L) * rsqrt(1.0 - input.occlusion)));
 
-	illuminance = diffuseTerm * abs(NdotL);
-	float3 diffuse = (t ? input.albedo * microShadow : input.translucency) * (diffuseTerm * abs(NdotL)) * input.opacity;
-	
-	#ifdef REFLECTION_PROBE_RENDERING
-		return diffuse;
-	#endif
+	illuminance = diffuseTerm * saturate(NdotL);
+	float3 diffuse = input.albedo * microShadow * diffuseTerm * saturate(NdotL) * input.opacity;
 
 	NdotL = saturate(NdotL);
 	float LdotV, NdotH, LdotH, invLenLV;
 	GetBSDFAngle(V, L, NdotL, NdotV, LdotV, NdotH, LdotH, invLenLV);
+	
+	// Translucency
+	float subsurfaceThickness = (abs(NdotV) + 1.0) * 0.5;
+	float subsurfaceRough = Sq(0.7 - (1.0 - perceptualRoughness) * 0.5);
+	float subsurface = saturate(-LdotV);
+	subsurface = subsurfaceRough / (PI * Sq(subsurface * subsurface * (subsurfaceRough - 1.0) + 1.0)) * subsurfaceThickness;
+	diffuse += subsurface * input.translucency;
+	
+	#ifdef REFLECTION_PROBE_RENDERING
+		return diffuse;
+	#endif
 
 	// Specular
 	float3 F = F_Schlick(input.f0, LdotH);
@@ -210,14 +217,14 @@ float3 GetLighting(float4 positionCS, float3 N, float3 T, PbrInput input, out fl
 	float3 bkD = input.translucency * input.opacity * Edss;
 	
 	float3 ambientR = GetDiffuseDominantDir(input.bentNormal, V, NdotV, perceptualRoughness * perceptualRoughness);
-	float3 ambient = AmbientLight(ambientR, input.albedo * input.opacity, input.occlusion);
-	float3 backAmbient = AmbientLight(-ambientR, input.translucency * input.opacity, input.occlusion);
+	float3 ambient = AmbientLight(input.bentNormal, input.albedo * input.opacity, input.occlusion);
+	float3 backAmbient = AmbientLight(-V, input.translucency * input.opacity, input.occlusion);
 	
 	float3 irradiance, backIrradiance;
 	
 	float3 iblR = GetSpecularDominantDir(N, R, perceptualRoughness, NdotV);
 	float iblMipLevel = PerceptualRoughnessToMipmapLevel(perceptualRoughness, NdotV);
-	float4 probe = SampleReflectionProbe(positionWS, iblR, iblMipLevel, ambientR, input.albedo * input.opacity, input.occlusion, irradiance);
+	float4 probe = SampleReflectionProbe(positionWS, iblR, iblMipLevel, input.bentNormal, input.albedo * input.opacity, input.occlusion, irradiance);
 	float3 radiance = probe.rgb;
 	if (probe.a < 1.0)
 	{

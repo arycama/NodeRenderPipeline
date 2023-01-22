@@ -53,7 +53,7 @@ float4 SampleCloud(float3 P, float3 V, float startDistance, float stepLength, fl
 		{
 			#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
 				float2 intersections;
-				if (!IntersectRaySphere(positionWS + _PlanetOffset, _LightDirection0, _PlanetRadius, intersections) || all(intersections < 0.0))
+				if (!IntersectRaySphere(positionWS + _PlanetOffset, _LightDirection0, _PlanetRadius, intersections) || intersections.x < 0.0)
 				{
 					float3 color0 = TransmittanceToAtmosphere(positionWS + _PlanetOffset, _LightDirection0, _LinearClampSampler) * ApplyExposure(_LightColor0);
 					if (any(color0 > 0.0))
@@ -68,7 +68,7 @@ float4 SampleCloud(float3 P, float3 V, float startDistance, float stepLength, fl
 						float LdotV = dot(_LightDirection0, V);
 						float asymmetry = lightTransmittance * transmittance;
 				
-						float phase = lerp(CornetteShanksPhaseFunction(-_BackScatter, LdotV) * 2.16, CornetteShanksPhaseFunction(_FrontScatter, LdotV), asymmetry) * 2;
+						float phase = lerp(CornetteShanksPhaseFunction(-_BackScatter, LdotV) * 2.16, CornetteShanksPhaseFunction(_FrontScatter, LdotV), asymmetry);
 						color.rgb += color0 * phase * lightTransmittance * (1.0 - transmittance) * color.a;
 					}
 				}
@@ -88,7 +88,7 @@ float4 SampleCloud(float3 P, float3 V, float startDistance, float stepLength, fl
 					float LdotV = dot(_LightDirection1, V);
 					float asymmetry = lightTransmittance * transmittance;
 				
-					float phase = lerp(CornetteShanksPhaseFunction(-_BackScatter, LdotV) * 2.16, CornetteShanksPhaseFunction(_FrontScatter, LdotV), asymmetry) * 2;
+					float phase = lerp(CornetteShanksPhaseFunction(-_BackScatter, LdotV) * 2.16, CornetteShanksPhaseFunction(_FrontScatter, LdotV), asymmetry);
 					color.rgb += color1 * phase * lightTransmittance * (1.0 - transmittance) * color.a;
 				}
 			#endif

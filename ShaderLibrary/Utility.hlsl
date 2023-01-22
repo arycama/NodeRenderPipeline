@@ -129,11 +129,11 @@ float GaussianWeight(float x, float radius)
 	return exp(-Square(x) * rcp(twoSqrRadius)) * rcp(sqrt(PI * twoSqrRadius));
 }
 
-float2 VogelDiskSample(int sampleIndex, int samplesCount, float phi)
+float2 VogelDiskSample(int sampleIndex, int samplesCount, float phi, float power = 1.0)
 {
 	float GoldenAngle = 2.4f;
 
-	float r = sqrt(sampleIndex + 0.5f) / sqrt(samplesCount);
+	float r = pow(sqrt(sampleIndex + 0.5f) / sqrt(samplesCount), power);
 	float theta = sampleIndex * GoldenAngle + phi;
 
 	float sine, cosine;
@@ -666,13 +666,12 @@ float3 Bicubic5Tap(Texture2D<float3> input, float2 texcoord, float sharpening, f
 
 	float2 w12 = w1 + w2;
 	float2 tc12 = rtMetrics.zw * (centerPosition + w2 / w12);
-	float3 centerColor = input.SampleLevel(_LinearClampSampler, float2(tc12.x, tc12.y), 0.0);
 	
 	float2 tc0 = rtMetrics.zw * (centerPosition - 1.0);
 	float2 tc3 = rtMetrics.zw * (centerPosition + 2.0);
 	float4 color = float4(input.SampleLevel(_LinearClampSampler, float2(tc12.x, tc0.y), 0.0), 1.0) * (w12.x * w0.y) +
 					float4(input.SampleLevel(_LinearClampSampler, float2(tc0.x, tc12.y), 0.0), 1.0) * (w0.x * w12.y) +
-					float4(centerColor, 1.0) * (w12.x * w12.y) +
+					float4(input.SampleLevel(_LinearClampSampler, float2(tc12.x, tc12.y), 0.0), 1.0) * (w12.x * w12.y) +
 					float4(input.SampleLevel(_LinearClampSampler, float2(tc3.x, tc0.y), 0.0), 1.0) * (w3.x * w12.y) +
 					float4(input.SampleLevel(_LinearClampSampler, float2(tc12.x, tc3.y), 0.0), 1.0) * (w12.x * w3.y);
 	return color.rgb * rcp(color.a);

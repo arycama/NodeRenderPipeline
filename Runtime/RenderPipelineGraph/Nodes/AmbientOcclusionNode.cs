@@ -15,7 +15,7 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
     [Header("Appareance")]
     [Input, SerializeField] private bool debugNoise;
     [Input, SerializeField, Range(1f, 32f)] private float worldRadius = 5f;
-    [Input, SerializeField, Range(0.5f, 8f)] private float strength = 1.5f;
+    [Input, SerializeField, Range(0f, 8f)] private float strength = 1.5f;
     [SerializeField, Range(0f, 1f)] private float falloff = 0.75f;
     [SerializeField, Range(0f, 0.2f)] private float thinOccluderCompensation = 0.05f;
     [Input, SerializeField, Range(0f, 1f)] private float maxScreenRadius = 0.125f;
@@ -25,7 +25,8 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
     [SerializeField, Range(1, 16)] private int sampleCount = 4;
 
     [Header("Temporal Denoising")]
-    [SerializeField] private float depthRejection = 0.5f;
+    [SerializeField, Min(1e-3f)] private float depthWeight = 64f;
+    [SerializeField, Min(1e-3f)] private float depthRejection = 0.5f;
     [SerializeField] private float velocityRejection = 0.5f;
     [SerializeField] private float clampVelocityWeight = 8f;
     [SerializeField] private float clampWindowScale = 0.5f;
@@ -51,7 +52,7 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
 
     private static readonly int aoTempId0 = Shader.PropertyToID("_AoTemp0"), aoTempId1 = Shader.PropertyToID("_AoTemp1");
 
-    private int computeKernel, temporalKernel, spatialKernel, combineKernel;
+    private int computeKernel, generateMipsKernel, temporalKernel, spatialKernel, combineKernel;
     private ComputeShader computeShader;
 
     public override void Initialize()
@@ -59,6 +60,7 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
         computeShader = Resources.Load<ComputeShader>("Post Processing/AmbientOcclusion");
         computeKernel = computeShader.FindKernel("Compute");
         temporalKernel = computeShader.FindKernel("Temporal");
+        generateMipsKernel = computeShader.FindKernel("GenerateMips");
         spatialKernel = computeShader.FindKernel("Spatial");
         combineKernel = computeShader.FindKernel("Combine");
 
@@ -71,7 +73,13 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
         if (!isEnabled)
             return;
 
-        var desc0 = new RenderTextureDescriptor(camera.pixelWidth >> 1, camera.pixelHeight >> 1, GraphicsFormat.R32_UInt, 0) { enableRandomWrite = true };
+        var desc0 = new RenderTextureDescriptor(camera.pixelWidth >> 1, camera.pixelHeight >> 1, GraphicsFormat.R8G8B8A8_UNorm, 0) 
+        { 
+            autoGenerateMips = false, 
+            enableRandomWrite = true,
+            mipCount = 5,
+            useMipMap = true,
+        };
 
         using var scope = context.ScopedCommandBuffer("Ambient Occlusion", true);
         scope.Command.SetRenderTarget(BuiltinRenderTextureType.None);
@@ -79,7 +87,24 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
         scope.Command.GetTemporaryRT(aoTempId0, desc0);
         ComputeAO(scope.Command, camera, aoTempId0);
 
-        var desc1 = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, GraphicsFormat.R32_UInt, 0) { enableRandomWrite = true };
+        // Generate mips
+        //scope.Command.SetComputeTextureParam(computeShader, generateMipsKernel, "_Result0", aoTempId0, 0);
+        //scope.Command.SetComputeTextureParam(computeShader, generateMipsKernel, "_Result1", aoTempId0, 1);
+        //scope.Command.SetComputeTextureParam(computeShader, generateMipsKernel, "_Result2", aoTempId0, 2);
+        //scope.Command.SetComputeTextureParam(computeShader, generateMipsKernel, "_Result3", aoTempId0, 3);
+        //scope.Command.SetComputeTextureParam(computeShader, generateMipsKernel, "_Result4", aoTempId0, 4);
+        scope.Command.SetComputeIntParam(computeShader, "_Width", camera.pixelWidth >> 1);
+        scope.Command.SetComputeIntParam(computeShader, "_Height", camera.pixelHeight >> 1);
+
+        //var threadsX = ((camera.pixelWidth >> 1) + 15 - 1) / 15;
+        //var threadsY = ((camera.pixelHeight >> 1) + 15 - 1) / 15;
+
+        //using (var profilerScope = scope.Command.ProfilerScope("Generate Mips"))
+        //    scope.Command.DispatchCompute(computeShader, generateMipsKernel, threadsX, threadsY, 1);
+
+        scope.Command.GenerateMips(aoTempId0);
+
+        var desc1 = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, GraphicsFormat.R8G8B8A8_UNorm, 0) { enableRandomWrite = true };
         aoCache.GetTexture(camera, desc1, out var current, out var previous, FrameCount);
 
         var frameCountDesc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, GraphicsFormat.R8_UNorm, 0) { enableRandomWrite = true };
@@ -102,6 +127,7 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
         scope.Command.SetComputeTextureParam(computeShader, temporalKernel, "_GBuffer1", gbuffer1);
 
         scope.Command.SetComputeFloatParam(computeShader, "_ClampWindowScale", clampWindowScale);
+        scope.Command.SetComputeFloatParam(computeShader, "_DepthWeight", depthWeight);
         scope.Command.SetComputeFloatParam(computeShader, "_DepthRejection", depthRejection);
         scope.Command.SetComputeFloatParam(computeShader, "_VelocityRejection", velocityRejection);
         scope.Command.SetComputeFloatParam(computeShader, "_ClampVelocityWeight", clampVelocityWeight);

@@ -28,9 +28,9 @@ public partial class ExposureTextureNode : RenderPipelineNode
         // If this is first frame, or a preview camera, fill exposrue textures with white
         if (wasCreated)
         {
-            //using var scope = context.ScopedCommandBuffer();
-            //scope.Command.SetRenderTarget(new RenderTargetIdentifier[] { texture0, texture1 }, texture0);
-            //scope.Command.ClearRenderTarget(false, true, new Color(Mathf.PI * 4, Mathf.PI * 4, Mathf.PI * 4, 1f));
+            using var scope = context.ScopedCommandBuffer();
+            scope.Command.SetRenderTarget(new RenderTargetIdentifier[] { texture0, texture1 }, texture0);
+            scope.Command.ClearRenderTarget(false, true, new Color(Mathf.PI * 4, Mathf.PI * 4, Mathf.PI * 4, 1f));
         }
 
         currentFrame = texture0;

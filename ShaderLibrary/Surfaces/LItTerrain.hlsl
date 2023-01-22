@@ -225,6 +225,8 @@ void FragmentShadow() { }
 [earlydepthstencil]
 GBufferOut Fragment(FragmentInput input)
 {
+	input.uv = UnjitterTextureUV(input.uv);
+	
 	// Write to feedback buffer incase we need to request the tile
 	uint feedbackPosition = CalculateFeedbackBufferPosition(input.uv);
 	_VirtualFeedbackTexture[feedbackPosition] = 1;

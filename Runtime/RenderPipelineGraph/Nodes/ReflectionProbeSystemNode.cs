@@ -26,15 +26,15 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
     [Input] private RenderTargetIdentifier atmosphereTransmittance;
     [Input] private RenderTargetIdentifier exposure;
 
-    [Output] private SmartComputeBuffer<ReflectionProbeData> reflectionProbeDataBuffer = new();
+    [Output] private SmartComputeBuffer<ReflectionProbeData> reflectionProbeDataBuffer;
     [Output] private ComputeBuffer ambientBuffer;
     [Output] private RenderTargetIdentifier reflectionProbeOutput;
     [Input, Output] private NodeConnection connection;
 
     private readonly List<ReadyProbeData> readyProbes = new();
 
-    private SmartComputeBuffer<DirectionalLightData> directionalLightBuffer = new();
-    private SmartComputeBuffer<LightData> lightDataBuffer = new();
+    private SmartComputeBuffer<DirectionalLightData> directionalLightBuffer;
+    private SmartComputeBuffer<LightData> lightDataBuffer;
     private RenderTexture reflectionProbeArray, tempConvolveProbe;
 
     // Needed to copy exposure, as its currently a RenderTargetIdentifier
@@ -77,10 +77,15 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
         counterBuffer = new ComputeBuffer(1, sizeof(uint)) { name = nameof(counterBuffer) };
         lightClusterId = GetShaderPropertyId();
 
-        ambientBuffer = new ComputeBuffer(maxActiveProbes * 3, sizeof(float) * 4);
+        reflectionProbeDataBuffer = new();
         reflectionProbeDataBuffer.EnsureCapcity(1);
 
+        ambientBuffer = new ComputeBuffer(maxActiveProbes * 3, sizeof(float) * 4);
+
         exposureReadback = OnExposureReadback;
+
+        directionalLightBuffer = new();
+        lightDataBuffer = new();
     }
 
     public override void Cleanup()

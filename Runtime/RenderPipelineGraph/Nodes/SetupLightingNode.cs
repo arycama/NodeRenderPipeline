@@ -47,11 +47,11 @@ public partial class SetupLightingNode : RenderPipelineNode
     [Input] private float shadowDistance;
     [Input] private GpuInstanceBuffers gpuInstanceBuffers;
 
-    [Output] private readonly SmartComputeBuffer<DirectionalLightData> directionalLightDataBuffer = new();
-    [Output] private readonly SmartComputeBuffer<LightData> lightDataBuffer = new();
-    [Output] private readonly SmartComputeBuffer<Matrix4x4> spotlightShadowMatricesBuffer = new();
-    [Output] private readonly SmartComputeBuffer<Matrix4x4> areaShadowMatricesBuffer = new();
-    [Output] private readonly SmartComputeBuffer<Matrix3x4> directionalShadowMatrices = new();
+    [Output] private SmartComputeBuffer<DirectionalLightData> directionalLightDataBuffer;
+    [Output] private SmartComputeBuffer<LightData> lightDataBuffer;
+    [Output] private SmartComputeBuffer<Matrix4x4> spotlightShadowMatricesBuffer;
+    [Output] private SmartComputeBuffer<Matrix4x4> areaShadowMatricesBuffer;
+    [Output] private SmartComputeBuffer<Matrix3x4> directionalShadowMatrices;
 
     [Output] private RenderTargetIdentifier directionalShadows = directionalShadowsId;
     [Input, Output] private NodeConnection connection;
@@ -60,6 +60,12 @@ public partial class SetupLightingNode : RenderPipelineNode
     {
         if (shadowsSubGraph != null)
             shadowsSubGraph.Initialize();
+
+        directionalLightDataBuffer = new();
+        lightDataBuffer = new();
+        spotlightShadowMatricesBuffer = new();
+        areaShadowMatricesBuffer = new();
+        directionalShadowMatrices = new();
     }
 
     public override void Cleanup()

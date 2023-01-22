@@ -7,129 +7,67 @@ RWTexture2D<float3> _Result;
 Texture2D<float3> _Input, _History;
 Texture2D<uint> _MotionVectors;
 Texture2D<float> _Depth;
-float _Sharpening, _HistorySharpening;
+uint _MaxWidth, _MaxHeight;
 
-groupshared uint _ColorShared[32][32];
-groupshared uint _VelocityShared[32][32];
-groupshared float _DepthShared[32][32];
-
-[numthreads(32, 32, 1)]
-void Temporal(uint2 groupThreadID : SV_GroupThreadID, uint2 groupID : SV_GroupID)
+[numthreads(8, 8, 1)]
+void Temporal(uint2 id : SV_DispatchThreadID)
 {
-	uint2 groupStart = groupID * 30;
+	float3 result = 0.0, mean = 0.0, stdDev = 0.0;
+	uint2 closestDepthUv = uint2(0, 0);
+	float closestDepth = 0.0, weightSum = 0.0;
 	
-	// Fetch color and velocity for this pixel
-	uint2 screenCoord = clamp(groupStart + groupThreadID, 1, uint2(_ScreenSize.xy)) - 1;
-	float3 color = _Input[screenCoord];
-	uint velocity = _MotionVectors[screenCoord];
-	float depth = _Depth[screenCoord];
-	
-	_ColorShared[groupThreadID.y][groupThreadID.x] = PackToR11G11B10f(color);
-	_VelocityShared[groupThreadID.y][groupThreadID.x] = velocity;
-	_DepthShared[groupThreadID.y][groupThreadID.x] = depth;
-	
-	GroupMemoryBarrierWithGroupSync();
-	
-	// Boundary threads can exit after group sync
-	if (any(groupThreadID == 0 || groupThreadID == 31))
-		return;
-	
-	float3 result = 0.0, mean = 0.0, stdDev = 0.0, meanCross = 0.0, stdDevCross = 0.0;
-	float2 maxVelocity = 0.0;
-	float maxVelocityLengthSqr = 0.0, weightSum = 0.0;
-	
-	float2 closestDepthUv = screenCoord;
-	float closestDepth = -1.0;
-	
-	for (uint y = 0; y < 3; y++)
+	[unroll]
+	for (int y = -1; y <= 1; y++)
 	{
-		for (uint x = 0; x < 3; x++)
+		[unroll]
+		for (int x = -1; x <= 1; x++)
 		{
-			uint2 coord = groupThreadID + uint2(x, y) - 1;
-			uint colorData = _ColorShared[coord.y][coord.x];
-			uint velocityData = _VelocityShared[coord.y][coord.x];
-			float depth = _DepthShared[coord.y][coord.x];
+			float2 delta = float2(x, y) - _Jitter * _ScreenSize.xy;
+			float weight = exp(-2.29 * dot(delta, delta));
+			weightSum += weight;
 			
-			float2 offset = uint2(x, y) - 1.0 - _Jitter * _ScreenSize.xy;
-			float weight = exp(-2.29 * dot(offset, offset));
+			uint2 coord = clamp(id + int2(x, y), 0, uint2(_MaxWidth, _MaxHeight));
+			float3 color = _Input[coord];
+			float depth = _Depth[coord];
 			
-			float3 color = UnpackFromR11G11B10f(colorData);
 			color = RGBToYCoCg(color);
 			color *= rcp(1.0 + color.r);
-			result += color * weight;
 			
-			weightSum += weight;
+			result += color * weight;
 			mean += color;
 			stdDev += color * color;
 			
-			if(y == 1 || x == 1)
+			if(depth > closestDepth)
 			{
-				meanCross += color;
-				stdDevCross += color * color;
-			}
-			
-			float2 velocity = UnpackVelocity(velocityData).xy; // Unsure about z
-			float velLengthSqr = dot(velocity, velocity);
-			if (velLengthSqr > maxVelocityLengthSqr)
-			{
-				maxVelocityLengthSqr = velLengthSqr;
-				maxVelocity = velocity;
-			}
-			
-			if (depth > closestDepth)
-			{
+				closestDepthUv = coord;
 				closestDepth = depth;
-				closestDepthUv = screenCoord + uint2(x, y) - 1;
 			}
 		}
 	}
 	
-	// Just use max depth uv's motion vector. Using max velocity causes issues on thin/noisy geo like foliage
-	maxVelocity = UnpackVelocity(_MotionVectors[closestDepthUv]).xy;
-	
-	// Normalize weights
 	result /= weightSum;
-	mean = 0.5 * (mean / 9.0 + meanCross / 5.0);
-	stdDev = sqrt(abs(0.5 * (stdDev / 9.0 + stdDevCross / 5.0) - mean * mean)) * 1.0;
+	mean /= 9.0;
+	stdDev = sqrt(abs(stdDev / 9.0 - mean * mean)) * 1.5;
 	
 	// Calculate previosu Uv
-	float2 uv = (screenCoord + 0.5) * _ScreenSize.zw;
-	float2 previousUv = uv - maxVelocity;
+	float2 uv = (id + 0.5) * _ScreenSize.zw;
+	float2 previousUv = uv - UnpackVelocity(_MotionVectors[closestDepthUv]).xy;
 		
 	// Sample history
-	if (all(previousUv >= 0.0 && previousUv <= 1.0))
+	if (all(saturate(previousUv) == previousUv))
 	{
-		float3 history = _History.SampleLevel(_LinearClampSampler, previousUv, 0.0);
-		history = Bicubic5Tap(_History, previousUv, _HistorySharpening, _ScreenSize);
-		
+		float3 history = Bicubic5Tap(_History, previousUv, 0.5, _ScreenSize);
 		history = RGBToYCoCg(history);
 		history *= rcp(1.0 + history.r);
 		
-		history = ClipHistory(history, result, mean, stdDev);
-		
-		// Sharpen
-		float3 linearC = result * rcp(1.0 - result.r);
-		float3 linearAvg = mean * rcp(1.0 - mean.r);
-		
-		// Rotating back to RGB it leads to better behaviour when sharpening, a better approach needs definitively to be investigated in the future.
-		linearC = YCoCgToRGB(linearC);
-		linearAvg = YCoCgToRGB(linearAvg);
-		linearC = linearC.xyz + max(0, (linearC - linearAvg)) * _Sharpening * 3;
-		linearC = clamp(linearC.xyz, 0, 65472.0);
-
-		linearC = RGBToYCoCg(linearC);
-		result = linearC * rcp(1.0 + linearC.r);
-		
+		history = ClipToAABB(history, mean, stdDev);
 		result = lerp(history, result, 0.05);
 	}
-	
-	result *= rcp(1.0 - result.r);
-	result = YCoCgToRGB(result);
 	
 	if(AnyIsNaN(result))
 		result = 0;
 	
-	// Output final result
-	_Result[screenCoord] = result;
-	_Result[screenCoord] = _Input[screenCoord];
+	result *= rcp(1.0 - result.r);
+	result = YCoCgToRGB(result);
+	_Result[id] = result;
 }

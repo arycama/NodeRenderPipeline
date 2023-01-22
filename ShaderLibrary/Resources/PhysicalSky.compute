@@ -121,7 +121,7 @@ void KERNEL_NAME(uint2 id : SV_DispatchThreadID)
 		float3 P = rayOrigin + V * rayDistance;
 		float3 N = normalize(P);
 		
-		#ifdef LIGHT_COUNT_ONE
+		#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
 			float3 color = ApplyExposure(_LightColor0) * TransmittanceToAtmosphere(P, _LightDirection0, _LinearClampSampler);
 			float NdotL = dot(N, _LightDirection0);
 			luminance += color * transmittance * saturate(NdotL) * _GroundColor * INV_PI;

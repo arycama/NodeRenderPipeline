@@ -85,7 +85,7 @@ float3 AtmosphereLight(float3 P, float3 V, float3 L, SamplerState samplerState)
 {
 	// Single scatter, with earth shadow 
 	float2 intersections;
-	if (IntersectRaySphere(P, L, _PlanetRadius, intersections) && any(intersections >= 0.0))
+	if (IntersectRaySphere(P, L, _PlanetRadius, intersections) && intersections.x >= 0.0)
 		return 0.0;
 	
 	float angle = dot(V, L);

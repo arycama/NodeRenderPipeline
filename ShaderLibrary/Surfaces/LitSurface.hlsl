@@ -66,6 +66,8 @@ void vert(inout VertexData data)
 
 void surf(inout FragmentData input, inout SurfaceData surface)
 {
+	input.uv0.xy = UnjitterTextureUV(input.uv0.xy);
+	
 	#ifdef _PARALLAXMAP
 		float height = _ParallaxMap.Sample(sampler_MainTex, TRANSFORM_TEX(input.uv0, _MainTex)).b;
 		input.uv0.xy += ParallaxOffset1Step(height, _Parallax, input.uv1);
@@ -132,14 +134,13 @@ void surf(inout FragmentData input, inout SurfaceData surface)
 		{
 			// Calculate blending factors
 			float terrainHeight = GetTerrainHeight(input.positionWS);
-			float heightBlend = 1.0 - saturate(_HeightBlend * abs(input.positionWS.y - terrainHeight));
+			float heightBlend = 1.0 - saturate(5 * abs(input.positionWS.y - terrainHeight));
 
 			// Normal blending factor
 			float3 terrainNormalWS = GetTerrainNormal(input.positionWS);
 
 			// Dot product between world normal and terrain normal
-			float angle = dot(input.normal, terrainNormalWS) * 0.5 + 0.5;
-			float normalBlend = saturate(angle / _NormalBlend);
+			float normalBlend = pow(dot(input.normal, terrainNormalWS) * 0.5 + 0.5, 1);
 			float finalBlend = heightBlend * normalBlend;
 
 			if (finalBlend > 0)

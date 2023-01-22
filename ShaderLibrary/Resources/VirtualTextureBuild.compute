@@ -84,8 +84,8 @@ void VirtualTextureBuild(uint2 id : SV_DispatchThreadID)
 		uint id1 = ((data >> 13) & 0xF);
 		
 		// remap blend if layers do not match
-		if(id0 != id1)
-			blend = Remap(blend, 0.0, 1.0, 1.0 / 33.0, 15.0 / 33.0);
+		//if(id0 != id1)
+		//	blend = Remap(blend, 0.0, 1.0, 1.0 / 15.0, 7.0 / 15.0);
 		
 		uint layerIndex;
 		float offsetX, offsetY, rotation, layerWeight;

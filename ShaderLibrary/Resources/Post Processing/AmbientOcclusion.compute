@@ -4,88 +4,75 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
 
 #pragma kernel Compute
+#pragma kernel GenerateMips
 #pragma kernel Temporal
 #pragma kernel Spatial
 #pragma kernel Combine
+#pragma enable_d3d11_debug_symbols
 
 RWTexture2D<float4> _VisibilityCone;
 RWTexture2D<float> _FrameCountResult;
-RWTexture2D<uint> _Result;
+RWTexture2D<float4> _Result;
+Texture2D<float4> _Input, _History;
 Texture2D<float3> _PreviousFrame;
 Texture2D<float> _Depth, _PreviousDepth, _FrameCountPrevious, _FrameCount;
-Texture2D<uint> _Motion, _Input, _History;
+Texture2D<uint> _Motion;
 
 cbuffer AOConstants
 {
 	float4 _UvToView;
-	float _SampleCount, _Strength, _ThinOccluderCompensation, _MaxScreenRadius, _FalloffScale, _FalloffBias, _Radius, _SampleDistributionPower, _DepthMipSamplingOffset, _MaxMips, _ClampWindowScale, _DepthRejection, _VelocityRejection, _ClampVelocityWeight, _AccumFrameCount, _DirectionCount, _WorldRadius;
+	float _SampleCount, _Strength, _ThinOccluderCompensation, _MaxScreenRadius, _FalloffScale, _FalloffBias, _Radius, _SampleDistributionPower, _DepthMipSamplingOffset, _MaxMips, _ClampWindowScale, _DepthRejection, _DepthWeight, _VelocityRejection, _ClampVelocityWeight, _AccumFrameCount, _DirectionCount, _WorldRadius;
 	float _DistanceWeight, _NormalWeight, _TangentWeight;
 	uint _BlurSamples;
 	uint _MaxWidth, _MaxHeight;
 };
 
 // Inputs are screen XY and viewspace depth, output is viewspace position
-float3 ComputeViewspacePosition(uint2 screenPos, float viewspaceDepth)
+float3 ComputeViewspacePosition(float2 screenPos, float viewspaceDepth)
 {
 	float3 ret;
-	ret.xy = ((screenPos + 0.5) * _ScreenSize.zw * _UvToView.xy + _UvToView.zw) * viewspaceDepth;
+	ret.xy = (screenPos * _ScreenSize.zw * _UvToView.xy + _UvToView.zw) * viewspaceDepth;
 	ret.z = viewspaceDepth;
 	return ret;
 }
 
-uint PackOutput(float4 input)
+float4 PackOutput(float4 input)
 {
 	input /= 1.5;
 	input.xyz = 0.5 * input.xyz + 0.5;
-	uint4 result = uint4(saturate(input) * 255.0 + 0.5);
-	return result.x | (result.y << 8) | (result.z << 16) | (result.w << 24);
+	return input;
 }
 
-float4 UnpackInput(uint input)
+float4 UnpackInput(float4 input)
 {
-	float4 output = (input >> uint4(0, 8, 16, 24)) & 0xFF;
-	output = output / 255.0;
-	output.xyz = 2.0 * output.xyz - 1.0;
-	return output * 1.5;
+	input.xyz = 2.0 * input.xyz - 1.0;
+	return input * 1.5;
 }
 
 [numthreads(8, 8, 1)]
 void Compute(uint2 id : SV_DispatchThreadID)
 {
-	uint2 pixelCenter = clamp(2 * id + int2(sign(_Jitter)), 0, uint2(_MaxWidth, _MaxHeight));
+	float2 pixelCenter = floor(2 * id + 1 + _Jitter * 0.5) + 0.5;
 	
 	float3 N = GBufferNormal(pixelCenter);
 	float3 normalV = WorldToViewDir(N, true);
 	float2 noise = _BlueNoise2D[id % 128];
 
-    // viewspace Z at the center
 	float viewspaceZ = LinearEyeDepth(_Depth[pixelCenter], _ZBufferParams);
-
-    // Move center pixel slightly towards camera to avoid imprecision artifacts due to depth buffer imprecision; offset depends on depth texture format used
-	viewspaceZ *= 0.99999; // this is good for FP32 depth buffer
-
 	float3 cPosV = ComputeViewspacePosition(pixelCenter, viewspaceZ);
 	float3 viewV = normalize(-cPosV);
 
-    // see "Algorithm 1" in https://www.activision.com/cdn/research/Practical_Real_Time_Strategies_for_Accurate_Indirect_Occlusion_NEW%20VERSION_COLOR.pdf
-    // quality settings / tweaks / hacks
-	float pixelTooCloseThreshold = 1.3; // if the offset is under approx pixel size (pixelTooCloseThreshold), push it out to the minimum distance
-
 	float screenspaceRadius = min(_MaxScreenRadius, _Radius / viewspaceZ);
-
-    // this is the min distance to start sampling from to avoid sampling from the center pixel (no useful data obtained from sampling center pixel)
-	float minS = pixelTooCloseThreshold / screenspaceRadius;
-
+	float ratio = saturate(_MaxScreenRadius / (_Radius / viewspaceZ));
+	
 	float4 result = 0.0;
 	for (float i = 0; i < _DirectionCount; i++)
 	{
 		float phi = PI / _DirectionCount * (i + noise.x);
 		float3 directionV = float3(cos(phi), sin(phi), 0.0);
 		
-		float3 positionWS = PixelToWorld(id + 0.5, _Depth[pixelCenter]);
-		
 		float3 orthoDirectionV = ProjectOnPlane(directionV, viewV);
-		float3 axisV = cross(directionV, viewV);
+		float3 axisV = normalize(cross(directionV, viewV));
 		float3 projNormalV = ProjectOnPlane(normalV, axisV);
 	
 		float sgnN = sign(dot(orthoDirectionV, projNormalV));
@@ -97,70 +84,47 @@ void Compute(uint2 id : SV_DispatchThreadID)
 		[unroll]
 		for (uint side = 0; side < 2; side++)
 		{
-			// this is a lower weight target; not using -1 as in the original paper because it is under horizon, so a 'weight' has different meaning based on the normal
-			float lowHorizonCos = cos(n + (2.0 * side - 1.0) * HALF_PI);
-
-			// lines 17, 18 from the paper, manually unrolled the 'side' loop
-			float horizonCos = lowHorizonCos;
-	
-			for (float step = 0.0; step < _SampleCount; step++)
-			{
-				// approx line 20 from the paper, with added noise
-				float s = (step + noise.y) / _SampleCount;
-
-				// additional distribution modifier
-				s = pow(s, _SampleDistributionPower);
-
-				// avoid sampling center pixel
-				s += minS;
-		
-				// approx lines 21-22 from the paper, unrolled
-				float2 sampleOffset = s * (2.0 * side - 1.0) * directionV.xy * screenspaceRadius;
-
-				float sampleOffsetLength = length(sampleOffset);
-
-				// note: when sampling, using point_point_point or point_point_linear sampler works, but linear_linear_linear will cause unwanted interpolation between neighbouring depth values on the same MIP level!
-				uint mipLevel = clamp(log2(sampleOffsetLength) - _DepthMipSamplingOffset, 0, _MaxMips);
-
-				// Snap to pixel center (more correct direction math, avoids artifacts due to sampling pos not matching depth texel center - messes up slope - but adds other 
-				// artifacts due to them being pushed off the slice). Also use full precision for high res cases.
-				uint2 sampleCoord = pixelCenter + round(sampleOffset);
-				
-				if (any(sampleCoord < 0 || sampleCoord >= uint2(_MaxWidth, _MaxHeight)))
-					continue;
-				
-				float SZ = LinearEyeDepth(_Depth.mips[mipLevel][sampleCoord >> mipLevel], _ZBufferParams);
-				float3 sPosV = ComputeViewspacePosition(sampleCoord, SZ);
-				float3 sampleDelta = sPosV - cPosV;
-				float sampleDist = length(sampleDelta);
-
-				// approx lines 23, 24 from the paper, unrolled
-				float3 sampleHorizonVec = sampleDelta / sampleDist;
-
-				// any sample out of radius should be discarded - also use fallof range for smooth transitions; this is a modified idea from "4.3 Implementation details, Bounding the sampling area"
-				float weight = saturate(sampleDist * _FalloffScale + _FalloffBias);
-
-				// sample horizon cos
-				float shc = dot(sampleHorizonVec, viewV);
-
-				// bound the sample area
-				float weightedShc = lerp(lowHorizonCos, shc, weight);
+			// Find the intersection with the next pixel, and use that as the starting point for the ray
+			float2 direction = directionV.xy * (2.0 * side - 1.0);
+			float2 cell = floor(pixelCenter);
+			float2 tMin = (cell - pixelCenter) / direction;
+			float2 tMax = (cell - pixelCenter + 1.0) / direction;
+			float t = Max2(max(tMin, tMax));
+			float2 start = pixelCenter + direction * t;
+			float2 end = pixelCenter + direction * screenspaceRadius;
+			float2 step = (end - start) / _SampleCount;
 			
-				if (weightedShc >= horizonCos)
+			float lowHorizonCos = cos(n + (2.0 * side - 1.0) * HALF_PI);
+			float cHorizonCos = lowHorizonCos;
+			
+			for (float j = 0.0; j < _SampleCount; j++)
+			{
+				float2 position = start + (j + noise.y) * step;
+				float SZ = LinearEyeDepth(_Depth[position], _ZBufferParams);
+				float3 sPosV = ComputeViewspacePosition(position, SZ);
+				float3 sHorizonV = normalize(sPosV - cPosV);
+
+				// Falloff
+				float start = _WorldRadius * 0.75 * ratio;
+				float end = _WorldRadius * ratio;
+				float weight = saturate((end - distance(sPosV, cPosV)) / (end - start));
+				float sHorizonCos = lerp(lowHorizonCos, dot(sHorizonV, viewV), weight);
+			
+				if (sHorizonCos >= cHorizonCos)
 				{
 					// If weighted horizon is greater than the previous sample, it becomes the new horizon
-					horizonCos = weightedShc;
+					cHorizonCos = sHorizonCos;
 				}
-				else if (shc < horizonCos)
+				else if (dot(sHorizonV, viewV) < cHorizonCos)
 				{
 					// Otherwise, reduce the max horizon to attenuate thin features, but only if the -non- weighted sample is also below the current sample
 					// This prevents the falloff causing objects to be treated as thin when they would not be otherwise
-					horizonCos = max(lowHorizonCos, horizonCos - _ThinOccluderCompensation);
+					cHorizonCos = max(lowHorizonCos, cHorizonCos - _ThinOccluderCompensation);
 				}
 			}
 
-			h[side] = n + clamp((2.0 * side - 1.0) * FastACos(horizonCos) - n, -HALF_PI, HALF_PI);
-			result.w += length(projNormalV) * (cos(n) + 2.0 * h[side] * sin(n) - cos(2.0 * h[side] - n)) / 4.0;
+			h[side] = n + clamp((2.0 * side - 1.0) * FastACos(cHorizonCos) - n, -HALF_PI, HALF_PI);
+			result.w += length(projNormalV) * (cosN + 2.0 * h[side] * sin(n) - cos(2.0 * h[side] - n)) / 4.0;
 		}
 		
 		// see "Algorithm 2 Extension that computes bent normals b."
@@ -177,15 +141,101 @@ void Compute(uint2 id : SV_DispatchThreadID)
 	_Result[id] = PackOutput(result);
 }
 
-[numthreads(8, 8, 1)]
-void Temporal(uint2 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId : SV_GroupThreadID, uint2 groupId : SV_GroupID)
+RWTexture2D<float4> _Result0, _Result1, _Result2, _Result3, _Result4;
+uint _Width, _Height;
+groupshared float4 _ResultShared[32][32];
+
+[numthreads(32, 32, 1)]
+void GenerateMips(uint2 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId : SV_GroupThreadID, uint2 groupId : SV_GroupID)
 {
-	float2 pixCenter = dispatchThreadId + 0.5;
-	float2 uv = pixCenter * _ScreenSize.zw;
-	uint4 input = _Input.Gather(_PointClampSampler, uv).xywz;
+	// Each thread reads 2x2 values and writes them into shared memory. 
+	uint2 coord = groupId * 15 + groupThreadId;
+	_ResultShared[groupThreadId.y][groupThreadId.x] = _Result0[coord];
+
+	GroupMemoryBarrierWithGroupSync();
 	
-	float maxWeight = 0.0, weightSum = 0.0;
-	float4 current = 0.0, mean = 0.0, stdDev = 0.0;
+	float4 result = 0.0;
+	if (all(groupThreadId < 15))
+	{
+		result += _ResultShared[groupThreadId.y * 2 + 0][groupThreadId.x * 2 + 0] * 0.25;
+		result += _ResultShared[groupThreadId.y * 2 + 1][groupThreadId.x * 2 + 0] * 0.25;
+		result += _ResultShared[groupThreadId.y * 2 + 0][groupThreadId.x * 2 + 1] * 0.25;
+		result += _ResultShared[groupThreadId.y * 2 + 1][groupThreadId.x * 2 + 1] * 0.25;
+		
+		if (all(groupThreadId < 8))
+			_Result1[groupId * 8 + groupThreadId] = result;
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+	
+	if (all(groupThreadId < 15))
+		_ResultShared[groupThreadId.y][groupThreadId.x] = result;
+	
+	GroupMemoryBarrierWithGroupSync();
+	
+	result = 0.0;
+	if (all(groupThreadId < 7))
+	{
+		result += _ResultShared[groupThreadId.y * 2 + 0][groupThreadId.x * 2 + 0] * 0.25;
+		result += _ResultShared[groupThreadId.y * 2 + 1][groupThreadId.x * 2 + 0] * 0.25;
+		result += _ResultShared[groupThreadId.y * 2 + 0][groupThreadId.x * 2 + 1] * 0.25;
+		result += _ResultShared[groupThreadId.y * 2 + 1][groupThreadId.x * 2 + 1] * 0.25;
+		
+		if (all(groupThreadId < 4))
+			_Result2[groupId * 4 + groupThreadId] = result;
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+	
+	if (all(groupThreadId < 7))
+		_ResultShared[groupThreadId.y][groupThreadId.x] = result;
+	
+	GroupMemoryBarrierWithGroupSync();
+	
+	result = 0.0;
+	if (all(groupThreadId < 3))
+	{
+		result += _ResultShared[groupThreadId.y * 2 + 0][groupThreadId.x * 2 + 0] * 0.25;
+		result += _ResultShared[groupThreadId.y * 2 + 1][groupThreadId.x * 2 + 0] * 0.25;
+		result += _ResultShared[groupThreadId.y * 2 + 0][groupThreadId.x * 2 + 1] * 0.25;
+		result += _ResultShared[groupThreadId.y * 2 + 1][groupThreadId.x * 2 + 1] * 0.25;
+		
+		if (all(groupThreadId < 2))
+			_Result3[groupId * 2 + groupThreadId] = result;
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+	
+	if (all(groupThreadId < 3))
+		_ResultShared[groupThreadId.y][groupThreadId.x] = result;
+	
+	GroupMemoryBarrierWithGroupSync();
+	
+	result = 0.0;
+	if (all(groupThreadId < 1))
+	{
+		result += _ResultShared[groupThreadId.y * 2 + 0][groupThreadId.x * 2 + 0] * 0.25;
+		result += _ResultShared[groupThreadId.y * 2 + 1][groupThreadId.x * 2 + 0] * 0.25;
+		result += _ResultShared[groupThreadId.y * 2 + 0][groupThreadId.x * 2 + 1] * 0.25;
+		result += _ResultShared[groupThreadId.y * 2 + 1][groupThreadId.x * 2 + 1] * 0.25;
+		_Result4[groupId + groupThreadId] = result;
+	}
+}
+
+[numthreads(8, 8, 1)]
+void Temporal(uint2 id : SV_DispatchThreadID)
+{
+	float2 uv = (id + 0.5) * _ScreenSize.zw;
+	
+	float4 result = 0.0;
+	uint mip = 0;
+	float2 mipResolution = uint2(_Width, _Height) >> mip;
+	
+	uint2 floorUv = uint2(uv * mipResolution - 0.5);
+	
+	// Get the depth which is closest to the full res depth, then weigh the samples based on that
+	float fullResDepth = LinearEyeDepth(_Depth[id], _ZBufferParams);
+	float4 depths;
 	
 	[unroll]
 	for (uint y = 0, i = 0; y < 2; y++)
@@ -193,95 +243,65 @@ void Temporal(uint2 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId 
 		[unroll]
 		for (uint x = 0; x < 2; x++, i++)
 		{
-			float4 sample = UnpackInput(input[i]);
-			float2 sampleCenter = float2(x, y) + _Jitter * _ScreenSize.xy;
-			float weight = saturate(1.0 - abs(sampleCenter.x));
-			weight *= saturate(1.0 - abs(sampleCenter.y));
-
-			maxWeight = max(maxWeight, weight);
-			weightSum += weight;
-			current += sample * weight;
-			mean += sample;
-			stdDev += sample * sample;
+			uint2 coord = floorUv + uint2(x, y);
+			depths[i] = LinearEyeDepth(_Depth.mips[mip + 1][coord], _ZBufferParams);
 		}
 	}
 	
-	current /= weightSum;
+	float4 deltas = abs(depths - fullResDepth);
+	float closestDepth = Min4(deltas);
+	float4 depthWeights = exp2(-Square(deltas - closestDepth) * (_DepthWeight / fullResDepth));
 	
-	mean /= 4.0;
-	stdDev = sqrt(abs(stdDev / 4.0 - mean * mean));
+	float2 fracUv = frac(uv * mipResolution - 0.5);
 	
-	uint2 lowResCoord = dispatchThreadId >> 1;
+	float4 weights;
+	weights.x = (1.0 - fracUv.x) * (1.0 - fracUv.y);
+	weights.y = fracUv.x * (1.0 - fracUv.y);
+	weights.z = (1.0 - fracUv.x) * fracUv.y;
+	weights.w = fracUv.x * fracUv.y;
 	
-	float3 velocity = UnpackVelocity(_Motion[dispatchThreadId]);
-	float2 previousUv = (dispatchThreadId + 0.5) * _ScreenSize.zw - velocity.xy;
-		
-	// Sample history, remove weighting from history and current, blend, re-apply weight
-	uint4 packedHistory = _History.Gather(_PointClampSampler, previousUv).xywz;
-	float4 previousDepths = _PreviousDepth.Gather(_PointClampSampler, previousUv).xywz;
-	float4 frameCounts = _FrameCountPrevious.Gather(_PointClampSampler, previousUv).xywz * 255.0;
-	float4 bilinearWeights = BilinearWeights(previousUv, _ScreenSize.xy).xywz;
-		
-	float2 previousCoord = floor(previousUv * _ScreenSize.xy - 0.5);
-	float2 previousFrac = frac(previousUv * _ScreenSize.xy - 0.5);
-	
-	float4 history = 0.0;
-	float historyWeightSum = 0.0, accumWeightSum = 0.0, accumSpeed = 0.0;
-	float currentDepth = Linear01ToDeviceDepth(Linear01Depth(_Depth[dispatchThreadId], _ZBufferParams) - velocity.z, _ZBufferParams);
-	
-	// Compute disocclusion basing on plane distance
-	float3 Xprev = MultiplyPointProj(_PrevInvViewProjMatrix, float3(previousUv * 2.0 - 1.0, currentDepth)).xyz;
-	float3 Xvprev = MultiplyPoint(_PrevViewMatrix, Xprev);
-	//float NoXprev = dot(N, Xprev);
-	//float NoVprev = NoXprev / Xvprev.z;
-	//float4 planeDist = abs(NoVprev * viewZprev - NoXprev);
-	float invDistToPoint = rcp(LinearEyeDepth(_Depth[dispatchThreadId], _ZBufferParams));
-	//float4 occlusion = step(gDisocclusionThreshold, planeDist * invDistToPoint);
-	//occlusion = saturate(float(isInScreen) - occlusion);
+	float weightSum = 0.0;
+	float4 minValue = 0.0, maxValue = 0.0;
 	
 	[unroll]
-	for (y = 0, i = 0; y < 2; y++)
+	for (uint y = 0, i = 0; y < 2; y++)
 	{
 		[unroll]
-		for (int x = 0; x < 2; x++, i++)
+		for (uint x = 0; x < 2; x++, i++)
 		{
-			float2 coord = previousCoord + float2(x, y);
+			uint2 coord = floorUv + uint2(x, y);
+			float4 color = _Input.mips[mip][coord];
+			float sampleDepth = LinearEyeDepth(_Depth.mips[mip][coord], _ZBufferParams);
 			
-			if(any(coord < 0 || coord >= _ScreenSize.xy))
-				continue;
+			float weight = weights[i] * depthWeights[i];
+			result += color * weight;
+			weightSum += weight;
 			
-			float3 previousPositionWS = MultiplyPointProj(_PrevInvViewProjMatrix, float3(((coord + 0.5) / _ScreenSize.xy) * 2 - 1, previousDepths[i])).xyz;
-			float weight = saturate(1.0 - distance(Xprev, previousPositionWS) * _DepthRejection * invDistToPoint);
-			weight *= saturate(1.0 - length(velocity) * _VelocityRejection);
-			weight *= bilinearWeights[i];
-			
-			float4 historySample = UnpackInput(packedHistory[i]);
-			history += historySample * weight;
-			historyWeightSum += weight;
-			accumSpeed += frameCounts[i] * weight;
-			accumWeightSum += bilinearWeights[i];
+			if(i == 0)
+				minValue = maxValue = color;
+			else
+			{
+				minValue = min(minValue, color);
+				maxValue = max(maxValue, color);
+			}
 		}
 	}
 	
-	if (historyWeightSum > 0.0)
-		history /= historyWeightSum;
+	if(weightSum > 0.0)
+		result /= weightSum;
 	
-	if(accumWeightSum > 0.0)
-		accumSpeed /= accumWeightSum;
+	float2 motion = UnpackVelocity(_Motion[id]);
+	float2 previousUv = uv - motion;
 	
-	accumSpeed = min(accumSpeed, _AccumFrameCount);
-	float speed = 1.0 / (1.0 + accumSpeed);
+	if(all(saturate(previousUv) == previousUv))
+	{
+		float4 history = _History.SampleLevel(_LinearClampSampler, uv - motion, 0.0);
+		float4 window = (maxValue - minValue) * _ClampWindowScale;
+		history = clamp(history, minValue - window, maxValue + window);
+		result = lerp(history, result, 0.05);
+	}
 	
-	float velocityWeight = saturate(1.0 - length(velocity) * _ClampVelocityWeight);
-	float4 extents = stdDev * (1.0 + _ClampWindowScale * velocityWeight);
-	history = clamp(history, mean - extents, mean + extents);
-	
-	float t = speed * maxWeight;
-	current = lerp(history, current, t);
-	
-	_Result[dispatchThreadId] = PackOutput(current);
-	_FrameCountResult[dispatchThreadId] = (accumSpeed + 1.0) / 255.0;
-	//_Result[dispatchThreadId] = _Input[dispatchThreadId >> 1];
+	_Result[id] = result;
 }
 
 [numthreads(8, 8, 1)]
@@ -298,16 +318,16 @@ void Spatial(uint2 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId :
 	float3 normal = GBufferNormal(dispatchThreadId);
 	float3x3 frame = GetLocalFrame(normal);
 	
-	float radius = lerp(_WorldRadius, _WorldRadius / 32, saturate(frameCount / _AccumFrameCount));
-	//radius = _WorldRadius * 1.0 / (1.0 + frameCount);
-	//radius = _WorldRadius;
+	float rcpEyeDepth = rcp(LinearEyeDepth(depth, _ZBufferParams));
+	float ratio = saturate(_MaxScreenRadius / (_Radius * rcpEyeDepth));
+	float radius = _WorldRadius * ratio;
 	
 	// Tangent plane
 	float4 plane = float4(normal, -dot(normal, positionWS));
 	
 	for (uint i = 0; i < _BlurSamples; i++)
 	{
-		float3 p = float3(radius * VogelDiskSample(i, _BlurSamples, phi), 0.0);
+		float3 p = float3(radius * VogelDiskSample(i, _BlurSamples, phi, 2.0), 0.0);
 		float3 samplePosition = mul(p, frame) + positionWS;
 		
 		float2 pixel = floor(WorldToPixel(samplePosition, false)) + 0.5;
@@ -322,9 +342,8 @@ void Spatial(uint2 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId :
 		float3 sampleWorldPos = PixelToWorld(pixel + 0.5, sampleDepth);
 		float3 sampleNormal = GBufferNormal(pixel);
 		
-		float weight = exp2(-Sq(distance(sampleWorldPos, positionWS)) * _DistanceWeight);
-		weight *= saturate(pow(dot(normal, sampleNormal), _NormalWeight));
-		weight *= exp2(-Sq(dot(plane, float4(sampleWorldPos, 1.0))) * _TangentWeight);
+		float weight = saturate(1.0 - abs(dot(plane, float4(sampleWorldPos, 1.0))) * _TangentWeight * rcpEyeDepth);
+		weight *= saturate(1.0 - Angle(normal, sampleNormal) * _NormalWeight * rcpEyeDepth);
 		
 		result += UnpackInput(_Input[pixel]) * weight;
 		weightSum += weight;
@@ -333,21 +352,14 @@ void Spatial(uint2 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId :
 	result /= weightSum;
 	
 	_Result[dispatchThreadId] = PackOutput(result);
-	//_Result[dispatchThreadId] = _Input[dispatchThreadId];
+	_Result[dispatchThreadId] = _Input[dispatchThreadId];
 }
 
 [numthreads(8, 8, 1)]
 void Combine(uint2 dispatchThreadId : SV_DispatchThreadID)
 {
-	float2 uv = (dispatchThreadId + 0.5) * _ScreenSize.zw - _Jitter;
-	uint4 inputs = _Input.Gather(_PointClampSampler, uv);
-	float4 weights = BilinearWeights(uv, _ScreenSize.xy);
-	
-	float4 result = 0.0;
-	
-	[unroll]
-	for (uint i = 0; i < 4; i++)
-		result += UnpackInput(inputs[i]) * weights[i];
+	float2 uv = (dispatchThreadId + 0.5) * _ScreenSize.zw + _Jitter; // Re-jitter the output, as it will later be unjittered by taa resolve
+	float4 result = UnpackInput(_Input.SampleLevel(_LinearClampSampler, uv, 0.0));
 	
 	// Remove weighting from final result
 	result /= length(result.rgb);
