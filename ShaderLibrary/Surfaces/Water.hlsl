@@ -368,13 +368,12 @@ FragmentInput Domain(HullConstantOutput tessFactors, OutputPatch<DomainInput, 4>
 	#ifdef WATER_SHADOW_CASTER
 		output.positionCS = MultiplyPoint(_WaterShadowMatrix, position);
 	#else
-		output.positionCS = WorldToClip(position);
+	output.positionCS = WorldToClip(position);
 	#endif
 
 	// Motion vectors
 	GerstnerWaves(previousPositionWS + _WorldSpaceCameraPos, shoreDisplacement, normal, tangent, shoreFactor, _Time.y - unity_DeltaTime.x, breaker, foam);
 	previousPositionWS += shoreDisplacement + previousWaveDisplacement * lerp(1.0, 0.0, 0.75 * shoreFactor);
-	previousPositionWS += previousWaveDisplacement;
 	
 	output.nonJitteredPositionCS = WorldToClipNonJittered(position);
 	previousPositionWS = PlanetCurvePrevious(previousPositionWS);
