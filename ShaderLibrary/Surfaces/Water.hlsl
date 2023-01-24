@@ -92,7 +92,6 @@ struct FragmentOutput
 
 bool CheckTerrainMask(float3 p0, float3 p1, float3 p2, float3 p3)
 {
-	return true;
 	float2 bl = TRANSFORM_TEX(p0.xz, _OceanTerrainMask);
 	float2 br = TRANSFORM_TEX(p3.xz, _OceanTerrainMask);
 	float2 tl = TRANSFORM_TEX(p1.xz, _OceanTerrainMask);
@@ -355,11 +354,10 @@ FragmentInput Domain(HullConstantOutput tessFactors, OutputPatch<DomainInput, 4>
 	}
 
 	// shore waves
-	//float shoreFactor, breaker, foam;
-	//float3 normal, shoreDisplacement, tangent;
-	//GerstnerWaves(position + _WorldSpaceCameraPos, shoreDisplacement, normal, tangent, shoreFactor, _Time.y, breaker, foam);
-	//float3 displacement = shoreDisplacement + waveDisplacement * lerp(1.0, 0.0, 0.75 * shoreFactor);
-	float3 displacement = waveDisplacement;
+	float shoreFactor, breaker, foam;
+	float3 normal, shoreDisplacement, tangent;
+	GerstnerWaves(position + _WorldSpaceCameraPos, shoreDisplacement, normal, tangent, shoreFactor, _Time.y, breaker, foam);
+	float3 displacement = shoreDisplacement + waveDisplacement * lerp(1.0, 0.0, 0.75 * shoreFactor);
 
 	float3 previousPositionWS = position;
 
@@ -374,8 +372,8 @@ FragmentInput Domain(HullConstantOutput tessFactors, OutputPatch<DomainInput, 4>
 	#endif
 
 	// Motion vectors
-	//GerstnerWaves(previousPositionWS + _WorldSpaceCameraPos, shoreDisplacement, normal, tangent, shoreFactor, _Time.y - unity_DeltaTime.x, breaker, foam);
-	//previousPositionWS += shoreDisplacement + previousWaveDisplacement * lerp(1.0, 0.0, 0.75 * shoreFactor);
+	GerstnerWaves(previousPositionWS + _WorldSpaceCameraPos, shoreDisplacement, normal, tangent, shoreFactor, _Time.y - unity_DeltaTime.x, breaker, foam);
+	previousPositionWS += shoreDisplacement + previousWaveDisplacement * lerp(1.0, 0.0, 0.75 * shoreFactor);
 	previousPositionWS += previousWaveDisplacement;
 	
 	output.nonJitteredPositionCS = WorldToClipNonJittered(position);
@@ -390,12 +388,9 @@ void FragmentShadow() { }
 FragmentOutput Fragment(FragmentInput input)
 {
 	// Gerstner normals + foam
-	//float shoreFactor, breaker, shoreFoam;
-	//float3 N, displacement, T;
-	//GerstnerWaves(input.uv0.xyz, displacement, N, T, shoreFactor, _Time.y, breaker, shoreFoam);
-	float shoreFactor = 0.0, shoreFoam = 0.0, breaker = 0.0;
-	float3 N = float3(0, 1, 0);
-	float3 T = float3(1, 0, 0);
+	float shoreFactor, breaker, shoreFoam;
+	float3 N, displacement, T;
+	GerstnerWaves(input.uv0.xyz, displacement, N, T, shoreFactor, _Time.y, breaker, shoreFoam);
 	
 	// Normal + Foam data
 	float2 normalData = 0.0;
