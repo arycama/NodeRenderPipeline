@@ -114,6 +114,14 @@ public partial class PhysicalSkyNode : RenderPipelineNode
             }
         }
 
+        // If no lights, add a default one
+        if(dirLightCount == 0)
+        {
+            dirLightCount = 1;
+            command.SetComputeVectorParam(computeShader, "_LightDirection0", Vector3.up);
+            command.SetComputeVectorParam(computeShader, "_LightColor0", Vector3.one * 120000);
+        }
+
         var blueNoise1D = Resources.Load<Texture2D>(noiseIds.GetString(noiseDebug ? 0 : FrameCount % 16));
 
         var planetCenterRws = new Vector3(0f, (float)((double)atmosphereProfile.PlanetRadius + camera.transform.position.y), 0f);

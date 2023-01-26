@@ -6,7 +6,7 @@
   "displayName": "Node Rendering Pipeline",
   "dependencies": {
     "com.unity.render-pipelines.core": "12.1.7",
-    "com.arycama.nodegraph": "1.0.0"
+    "com.arycama.nodegraph": "1.0.1"
   },
   "type": "sample"
 }

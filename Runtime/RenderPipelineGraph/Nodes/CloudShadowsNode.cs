@@ -53,7 +53,7 @@ public partial class CloudShadowsNode : RenderPipelineNode
 
         var hasLight = false;
         var lightDirection = Vector3.up;
-        var lightRotation = Quaternion.identity;
+        var lightRotation = Quaternion.LookRotation(Vector3.down);
 
         foreach (var light in cullingResults.visibleLights)
         {

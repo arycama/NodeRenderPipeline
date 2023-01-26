@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using NodeGraph;
 using UnityEngine;
 using UnityEngine.Rendering;
+using static PlasticPipe.PlasticProtocol.Messages.NegotiationCommand;
 
 [NodeMenuItem("Lighting/Sky Reflection")]
 public partial class SkyReflectionNode : RenderPipelineNode
@@ -91,6 +92,13 @@ public partial class SkyReflectionNode : RenderPipelineNode
             }
         }
 
+        // If no lights, add a default one
+        if (dirLightCount == 0)
+        {
+            dirLightCount = 1;
+            scope.Command.SetComputeVectorParam(skyComputeShader, "_LightDirection0", Vector3.up);
+            scope.Command.SetComputeVectorParam(skyComputeShader, "_LightColor0", Vector3.one * 120000);
+        }
 
         var kernel = skyComputeShader.FindKernel("SkyReflection");
 
