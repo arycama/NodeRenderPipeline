@@ -1,6 +1,7 @@
 using NodeGraph;
 using UnityEngine;
 using UnityEngine.Rendering;
+using static PlasticPipe.PlasticProtocol.Messages.NegotiationCommand;
 
 [NodeMenuItem("Rendering/Volumetric Clouds")]
 public partial class VolumetricCloudsNode : RenderPipelineNode
@@ -67,9 +68,7 @@ public partial class VolumetricCloudsNode : RenderPipelineNode
         scope.Command.SetComputeTextureParam(computeShader, cloudKernel, "_Exposure", exposure);
 
         scope.Command.SetComputeBufferParam(computeShader, cloudKernel, "_AmbientSh", ambient);
-        scope.Command.SetComputeBufferParam(computeShader, cloudKernel, "_DirectionalLightData", directionalLightBuffer);
         scope.Command.SetComputeMatrixParam(computeShader, "_PixelCoordToViewDirWS", mat);
-        scope.Command.SetComputeIntParam(computeShader, "_DirectionalLightCount", directionalLightBuffer.Count);
         scope.Command.SetComputeFloatParam(computeShader, "_FogEnabled", CoreUtils.IsSceneViewFogEnabled(camera) ? 1f : 0f);
 
         // Find first 2 directional lights
@@ -91,12 +90,18 @@ public partial class VolumetricCloudsNode : RenderPipelineNode
             {
                 scope.Command.SetComputeVectorParam(computeShader, "_LightDirection1", -light.localToWorldMatrix.Forward());
                 scope.Command.SetComputeVectorParam(computeShader, "_LightColor1", light.finalColor);
-            }
-            else
-            {
+
                 // Only 2 lights supported
                 break;
             }
+        }
+
+        // If no lights, add a default one
+        if (dirLightCount == 0)
+        {
+            dirLightCount = 1;
+            scope.Command.SetComputeVectorParam(computeShader, "_LightDirection0", Vector3.up);
+            scope.Command.SetComputeVectorParam(computeShader, "_LightColor0", Vector3.one * 120000);
         }
 
         var keyword = dirLightCount == 2 ? "LIGHT_COUNT_TWO" : (dirLightCount == 1 ? "LIGHT_COUNT_ONE" : string.Empty);

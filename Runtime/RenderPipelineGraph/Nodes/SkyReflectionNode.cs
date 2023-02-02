@@ -6,7 +6,7 @@ using UnityEngine.Rendering;
 [NodeMenuItem("Lighting/Sky Reflection")]
 public partial class SkyReflectionNode : RenderPipelineNode
 {
-    private static readonly int skyReflectionId = Shader.PropertyToID("_SkyReflection");
+    private static readonly int skyReflectionId = Shader.PropertyToID("_SkyReflectionTexture");
 
     [SerializeField, Pow2(512)] private int resolution = 128;
     [SerializeField] private AtmosphereProfile atmosphereProfile;
@@ -36,7 +36,7 @@ public partial class SkyReflectionNode : RenderPipelineNode
 
     public override void Initialize()
     {
-        propertyId = GetShaderPropertyId();
+        propertyId = GetShaderPropertyId("Sky Reflection");
     }
 
     public override void Cleanup()
@@ -46,8 +46,9 @@ public partial class SkyReflectionNode : RenderPipelineNode
 
     public override void Execute(ScriptableRenderContext context, Camera camera)
     {
-        // Render sky reflection
         using var scope = context.ScopedCommandBuffer("Sky Reflection", true);
+        GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution());
+
         var tempSkyId = Shader.PropertyToID("_TempSky");
         scope.Command.GetTemporaryRT(tempSkyId, resolution, resolution, 0, FilterMode.Bilinear, RenderTextureFormat.RGB111110Float, RenderTextureReadWrite.Linear, 1, true);
 
@@ -90,12 +91,18 @@ public partial class SkyReflectionNode : RenderPipelineNode
             }
         }
 
-        var ambientSh = ambientCache.CreateIfNotAdded(camera, () => new ComputeBuffer(9, sizeof(float) * 4));
-
-        scope.Command.SetGlobalBuffer("_AmbientSh", ambientSh);
-        ambient = ambientSh;
+        // If no lights, add a default one
+        if (dirLightCount == 0)
+        {
+            dirLightCount = 1;
+            scope.Command.SetComputeVectorParam(skyComputeShader, "_LightDirection0", Vector3.up);
+            scope.Command.SetComputeVectorParam(skyComputeShader, "_LightColor0", Vector3.one * 120000);
+        }
 
         var kernel = skyComputeShader.FindKernel("SkyReflection");
+
+        var planetCenterRws = new Vector3(0f, (float)((double)atmosphereProfile.PlanetRadius + camera.transform.position.y), 0f);
+        scope.Command.SetComputeVectorParam(skyComputeShader, "_PlanetOffset", planetCenterRws);
 
         scope.Command.SetComputeTextureParam(skyComputeShader, kernel, "_Result", tempSkyId);
         scope.Command.SetComputeTextureParam(skyComputeShader, kernel, "_StarMap", atmosphereProfile.StarTexture);
@@ -104,10 +111,12 @@ public partial class SkyReflectionNode : RenderPipelineNode
         scope.Command.SetComputeTextureParam(skyComputeShader, kernel, "_Exposure", exposure);
         scope.Command.SetComputeTextureParam(skyComputeShader, kernel, "_CloudCoverage", cloudCoverage);
 
-        scope.Command.SetComputeBufferParam(skyComputeShader, kernel, "_DirectionalLightData", directionalLightBuffer);
+        // TODO: If this isn't filled, we should run the compute shader twice, once to generate the ambient, and once for the actual result
+        var ambientSh = ambientCache.CreateIfNotAdded(camera, () => new ComputeBuffer(9, sizeof(float) * 4));
+        scope.Command.SetComputeBufferParam(skyComputeShader, kernel, "_AmbientSh", ambientSh);
+
         scope.Command.SetComputeVectorParam(skyComputeShader, "_StarColor", atmosphereProfile.StarColor.linear);
         scope.Command.SetComputeVectorParam(skyComputeShader, "_GroundColor", atmosphereProfile.GroundColor.linear);
-        scope.Command.SetComputeIntParam(skyComputeShader, "_DirectionalLightCount", directionalLightBuffer.Count);
 
         // Clouds
         scope.Command.SetComputeTextureParam(skyComputeShader, kernel, "_CloudNoise", noise);
@@ -126,7 +135,7 @@ public partial class SkyReflectionNode : RenderPipelineNode
 
             scope.Command.SetComputeMatrixParam(skyComputeShader, "_PixelCoordToViewDirWS", mat);
 
-            var keyword = directionalLightBuffer.Count == 2 ? "LIGHT_COUNT_TWO" : (directionalLightBuffer.Count == 1 ? "LIGHT_COUNT_ONE" : string.Empty);
+            var keyword = dirLightCount == 2 ? "LIGHT_COUNT_TWO" : (dirLightCount == 1 ? "LIGHT_COUNT_ONE" : string.Empty);
             using (var keywordScope = scope.Command.KeywordScope(keyword))
                 scope.Command.DispatchNormalized(skyComputeShader, kernel, resolution, resolution, 1);
 
@@ -140,9 +149,13 @@ public partial class SkyReflectionNode : RenderPipelineNode
         scope.Command.GenerateMips(skyReflectionId);
 
         // Calculate ambient (Before convolution)
+
         scope.Command.SetComputeTextureParam(convolveComputeShader, 0, "_AmbientProbeInputCubemap", skyReflectionId);
-        scope.Command.SetComputeBufferParam(convolveComputeShader, 0, "_AmbientProbeOutputBuffer", ambient);
+        scope.Command.SetComputeBufferParam(convolveComputeShader, 0, "_AmbientProbeOutputBuffer", ambientSh);
         scope.Command.DispatchCompute(convolveComputeShader, 0, 1, 1, 1);
+
+        scope.Command.SetGlobalBuffer("_AmbientSh", ambientSh);
+        ambient = ambientSh;
 
         scope.Command.BeginSample("Convolution");
 

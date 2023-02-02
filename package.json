@@ -1,12 +1,12 @@
 {
   "name": "com.arycama.noderenderpipeline",
   "description": "A node based rendering pipeline",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "unity": "2021.3",
   "displayName": "Node Rendering Pipeline",
   "dependencies": {
     "com.unity.render-pipelines.core": "12.1.7",
-    "com.arycama.nodegraph": "1.0.0"
+    "com.arycama.nodegraph": "1.0.1"
   },
   "type": "sample"
 }

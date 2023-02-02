@@ -41,7 +41,8 @@ struct FragmentInput
 
 Buffer<uint> _PatchData;
 float4 _PatchScaleOffset;
-float _RcpVerticesPerEdge, _RcpVerticesPerEdgeMinusOne, _InvCellCount;
+float2 _SpacingScale;
+float _RcpVerticesPerEdge, _RcpVerticesPerEdgeMinusOne, _UvScale, _UvOffset;
 uint _VerticesPerEdge, _VerticesPerEdgeMinusOne;
 SamplerState _TrilinearClampSamplerAniso4;
 
@@ -59,8 +60,8 @@ HullInput Vertex(VertexInput input)
 {
 	uint column = input.vertexID % _VerticesPerEdge;
 	uint row = input.vertexID / _VerticesPerEdge;
-	float x = column * _RcpVerticesPerEdgeMinusOne;
-	float y = row * _RcpVerticesPerEdgeMinusOne;
+	float x = column;
+	float y = row;
 	
 	uint cellData = _PatchData[input.instanceID];
 	uint dataColumn = (cellData >> 0) & 0x3FF;
@@ -69,26 +70,25 @@ HullInput Vertex(VertexInput input)
 	int4 diffs = (cellData >> uint4(24, 26, 28, 30)) & 0x3;
 	
 	if (column == _VerticesPerEdgeMinusOne)
-		y = (floor(row * exp2(-diffs.x)) + (frac(row * exp2(-diffs.x)) >= 0.5)) * exp2(diffs.x) * _RcpVerticesPerEdgeMinusOne;
+		y = (floor(row * exp2(-diffs.x)) + (frac(row * exp2(-diffs.x)) >= 0.5)) * exp2(diffs.x);
 
 	if (row == _VerticesPerEdgeMinusOne)
-		x = (floor(column * exp2(-diffs.y)) + (frac(column * exp2(-diffs.y)) >= 0.5)) * exp2(diffs.y) * _RcpVerticesPerEdgeMinusOne;
+		x = (floor(column * exp2(-diffs.y)) + (frac(column * exp2(-diffs.y)) >= 0.5)) * exp2(diffs.y);
 	
 	if (column == 0)
-		y = (floor(row * exp2(-diffs.z)) + (frac(row * exp2(-diffs.z)) > 0.5)) * exp2(diffs.z) * _RcpVerticesPerEdgeMinusOne;
+		y = (floor(row * exp2(-diffs.z)) + (frac(row * exp2(-diffs.z)) > 0.5)) * exp2(diffs.z);
 	
 	if (row == 0)
-		x = (floor(column * exp2(-diffs.w)) + (frac(column * exp2(-diffs.w)) > 0.5)) * exp2(diffs.w) * _RcpVerticesPerEdgeMinusOne;
+		x = (floor(column * exp2(-diffs.w)) + (frac(column * exp2(-diffs.w)) > 0.5)) * exp2(diffs.w);
 	
-	float2 positionOS = float2(dataColumn + x, dataRow + y) * exp2(lod);
-	float2 uv = positionOS * _InvCellCount;
-	float height = GetTerrainHeight(uv);
-	float3 positionWS = float3(positionOS * _PatchScaleOffset.xy + _PatchScaleOffset.zw, height).xzy;
+	float2 vertex = (float2(x, y) * _RcpVerticesPerEdgeMinusOne + float2(dataColumn, dataRow)) * exp2(lod);
 	
 	HullInput output;
-	output.position = positionWS;
-	output.patchData = float4(column, row, lod, cellData);
-	output.uv = uv;
+	output.patchData = uint4(column, row, lod, cellData);
+	output.uv = vertex * _UvScale + _UvOffset;
+	
+	output.position.xz = vertex * _PatchScaleOffset.xy + _PatchScaleOffset.zw;
+	output.position.y = GetTerrainHeight(output.uv);
 	return output;
 }
 
@@ -119,7 +119,7 @@ HullConstantOutput HullConstant(InputPatch<HullInput, 4> inputs)
 		float3 pc = v.position;
 		
 		// Compensate for neighboring patch lods
-		float2 spacing = _PatchScaleOffset.xy * _RcpVerticesPerEdgeMinusOne * exp2(floor(v.patchData.z));
+		float2 spacing = _SpacingScale * exp2(v.patchData.z);
 		
 		uint lodDeltas = inputs[0].patchData.w;
 		uint4 diffs = (lodDeltas >> uint4(24, 26, 28, 30)) & 0x3;
@@ -225,6 +225,8 @@ void FragmentShadow() { }
 [earlydepthstencil]
 GBufferOut Fragment(FragmentInput input)
 {
+	input.uv = UnjitterTextureUV(input.uv);
+	
 	// Write to feedback buffer incase we need to request the tile
 	uint feedbackPosition = CalculateFeedbackBufferPosition(input.uv);
 	_VirtualFeedbackTexture[feedbackPosition] = 1;

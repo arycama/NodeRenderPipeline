@@ -13,6 +13,8 @@ Shader "Surface/Nature/SpeedTree 8"
         [NoScaleOffset] _BumpMap ("Normal Map", 2D) = "bump" {}
         [NoScaleOffset] _ExtraTex ("Smoothness (R), Metallic (G), AO (B)", 2D) = "(0.5, 0.0, 1.0)" {}
         [NoScaleOffset] _SubsurfaceTex ("Subsurface (RGB)", 2D) = "black" {}
+
+        [KeywordEnum(None,Fastest,Fast,Better,Best,Palm)] _WindQuality ("Wind Quality", Range(0,5)) = 0
     }
 
     SubShader
@@ -25,6 +27,7 @@ Shader "Surface/Nature/SpeedTree 8"
         #pragma multi_compile _ INDIRECT_RENDERING
         #pragma shader_feature_local_fragment _CUTOUT_ON
         #pragma shader_feature_local _BILLBOARD_ON
+        #pragma shader_feature_local _WINDQUALITY_NONE _WINDQUALITY_FASTEST _WINDQUALITY_FAST _WINDQUALITY_BETTER _WINDQUALITY_BEST _WINDQUALITY_PALM
 
         #define HAS_VERTEX_MODIFIER
         #pragma target 5.0

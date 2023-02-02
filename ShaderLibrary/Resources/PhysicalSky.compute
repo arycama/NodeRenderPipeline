@@ -19,7 +19,8 @@ Texture2D<float> _Depth, _CloudDepth, _PrevFrameCount;
 
 float4x4 _PixelCoordToViewDirWS;
 float4 _ScaleOffset;
-float3 _StarColor, _LightColor0, _LightDirection0, _LightColor1, _LightDirection1;
+float3 _StarColor;
+float _NoShadow;
 
 #ifdef __INTELLISENSE__
 	#define LIGHT_COUNT_ONE 
@@ -98,7 +99,9 @@ void KERNEL_NAME(uint2 id : SV_DispatchThreadID)
 		
 			if (useShadow)
 			{
-				attenuation *= DirectionalLightShadow(P - _PlanetOffset, 0, 0.5, false, false);
+				if (!_NoShadow)
+					attenuation *= DirectionalLightShadow(P - _PlanetOffset, 0, 0.5, false, false);
+			
 				attenuation *= CloudTransmittanceLevelZero(P - _PlanetOffset);
 			}
 		
@@ -121,7 +124,7 @@ void KERNEL_NAME(uint2 id : SV_DispatchThreadID)
 		float3 P = rayOrigin + V * rayDistance;
 		float3 N = normalize(P);
 		
-		#ifdef LIGHT_COUNT_ONE
+		#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
 			float3 color = ApplyExposure(_LightColor0) * TransmittanceToAtmosphere(P, _LightDirection0, _LinearClampSampler);
 			float NdotL = dot(N, _LightDirection0);
 			luminance += color * transmittance * saturate(NdotL) * _GroundColor * INV_PI;

@@ -51,8 +51,12 @@ public class CelestialBody : MonoBehaviour
         propertyBlock.SetInt("_CelestialBodyCount", celestialBodies.Count);
         propertyBlock.SetVector("_Luminance", Color);
         propertyBlock.SetVector("_Direction", Direction);
-        propertyBlock.SetVectorArray("_CelestialBodyColors", colors);
-        propertyBlock.SetVectorArray("_CelestialBodyDirections", directions);
+
+        if (colors.Count > 0)
+        {
+            propertyBlock.SetVectorArray("_CelestialBodyColors", colors);
+            propertyBlock.SetVectorArray("_CelestialBodyDirections", directions);
+        }
 
         var scale = 2 * Mathf.Tan(0.5f * angularDiameter * Mathf.Deg2Rad);
         var matrix = Matrix4x4.TRS(camera.transform.position - transform.forward, Quaternion.LookRotation(-transform.forward), Vector3.one * scale);

@@ -76,9 +76,6 @@ public partial class AtmosphereNode : RenderPipelineNode
         scope.Command.SetGlobalFloat("_OzoneWidth", atmosphereProfile.OzoneWidth);
         scope.Command.SetGlobalFloat("_OzoneHeight", atmosphereProfile.OzoneHeight);
 
-        // Other
-        scope.Command.SetGlobalColor("_GroundColor", atmosphereProfile.GroundColor.linear);
-
         // Some optimized variables for precision
         var log2e = Math.Log(Math.E, 2.0);
         var rayleighHeightScale = -log2e / (double)atmosphereProfile.AirAverageHeight;

@@ -46,8 +46,6 @@ public partial class CloudCoverageNode : RenderPipelineNode
         scope.Command.SetComputeTextureParam(cs, kernel, "_Exposure", exposure);
         cloudProfile.SetMaterialProperties(cs, kernel, scope.Command, atmosphereProfile.PlanetRadius);
 
-        scope.Command.SetComputeBufferParam(cs, kernel, "_DirectionalLightData", directionalLightBuffer);
-        scope.Command.SetComputeIntParam(cs, "_DirectionalLightCount", directionalLightBuffer.Count);
         scope.Command.SetComputeTextureParam(cs, kernel, "_CloudCoverageResult", cloudCoverageId);
         scope.Command.DispatchCompute(cs, kernel, 1, 1, 1);
 

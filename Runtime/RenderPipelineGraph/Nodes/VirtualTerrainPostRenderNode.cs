@@ -22,8 +22,8 @@ public partial class VirtualTerrainPostRenderNode : RenderPipelineNode
 
     private ComputeBuffer counterBuffer, requestBuffer, tilesToUnmapBuffer, mappedTiles;
 
-    private readonly SmartComputeBuffer<uint> tileRequestsBuffer = new(), destPixelbuffer = new(), dstOffsetsBuffer = new();
-    private readonly SmartComputeBuffer<Vector4> scaleOffsetsBuffer = new();
+    private SmartComputeBuffer<uint> tileRequestsBuffer, destPixelbuffer, dstOffsetsBuffer;
+    private SmartComputeBuffer<Vector4> scaleOffsetsBuffer;
 
     private RenderTexture indirectionTexture, indirectionTextureMapTexture;
     private Texture2DArray albedoSmoothnessTexture, normalTexture, heightTexture;
@@ -113,6 +113,11 @@ public partial class VirtualTerrainPostRenderNode : RenderPipelineNode
 
         counterReadbackComplete = OnCounterReadbackComplete;
         requestReadbackComplete = OnRequestReadbackComplete;
+
+        tileRequestsBuffer = new();
+        destPixelbuffer = new();
+        dstOffsetsBuffer = new();
+        scaleOffsetsBuffer = new();
     }
 
     public override void Cleanup()

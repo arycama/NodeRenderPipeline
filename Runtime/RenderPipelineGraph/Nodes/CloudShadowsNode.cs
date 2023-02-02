@@ -48,28 +48,21 @@ public partial class CloudShadowsNode : RenderPipelineNode
         var startHeight = cloudProfile.StartHeight;
         scope.Command.SetComputeFloatParam(computeShader, "_CloudHeight", startHeight);
         scope.Command.SetComputeFloatParam(computeShader, "_ShadowSamples", samples);
-        scope.Command.SetComputeBufferParam(computeShader, shadowKernel, "_DirectionalLightData", directionalLightBuffer);
-        scope.Command.SetComputeIntParam(computeShader, "_DirectionalLightCount", directionalLightBuffer.Count);
 
-        var hasLight = false;
         var lightDirection = Vector3.up;
-        var lightRotation = Quaternion.identity;
+        var lightRotation = Quaternion.LookRotation(Vector3.down);
 
-        foreach (var light in cullingResults.visibleLights)
+        for (var i = 0; i < cullingResults.visibleLights.Length; i++)
         {
+            var light = cullingResults.visibleLights[i];
             if (light.lightType != LightType.Directional)
                 continue;
 
             lightDirection = -light.localToWorldMatrix.Forward();
             lightRotation = light.localToWorldMatrix.rotation;
-            hasLight = true;
-            break;
-        }
 
-        if (!hasLight)
-        {
-            scope.Command.SetGlobalTexture("_CloudShadow", Texture2D.blackTexture);
-            return;
+            // Only 1 light supported
+            break;
         }
 
         var res = new Vector4(resolution, resolution, 1f / resolution, 1f / resolution);
@@ -82,16 +75,19 @@ public partial class CloudShadowsNode : RenderPipelineNode
         var viewProjection = projectionMatrix * viewMatrix;
         var worldToShadow = (projectionMatrix2 * viewMatrix).ConvertToAtlasMatrix(false);
 
-
         scope.Command.SetComputeFloatParam(computeShader, "_CloudDepthScale", 1f / radius);
         scope.Command.SetComputeVectorParam(computeShader, "_ScreenSizeCloudShadow", res);
         scope.Command.SetComputeMatrixParam(computeShader, "_InvViewProjMatrixCloudShadow", viewProjection.inverse);
         scope.Command.SetGlobalMatrix("_WorldToCloudShadow", worldToShadow);
         scope.Command.SetGlobalFloat("_CloudDepthInvScale", radius);
 
+        scope.Command.SetComputeVectorParam(computeShader, "_LightDirection0", -lightDirection);
+
         var descriptor = new RenderTextureDescriptor(resolution, resolution, RenderTextureFormat.RGB111110Float) { enableRandomWrite = true };
         scope.Command.GetTemporaryRT(cloudShadowId, descriptor);
         scope.Command.SetComputeTextureParam(computeShader, shadowKernel, "ShadowResult", cloudShadowId);
+
+        using var keywordScope = scope.Command.KeywordScope("LIGHT_COUNT_ONE");
         scope.Command.DispatchNormalized(computeShader, shadowKernel, resolution, resolution, 1);
     }
 

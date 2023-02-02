@@ -57,8 +57,6 @@ public partial class AutoExposureNode : RenderPipelineNode
     [Input, Output] private RenderTargetIdentifier result;
     [Input, Output] private NodeConnection connection;
 
-    private static readonly int tempExposureId = Shader.PropertyToID("_TempExposureId");
-
     private ComputeBuffer histogramBuffer, debugExposureBuffer;
     private Texture2D exposureTexture;
     private float[] exposurePixels;
@@ -115,20 +113,11 @@ public partial class AutoExposureNode : RenderPipelineNode
 
     public override void Execute(ScriptableRenderContext context, Camera camera)
     {
-        // Preview cameras are fixed to 1, so disable
-        if (camera.cameraType == CameraType.Preview)
-        {
-            return;
-        }
-
         using var scope = context.ScopedCommandBuffer("Post Processing", true);
 
         EyeAdaptation(scope, camera);
         Bloom(scope, camera);
         ExposureFusion(scope, camera);
-
-        scope.Command.CopyTexture(tempExposureId, currentExposure);
-        scope.Command.ReleaseTemporaryRT(tempExposureId);
     }
 
     private void Bloom(ScopedCommandBuffer scope, Camera camera)
@@ -264,7 +253,7 @@ public partial class AutoExposureNode : RenderPipelineNode
         var histogramKernel = computeShader.FindKernel("LuminanceHistogram");
         scope.Command.SetComputeTextureParam(computeShader, histogramKernel, "_ExposureCompensation", exposureTexture);
         scope.Command.SetComputeTextureParam(computeShader, histogramKernel, "_Input", result);
-        scope.Command.SetComputeTextureParam(computeShader, histogramKernel, "_Exposure", previousExposure);
+        scope.Command.SetComputeTextureParam(computeShader, histogramKernel, "_Exposure", currentExposure);
         scope.Command.SetComputeBufferParam(computeShader, histogramKernel, "_Histogram", histogramBuffer);
         scope.Command.SetComputeVectorParam(computeShader, "_HistogramExposureParams", histogramParams);
         scope.Command.SetComputeVectorParam(computeShader, "_ExposureParams", exposureParams);
@@ -273,16 +262,13 @@ public partial class AutoExposureNode : RenderPipelineNode
             scope.Command.DispatchNormalized(computeShader, histogramKernel, camera.pixelWidth, camera.pixelHeight, 1);
 
         // Calculate average luminance
-        // Note: seeing as this is done before post processing+TXAA, we need to do this into a temp texture, which we t hen eventually copy into the result for next frame
-        scope.Command.GetTemporaryRT(tempExposureId, new RenderTextureDescriptor(1, 1, RenderTextureFormat.RFloat, 0) { enableRandomWrite = true, });
-
         var averageKernel = computeShader.FindKernel("AverageLuminance");
         scope.Command.SetComputeFloatParam(computeShader, "_AdaptationSpeed", adaptationSpeed);
         scope.Command.SetComputeBufferParam(computeShader, averageKernel, "_Histogram", histogramBuffer);
         scope.Command.SetComputeBufferParam(computeShader, averageKernel, "_DebugExposure", debugExposureBuffer);
         scope.Command.SetComputeTextureParam(computeShader, averageKernel, "_ExposureCompensation", exposureTexture);
-        scope.Command.SetComputeTextureParam(computeShader, averageKernel, "_Exposure", previousExposure);
-        scope.Command.SetComputeTextureParam(computeShader, averageKernel, "_Result", tempExposureId);
+        scope.Command.SetComputeTextureParam(computeShader, averageKernel, "_Exposure", currentExposure);
+        scope.Command.SetComputeTextureParam(computeShader, averageKernel, "_Result", previousExposure);
         computeShader.ToggleKeyword("FIRST", FrameCount == 0);
         scope.Command.DispatchNormalized(computeShader, averageKernel, 256, 1, 1);
 
@@ -319,9 +305,6 @@ public partial class AutoExposureNode : RenderPipelineNode
 
         // Compute the luminances of synthetic exposures.
         // Compute the local weights of synthetic exposures.
-        scope.Command.SetComputeTextureParam(computeShader, 0, "_PreviousExposure", previousExposure);
-        scope.Command.SetComputeTextureParam(computeShader, 0, "_Exposure", tempExposureId);
-
         scope.Command.SetComputeFloatParam(computeShader, "_Compensation", enableLtm ? exposure : 1);
         scope.Command.SetComputeFloatParam(computeShader, "_Shadows", enableLtm ? Mathf.Pow(2, shadows) : 1.0f);
         scope.Command.SetComputeFloatParam(computeShader, "_Highlights", enableLtm ? Mathf.Pow(2, -highlights) : 1.0f);
@@ -395,9 +378,6 @@ public partial class AutoExposureNode : RenderPipelineNode
         scope.Command.ReleaseTemporaryRT(weights);
 
         // Perform guided upsampling and output the final RGB image.
-        scope.Command.SetComputeTextureParam(computeShader, 3, "_PreviousExposure", previousExposure);
-        scope.Command.SetComputeTextureParam(computeShader, 3, "_Exposure", tempExposureId);
-
         var displayMip = Mathf.Min(this.displayMip, mip);
 
         var width = camera.pixelWidth >> displayMip;

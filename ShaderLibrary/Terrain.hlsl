@@ -63,7 +63,7 @@ float2 WorldToTerrainPositionHalfTexel(float3 positionWS)
 
 float GetTerrainHeight(float2 uv)
 {
-	return _TerrainHeightmapTexture.SampleLevel(_LinearClampSampler, uv, 0) * _TerrainHeightScale + _TerrainHeightOffset - _WorldSpaceCameraPos.y;
+	return _TerrainHeightmapTexture.SampleLevel(_LinearClampSampler, uv, 0) * _TerrainHeightScale + _TerrainHeightOffset;
 }
 
 float GetTerrainHeight(float3 positionWS)

@@ -276,26 +276,13 @@ float DirectionalLightShadow(float3 positionWS, uint shadowIndex, float jitter =
 float3 DirectionalLightColor(uint index, float3 positionWS, bool softShadows = false, float jitter = 0.5, bool applyShadow = true, bool exponentialShadows = false, bool atmosphereTransmittance = true)
 {
     DirectionalLightData  lightData = _DirectionalLightData[index];
-
-    float3 color = ApplyExposure(lightData.Color);
-    
-	if (atmosphereTransmittance)
-	    color *= TransmittanceToAtmosphere(positionWS + _PlanetOffset, lightData.Direction, _LinearClampSampler);
     
     // Earth shadow 
-	//float2 intersections;
-	//if (IntersectRaySphere(positionRWS + _PlanetOffset, lightData.Direction, _PlanetRadius, intersections) && (max(intersections.x, intersections.y) >= 0.0))
-	//	color = 0;
-
-    if(applyShadow && index == 0)
-    {
-		color *= CloudTransmittanceLevelZero(positionWS);
-	}
-
-    if (applyShadow && lightData.ShadowIndex != UINT_MAX)
-    {
-		color *= DirectionalLightShadow(positionWS, lightData.ShadowIndex, jitter, softShadows, exponentialShadows);
-    }
+	float2 intersections;
+	if (IntersectRaySphere(positionWS + _PlanetOffset, lightData.Direction, _PlanetRadius, intersections) && intersections.x >= 0.0)
+		return 0.0;
+    
+	float attenuation = 1.0;
     
     #ifdef WATER_SHADOW_ON
 	    float shadowDistance = max(0.0, -_WorldSpaceCameraPos.y - positionWS.y) / max(1e-6, saturate(lightData.Direction.y));
@@ -306,10 +293,30 @@ float3 DirectionalLightColor(uint index, float3 positionWS, bool softShadows = f
 		    shadowDistance = saturate(shadowDepth - shadowPosition.z) * _WaterShadowFar;
 	    }
     
-	    color *= exp(-shadowDistance * _WaterExtinction);
+	    attenuation *= exp(-shadowDistance * _WaterExtinction);
+        if(attenuation == 0.0)
+			return 0.0;
     #endif
+    
+    if(applyShadow && index == 0)
+    {
+		attenuation *= CloudTransmittanceLevelZero(positionWS);
+		if (attenuation == 0.0)
+			return 0.0;
+	}
 
-    return color;
+    if (applyShadow && lightData.ShadowIndex != UINT_MAX)
+    {
+		attenuation *= DirectionalLightShadow(positionWS, lightData.ShadowIndex, jitter, softShadows, exponentialShadows);
+		if (attenuation == 0.0)
+			return 0.0;
+	}
+    
+	float3 color = attenuation;
+	if (atmosphereTransmittance)
+		color *= TransmittanceToAtmosphere(positionWS + _PlanetOffset, lightData.Direction, _LinearClampSampler);
+
+	return color * ApplyExposure(lightData.Color);
 }
 
 LightCommon GetLightColor(LightData lightData, float3 positionWS, float dither, bool softShadows)

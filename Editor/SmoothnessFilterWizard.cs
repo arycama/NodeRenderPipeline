@@ -70,6 +70,7 @@ public class SmoothnessFilterImporter : AssetPostprocessor
         if (string.IsNullOrEmpty(assetImporter.userData))
             return;
 
+
         // Need to Apply the texture first so it is available for rendering
         texture.Apply();
 
@@ -88,8 +89,8 @@ public class SmoothnessFilterImporter : AssetPostprocessor
             normal = AssetDatabase.LoadAssetAtPath<Texture2D>(texturePath);
         }
 
-        var width = Mathf.Max(normal.width, smoothness.width);
-        var height = Mathf.Max(normal.height, smoothness.height);
+        var width = texture.width;
+        var height = texture.height;
 
         // First pass will shorten normal based on the average normal length from the smoothness
         var lengthToSmoothness = new RenderTexture(256, 1, 0, RenderTextureFormat.R16)
@@ -183,15 +184,8 @@ public class SmoothnessFilterImporter : AssetPostprocessor
         Object.DestroyImmediate(normalResult);
         Object.DestroyImmediate(smoothnessResult);
         Object.DestroyImmediate(lengthToSmoothness);
-    }
 
-    private void FilterSmoothness(string normalPath)
-    {
-
-    }
-
-    private void FilterNormal(string smoothnessPath)
-    {
-
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
     }
 }

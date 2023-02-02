@@ -57,13 +57,13 @@ void CloudCoverage(uint id : SV_DispatchThreadId, uint groupIndex : SV_GroupInde
 void CloudShadow(uint2 id : SV_DispatchThreadID)
 {
 	float3 P = MultiplyPointProj(_InvViewProjMatrixCloudShadow, float3(2.0 * (id + 0.5) * _ScreenSizeCloudShadow.zw - 1.0, 0.0)).xyz;
-	float3 V = -_DirectionalLightData[0].Direction;
+	float3 V = _LightDirection0;
 	
 	// Check for intersection with planet
 
 	// Early exit if we miss the planet
 	float2 outerIntersections;
-	if (!IntersectRaySphere(P + _PlanetOffset, V, _PlanetRadius + _Height + _Thickness, outerIntersections))
+	if (!IntersectRaySphere(P + _PlanetOffset, V, _PlanetRadius + _Height + _Thickness, outerIntersections) || outerIntersections.y < 0.0)
 	{
 		ShadowResult[id] = 0;
 		return;
@@ -73,7 +73,7 @@ void CloudShadow(uint2 id : SV_DispatchThreadID)
 	float endDistance = outerIntersections.y;
 	
 	float2 innerIntersections;
-	if (IntersectRaySphere(P + _PlanetOffset, V, _PlanetRadius + _Height, innerIntersections))
+	if (IntersectRaySphere(P + _PlanetOffset, V, _PlanetRadius + _Height, innerIntersections) && innerIntersections.x > 0.0)
 		endDistance = innerIntersections.x;
 
 	float stepLength = (endDistance - startDistance) / _ShadowSamples;

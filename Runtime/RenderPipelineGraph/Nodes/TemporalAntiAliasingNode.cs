@@ -47,6 +47,8 @@ public partial class TemporalAntiAliasingNode : RenderPipelineNode
             var computeShader = Resources.Load<ComputeShader>("Utility/TemporalAntiAliasing");
             scope.Command.SetComputeFloatParam(computeShader, "_HistorySharpening", historySharpening);
             scope.Command.SetComputeFloatParam(computeShader, "_Sharpening", sharpening);
+            scope.Command.SetComputeIntParam(computeShader, "_MaxWidth", camera.pixelWidth - 1);
+            scope.Command.SetComputeIntParam(computeShader, "_MaxHeight", camera.pixelHeight - 1);
             scope.Command.SetComputeTextureParam(computeShader, 0, "_Depth", depth);
             scope.Command.SetComputeTextureParam(computeShader, 0, "_Result", texture0);
             scope.Command.SetComputeTextureParam(computeShader, 0, "_Input", result);
@@ -56,12 +58,7 @@ public partial class TemporalAntiAliasingNode : RenderPipelineNode
             scope.Command.SetComputeTextureParam(computeShader, 0, "_NewFrameCount", newFrameCount);
 
             computeShader.GetKernelThreadGroupSizes(0, out var xThreads, out var yThreads, out var zThreads);
-
-            // Each thread group is 32x32, but the first/last row are only used to fetch additional data
-            var threadGroupsX = (camera.pixelWidth - 1) / ((int)xThreads - 2) + 1;
-            var threadGroupsY = (camera.pixelHeight - 1) / ((int)yThreads - 2) + 1;
-
-            scope.Command.DispatchCompute(computeShader, 0, threadGroupsX, threadGroupsY, 1);
+            scope.Command.DispatchNormalized(computeShader, 0, camera.pixelWidth, camera.pixelHeight, 1);
 
             // Copy texture to output
             scope.Command.CopyTexture(texture0, 0, 0, result, 0, 0);
