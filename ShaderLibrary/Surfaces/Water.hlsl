@@ -368,7 +368,7 @@ FragmentInput Domain(HullConstantOutput tessFactors, OutputPatch<DomainInput, 4>
 	#ifdef WATER_SHADOW_CASTER
 		output.positionCS = MultiplyPoint(_WaterShadowMatrix, position);
 	#else
-		output.positionCS = WorldToClip(position);
+	output.positionCS = WorldToClip(position);
 	#endif
 
 	// Motion vectors
@@ -400,6 +400,7 @@ FragmentOutput Fragment(FragmentInput input)
 	for (uint i = 0; i < 4; i++)
 	{
 		float3 uv = float3(input.uv0.xz * _OceanScale[i], i + _OceanTextureSliceOffset);
+		uv.xy = UnjitterTextureUV(uv.xy);
 		float4 cascadeData = _OceanFoamSmoothnessMap.Sample(_TrilinearRepeatAniso4Sampler, uv);
 
 		normalData += _OceanNormalMap.Sample(_TrilinearRepeatAniso4Sampler, uv);
@@ -421,6 +422,7 @@ FragmentOutput Fragment(FragmentInput input)
 	if (foamFactor > 0)
 	{
 		float2 foamUv = input.uv0.xz * _FoamTex_ST.xy + _FoamTex_ST.zw;
+		foamUv.xy = UnjitterTextureUV(foamUv.xy);
 		foamFactor *= _FoamTex.Sample(_TrilinearRepeatAniso4Sampler, foamUv).r;
 		//float3 foamBump = UnpackNormalScale(_FoamBump.Sample(_TrilinearRepeatAniso4Sampler, foamUv), _FoamNormalScale);
 		//N = normalize(mul(tangentToWorld, oceanN));

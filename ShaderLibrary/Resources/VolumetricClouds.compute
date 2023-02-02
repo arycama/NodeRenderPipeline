@@ -63,7 +63,7 @@ void CloudShadow(uint2 id : SV_DispatchThreadID)
 
 	// Early exit if we miss the planet
 	float2 outerIntersections;
-	if (!IntersectRaySphere(P + _PlanetOffset, V, _PlanetRadius + _Height + _Thickness, outerIntersections))
+	if (!IntersectRaySphere(P + _PlanetOffset, V, _PlanetRadius + _Height + _Thickness, outerIntersections) || outerIntersections.y < 0.0)
 	{
 		ShadowResult[id] = 0;
 		return;
@@ -73,7 +73,7 @@ void CloudShadow(uint2 id : SV_DispatchThreadID)
 	float endDistance = outerIntersections.y;
 	
 	float2 innerIntersections;
-	if (IntersectRaySphere(P + _PlanetOffset, V, _PlanetRadius + _Height, innerIntersections))
+	if (IntersectRaySphere(P + _PlanetOffset, V, _PlanetRadius + _Height, innerIntersections) && innerIntersections.x > 0.0)
 		endDistance = innerIntersections.x;
 
 	float stepLength = (endDistance - startDistance) / _ShadowSamples;

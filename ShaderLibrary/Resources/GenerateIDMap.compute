@@ -103,17 +103,20 @@ void GenerateIDMap(uint2 id : SV_DispatchThreadID)
 	float weightSum = weight0 + weight1;
 	if(weightSum > 0.0)
 	{
-		weight0 /= weightSum;
-		weight1 /= weightSum;
+		//weight0 /= weightSum;
+		//weight1 /= weightSum;
 	}
 	
 	float blend = weight1;
 	
 	// If indices are equal, keep weight at 0, else we can assume it starts from the lowest value, eg 1.0 / 9.0
-	if(weight1 > 0.0 && index0 != index1)
-		blend = RangeRemap(1.0 / 33.0, 16.0 / 33.0, blend);
-	else
-		index1 = index0;
+	//if(weight1 > 0.0 && index0 != index1)
+	//	blend = RangeRemap(1.0 / 15.0, 7.0 / 15.0, blend);
+	//else
+	//	index1 = index0;
+	
+	//if(weight1 == 0.0)
+	//	index1 = index0;
 	
 	uint result = (index0 & 0xF) << 0;
 	result |= (uint(round(offsetX0 * 3.0)) & 0x3) << 4;
@@ -128,7 +131,7 @@ void GenerateIDMap(uint2 id : SV_DispatchThreadID)
 	float nrnd0 = 2.0 * nrand((id + 0.5) / _Resolution) - 1.0;
 	nrnd0 *= 1.0 - abs(2.0 * frac(blend * 15.0) - 1.0);
    
-	result |= (uint((blend * 15.0 + nrnd0)) & 0xF) << 26;
+	result |= (uint(round(blend * 15.0)) & 0xF) << 26;
 	//result |= (uint((1.0 - weight0) * 16.0) & 0xF) << 26;
 	//result |= (uint(triplanar * 4.0) & 0x3) << 30;
 	

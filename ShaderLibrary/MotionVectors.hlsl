@@ -60,10 +60,15 @@ float3 MotionVectorFragment(float4 nonJitteredPositionCS, float4 previousPositio
 	return positionSS - previousPositionSS;
 }
 
-float2 UnjitterTextureUV(float2 uv, float2 currentJitterInPixels)
+float2 UnjitterTextureUV(float2 uv)
 {
-    // Note: We negate the y because UV and screen space run in opposite directions
-	return uv - ddx_fine(uv) * currentJitterInPixels.x + ddy_fine(uv) * currentJitterInPixels.y;
+	#ifdef UNITY_PASS_SHADOWCASTER
+		return uv;
+	#else
+		// Note: We negate the y because UV and screen space run in opposite directions
+		float2 currentJitterInPixels = _Jitter * _ScreenSize.xy;
+		return uv - ddx_fine(uv) * currentJitterInPixels.x + ddy_fine(uv) * currentJitterInPixels.y;
+	#endif
 }
 
 #endif

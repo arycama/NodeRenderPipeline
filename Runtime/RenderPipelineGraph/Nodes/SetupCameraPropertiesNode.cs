@@ -10,6 +10,8 @@ public partial class SetupCameraPropertiesNode : RenderPipelineNode
 
     [Input, SerializeField, Range(0f, 1f)] private float jitterSpread = 1f;
     [Input, SerializeField, Pow2(64)] private int temporalSamples = 8;
+    [SerializeField] private bool jitterDebug = false;
+    [SerializeField] private Vector2 jitterOverride = Vector2.zero;
 
     [Output] private Vector2Int resolution;
     [Output] private Vector2 jitter;
@@ -32,6 +34,9 @@ public partial class SetupCameraPropertiesNode : RenderPipelineNode
         jitter.x = (HaltonSequence.Get(FrameCount % temporalSamples, 2) - 0.5f) / camera.pixelWidth;
         jitter.y = (HaltonSequence.Get(FrameCount % temporalSamples, 3) - 0.5f) / camera.pixelHeight;
         jitter *= jitterSpread;
+
+        if (jitterDebug)
+            jitter = new Vector2(jitterOverride.x / camera.pixelWidth, jitterOverride.y / camera.pixelHeight);
 
         camera.ResetProjectionMatrix();
         var projection = camera.projectionMatrix;

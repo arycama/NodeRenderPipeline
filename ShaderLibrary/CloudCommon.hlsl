@@ -6,6 +6,7 @@
 Texture3D<float> _CloudNoise, _CloudDetail;
 Texture2D<float3> _WeatherTexture;
 
+float3 _LightColor0, _LightDirection0, _LightColor1, _LightDirection1;
 float _Thickness, _Height, _WeatherScale;
 float _FrontScatter, _BackScatter, _ScatterBlend;
 float _ScatterOctaves, _ScatterContribution, _ScatterAttenuation, _ScatterEccentricity;
@@ -14,6 +15,10 @@ float _TemporalBlend, _StdDevFactor, _SampleFactor, _MaxDistance, _LightingSampl
 float _FogEnabled;
 float _Density, _DetailScale, _NoiseScale, _DetailStrength;
 float2 _WindSpeed;
+
+#ifdef __INTELLISENSE__
+	#define LIGHT_COUNT_TWO
+#endif
 
 float SampleCloudDensity(float3 positionWS)
 {
@@ -34,6 +39,8 @@ float SampleCloudDensity(float3 positionWS)
 
 float4 SampleCloud(float3 P, float3 V, float startDistance, float stepLength, float sampleCount, out float averageDepth)
 {
+	float lightingDs = _LightingDistance / _LightingSamples;
+	
 	float transmittanceSum = 0.0, weightedTransmittanceSum = 0.0;
 	float4 color = float4(0.0, 0.0, 0.0, 1.0);
 	for (float i = 0.0; i < sampleCount; i++)
@@ -44,25 +51,47 @@ float4 SampleCloud(float3 P, float3 V, float startDistance, float stepLength, fl
 
 		if (density > 0.0)
 		{
-			for (uint j = 0; j < _DirectionalLightCount; j++)
-			{
-				float3 lightColor = DirectionalLightColor(j, positionWS, false, 0, false, false);
-				float3 L = _DirectionalLightData[j].Direction;
-				float lightingDs = _LightingDistance / _LightingSamples;
-				
-				float lightTransmittance = 1.0;
-				for (float k = 0.5 * lightingDs; k < _LightingDistance; k += lightingDs)
+			#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
+				float2 intersections;
+				if (!IntersectRaySphere(positionWS + _PlanetOffset, _LightDirection0, _PlanetRadius, intersections) || intersections.x < 0.0)
 				{
-					float3 samplePos = positionWS + L * k;
-					lightTransmittance *= exp(-SampleCloudDensity(samplePos) * lightingDs);
+					float3 color0 = TransmittanceToAtmosphere(positionWS + _PlanetOffset, _LightDirection0, _LinearClampSampler) * ApplyExposure(_LightColor0);
+					if (any(color0 > 0.0))
+					{
+						float lightTransmittance = 1.0;
+						for (float k = 0.5 * lightingDs; k < _LightingDistance; k += lightingDs)
+						{
+							float3 samplePos = positionWS + _LightDirection0 * k;
+							lightTransmittance *= exp(-SampleCloudDensity(samplePos) * lightingDs);
+						}
+				
+						float LdotV = dot(_LightDirection0, V);
+						float asymmetry = lightTransmittance * transmittance;
+				
+						float phase = lerp(CornetteShanksPhaseFunction(-_BackScatter, LdotV) * 2.16, CornetteShanksPhaseFunction(_FrontScatter, LdotV), asymmetry);
+						color.rgb += color0 * phase * lightTransmittance * (1.0 - transmittance) * color.a;
+					}
 				}
+			#endif
+		
+			#ifdef LIGHT_COUNT_TWO
+				float3 color1 = TransmittanceToAtmosphere(positionWS + _PlanetOffset, _LightDirection1, _LinearClampSampler) * ApplyExposure(_LightColor1);
+				if (any(color1 > 0.0))
+				{
+					float lightTransmittance = 1.0;
+					for (float k = 0.5 * lightingDs; k < _LightingDistance; k += lightingDs)
+					{
+						float3 samplePos = positionWS + _LightDirection1 * k;
+						lightTransmittance *= exp(-SampleCloudDensity(samplePos) * lightingDs);
+					}
 				
-				float LdotV = dot(L, V);
-				float asymmetry = lightTransmittance * transmittance;
+					float LdotV = dot(_LightDirection1, V);
+					float asymmetry = lightTransmittance * transmittance;
 				
-				float phase = lerp(CornetteShanksPhaseFunction(-_BackScatter, LdotV) * 2.16, CornetteShanksPhaseFunction(_FrontScatter, LdotV), asymmetry) * 2;
-				color.rgb += lightColor * phase * lightTransmittance * (1.0 - transmittance) * color.a;
-			}
+					float phase = lerp(CornetteShanksPhaseFunction(-_BackScatter, LdotV) * 2.16, CornetteShanksPhaseFunction(_FrontScatter, LdotV), asymmetry);
+					color.rgb += color1 * phase * lightTransmittance * (1.0 - transmittance) * color.a;
+				}
+			#endif
 		}
 
 		color.a *= transmittance;

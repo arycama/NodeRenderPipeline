@@ -57,7 +57,7 @@
 			#pragma fragment Fragment
 
 			#pragma target 5.0
-
+			#pragma enable_d3d11_debug_symbols
 			#define MOTION_VECTORS_ON
 
 			#include "Water.hlsl"
