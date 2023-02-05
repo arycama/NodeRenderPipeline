@@ -114,16 +114,6 @@ public partial class PhysicalSkyNode : RenderPipelineNode
             }
         }
 
-        // If no lights, add a default one
-        var noShadow = false;
-        if(dirLightCount == 0)
-        {
-            dirLightCount = 1;
-            command.SetComputeVectorParam(computeShader, "_LightDirection0", Vector3.up);
-            command.SetComputeVectorParam(computeShader, "_LightColor0", Vector3.one * 120000);
-            noShadow = true;
-        }
-
         var blueNoise1D = Resources.Load<Texture2D>(noiseIds.GetString(noiseDebug ? 0 : FrameCount % 16));
 
         var planetCenterRws = new Vector3(0f, (float)((double)atmosphereProfile.PlanetRadius + camera.transform.position.y), 0f);
@@ -140,7 +130,6 @@ public partial class PhysicalSkyNode : RenderPipelineNode
 
         command.SetComputeVectorParam(computeShader, "_StarColor", atmosphereProfile.StarColor.linear);
         command.SetComputeVectorParam(computeShader, "_GroundColor", atmosphereProfile.GroundColor.linear);
-        command.SetComputeFloatParam(computeShader, "_NoShadow", noShadow ? 1f : 0f);
 
         command.SetComputeTextureParam(computeShader, kernel, "_TransmittanceResult", transmittance);
         command.SetComputeTextureParam(computeShader, kernel, "_ScatterResult", scatter);

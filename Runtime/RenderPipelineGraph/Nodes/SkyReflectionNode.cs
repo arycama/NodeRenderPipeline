@@ -91,16 +91,7 @@ public partial class SkyReflectionNode : RenderPipelineNode
             }
         }
 
-        // If no lights, add a default one
-        if (dirLightCount == 0)
-        {
-            dirLightCount = 1;
-            scope.Command.SetComputeVectorParam(skyComputeShader, "_LightDirection0", Vector3.up);
-            scope.Command.SetComputeVectorParam(skyComputeShader, "_LightColor0", Vector3.one * 120000);
-        }
-
         var kernel = skyComputeShader.FindKernel("SkyReflection");
-
         var planetCenterRws = new Vector3(0f, (float)((double)atmosphereProfile.PlanetRadius + camera.transform.position.y), 0f);
         scope.Command.SetComputeVectorParam(skyComputeShader, "_PlanetOffset", planetCenterRws);
 

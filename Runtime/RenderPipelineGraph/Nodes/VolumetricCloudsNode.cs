@@ -96,14 +96,6 @@ public partial class VolumetricCloudsNode : RenderPipelineNode
             }
         }
 
-        // If no lights, add a default one
-        if (dirLightCount == 0)
-        {
-            dirLightCount = 1;
-            scope.Command.SetComputeVectorParam(computeShader, "_LightDirection0", Vector3.up);
-            scope.Command.SetComputeVectorParam(computeShader, "_LightColor0", Vector3.one * 120000);
-        }
-
         var keyword = dirLightCount == 2 ? "LIGHT_COUNT_TWO" : (dirLightCount == 1 ? "LIGHT_COUNT_ONE" : string.Empty);
         using var keywordScope = scope.Command.KeywordScope(keyword);
 

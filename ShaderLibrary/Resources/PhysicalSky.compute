@@ -20,7 +20,6 @@ Texture2D<float> _Depth, _CloudDepth, _PrevFrameCount;
 float4x4 _PixelCoordToViewDirWS;
 float4 _ScaleOffset;
 float3 _StarColor;
-float _NoShadow;
 
 #ifdef __INTELLISENSE__
 	#define LIGHT_COUNT_ONE 
@@ -99,9 +98,7 @@ void KERNEL_NAME(uint2 id : SV_DispatchThreadID)
 		
 			if (useShadow)
 			{
-				if (!_NoShadow)
-					attenuation *= DirectionalLightShadow(P - _PlanetOffset, 0, 0.5, false, false);
-			
+				attenuation *= DirectionalLightShadow(P - _PlanetOffset, 0, 0.5, false, false);
 				attenuation *= CloudTransmittanceLevelZero(P - _PlanetOffset);
 			}
 		
@@ -438,7 +435,7 @@ void Upsample(int2 id : SV_DispatchThreadID)
     float3 volumetricLighting = _VolumetricLighting.SampleLevel(_LinearClampSampler, volumeUv, 0.0);
 	
 	//transmittance = 0;
-		scatter += volumetricLighting;
+		//scatter += volumetricLighting;
 	
 	//if(!isSky)
 	//scatter = volumeUv.z;
