@@ -13,6 +13,7 @@ public class CustomRenderPipeline : RenderPipeline
         GraphicsSettings.lightsUseColorTemperature = true;
         GraphicsSettings.lightsUseLinearIntensity = true;
         GraphicsSettings.disableBuiltinCustomRenderTextureUpdate = true;
+        GraphicsSettings.defaultRenderingLayerMask = ~0u;
 
         SupportedRenderingFeatures.active = new SupportedRenderingFeatures()
         {

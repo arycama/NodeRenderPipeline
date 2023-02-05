@@ -32,6 +32,7 @@ public class CustomRenderPipelineAsset : RenderPipelineAsset
     public override Shader terrainDetailGrassShader => defaultShaders.TerrainDetailGrassShader ?? base.terrainDetailGrassShader;
     public override Shader terrainDetailLitShader => defaultShaders.TerrainDetailLitShader ?? base.terrainDetailLitShader;
     public override string[] renderingLayerMaskNames => renderingLayerNames;
+    public override string[] prefixedRenderingLayerMaskNames => renderingLayerNames;
 
     protected override RenderPipeline CreatePipeline()
     {
