@@ -1,7 +1,6 @@
 using NodeGraph;
 using UnityEngine;
 using UnityEngine.Rendering;
-using static PlasticPipe.PlasticProtocol.Messages.NegotiationCommand;
 
 [NodeMenuItem("Rendering/Volumetric Clouds")]
 public partial class VolumetricCloudsNode : RenderPipelineNode

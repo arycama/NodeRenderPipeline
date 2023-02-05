@@ -1,6 +1,6 @@
+using NodeGraph;
 using UnityEngine;
 using UnityEngine.Rendering;
-using NodeGraph;
 
 public partial class TextureGraphNode : RenderPipelineNode
 {

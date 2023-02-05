@@ -73,9 +73,9 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
         if (!isEnabled)
             return;
 
-        var desc0 = new RenderTextureDescriptor(camera.pixelWidth >> 1, camera.pixelHeight >> 1, GraphicsFormat.R8G8B8A8_UNorm, 0) 
-        { 
-            autoGenerateMips = false, 
+        var desc0 = new RenderTextureDescriptor(camera.pixelWidth >> 1, camera.pixelHeight >> 1, GraphicsFormat.R8G8B8A8_UNorm, 0)
+        {
+            autoGenerateMips = false,
             enableRandomWrite = true,
             mipCount = 5,
             useMipMap = true,
