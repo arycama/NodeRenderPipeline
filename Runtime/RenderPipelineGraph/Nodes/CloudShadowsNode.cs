@@ -17,7 +17,6 @@ public partial class CloudShadowsNode : RenderPipelineNode
     [Input] private RenderTargetIdentifier detailNoise;
     [Input] private RenderTargetIdentifier weather;
     [Input] private CullingResults cullingResults;
-    [Input] private SmartComputeBuffer<DirectionalLightData> directionalLightBuffer;
 
     [Output] private readonly RenderTargetIdentifier result = cloudShadowId;
     [Input, Output] private NodeConnection connection;

@@ -10,13 +10,7 @@ public partial class SetupLightingNode : RenderPipelineNode
     private static readonly Plane[] frustumPlanes = new Plane[6];
     private static readonly Vector4[] cullingPlanes = new Vector4[6];
 
-    private static readonly int
-        directionalShadowsId = Shader.PropertyToID("_DirectionalShadows"),
-        pointShadowsId = Shader.PropertyToID("_PointShadows"),
-        spotlightShadowsId = Shader.PropertyToID("_SpotlightShadows"),
-        spotlightShadowMatricesId = Shader.PropertyToID("_SpotlightShadowMatrices"),
-        areaShadowsId = Shader.PropertyToID("_AreaShadows"),
-        areaShadowMatricesId = Shader.PropertyToID("_AreaShadowMatrices");
+    private int directionalShadowsId, pointShadowsId, spotlightShadowsId, areaShadowsId;
 
     [Header("Directional")]
     [SerializeField, Input, Output, Pow2(4096), Tooltip("Resolution of each shadowmap cascade")] private int directionalResolution = 2048;
@@ -53,7 +47,7 @@ public partial class SetupLightingNode : RenderPipelineNode
     [Output] private SmartComputeBuffer<Matrix4x4> areaShadowMatricesBuffer;
     [Output] private SmartComputeBuffer<Matrix3x4> directionalShadowMatrices;
 
-    [Output] private RenderTargetIdentifier directionalShadows = directionalShadowsId;
+    [Output] private RenderTargetIdentifier directionalShadows;
     [Input, Output] private NodeConnection connection;
 
     public override void Initialize()
@@ -66,6 +60,13 @@ public partial class SetupLightingNode : RenderPipelineNode
         spotlightShadowMatricesBuffer = new();
         areaShadowMatricesBuffer = new();
         directionalShadowMatrices = new();
+
+        directionalShadowsId = GetShaderPropertyId("_DirectionalShadows");
+        pointShadowsId = GetShaderPropertyId("_PointShadows");
+        spotlightShadowsId = GetShaderPropertyId("_SpotlightShadows");
+        areaShadowsId = GetShaderPropertyId("_AreaShadows");
+
+        directionalShadows = directionalShadowsId;
     }
 
     public override void Cleanup()
@@ -117,8 +118,8 @@ public partial class SetupLightingNode : RenderPipelineNode
         scope.Command.SetBufferData(directionalLightDataBuffer, directionalLightDatas);
 
         RenderPointShadows(context, pointShadowRequests, camera);
-        RenderSpotShadows(context, spotlightShadowRequests, spotlightShadowsId, spotlightShadowMatricesId, spotlightShadowMatricesBuffer, (int)spotDepth, spotResolution, spotBias, camera);
-        RenderSpotShadows(context, areaShadowRequests, areaShadowsId, areaShadowMatricesId, areaShadowMatricesBuffer, (int)areaDepth, areaResolution, areaBias, camera);
+        RenderSpotShadows(context, spotlightShadowRequests, spotlightShadowsId, spotlightShadowMatricesBuffer, (int)spotDepth, spotResolution, spotBias, camera,  "_SpotlightShadows", "_SpotlightShadowMatrices");
+        RenderSpotShadows(context, areaShadowRequests, areaShadowsId, areaShadowMatricesBuffer, (int)areaDepth, areaResolution, areaBias, camera, "_AreaShadows", "_AreaShadowMatrices");
 
         // Point/spot lights
         scope.Command.SetBufferData(lightDataBuffer, lightDatas);
@@ -499,14 +500,9 @@ public partial class SetupLightingNode : RenderPipelineNode
 
         scope.Command.SetGlobalFloat("_ZClip", 1);
 
-        // Set the shadowmap array
-        scope.Command.SetGlobalInt("_CascadeCount", directionalCascades);
-        scope.Command.SetGlobalTexture(directionalShadowsId, directionalShadowsId);
-
         // Set cascade matrices
         scope.Command.SetBufferData(directionalShadowMatrices, shadowMatrices);
         ListPool<Matrix3x4>.Release(shadowMatrices);
-        scope.Command.SetGlobalBuffer("_DirectionalShadowMatrices", directionalShadowMatrices);
 
         // Other data
         scope.Command.SetGlobalInt("_PcfSamples", pcfSamples);
@@ -572,10 +568,10 @@ public partial class SetupLightingNode : RenderPipelineNode
         }
 
         // Set the shadowmap array
-        scope.Command.SetGlobalTexture(pointShadowsId, pointShadowsId);
+        scope.Command.SetGlobalTexture("_PointShadows", pointShadowsId);
     }
 
-    private void RenderSpotShadows(ScriptableRenderContext context, List<SpotShadowRequestData> shadowRequests, int propertyId, int bufferId, SmartComputeBuffer<Matrix4x4> computeBuffer, int depth, int resolution, float bias, Camera camera)
+    private void RenderSpotShadows(ScriptableRenderContext context, List<SpotShadowRequestData> shadowRequests, int propertyId, SmartComputeBuffer<Matrix4x4> computeBuffer, int depth, int resolution, float bias, Camera camera, string texturePropertyName, string matrixPropertyName)
     {
         var shadowMatrices = ListPool<Matrix4x4>.Get();
 
@@ -619,11 +615,11 @@ public partial class SetupLightingNode : RenderPipelineNode
         }
 
         // Set the shadowmap array
-        scope.Command.SetGlobalTexture(propertyId, propertyId);
+        scope.Command.SetGlobalTexture(texturePropertyName, propertyId);
 
         scope.Command.SetBufferData(computeBuffer, shadowMatrices);
         ListPool<Matrix4x4>.Release(shadowMatrices);
-        scope.Command.SetGlobalBuffer(bufferId, computeBuffer);
+        scope.Command.SetGlobalBuffer(matrixPropertyName, computeBuffer);
     }
 
     public override void FinishRendering(ScriptableRenderContext context, Camera camera)

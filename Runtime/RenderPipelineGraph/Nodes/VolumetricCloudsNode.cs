@@ -17,7 +17,6 @@ public partial class VolumetricCloudsNode : RenderPipelineNode
     [Input] private RenderTargetIdentifier atmosphereTransmittance;
     [Input] private RenderTargetIdentifier atmosphereMultiScatter;
     [Input] private ComputeBuffer ambient;
-    [Input] private SmartComputeBuffer<DirectionalLightData> directionalLightBuffer;
     [Input] private CullingResults cullingResults;
     [Input] private RenderTargetIdentifier exposure;
 

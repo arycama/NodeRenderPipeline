@@ -14,7 +14,6 @@ public partial class SkyReflectionNode : RenderPipelineNode
 
     [Header("Sky")]
     [Input] private RenderTargetIdentifier exposure;
-    [Input] private SmartComputeBuffer<DirectionalLightData> directionalLightBuffer;
     [Input] private RenderTargetIdentifier cloudCoverage;
     [Input] private RenderTargetIdentifier atmosphereTransmittance;
     [Input] private RenderTargetIdentifier multiScatter;

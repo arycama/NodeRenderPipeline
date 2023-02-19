@@ -17,7 +17,6 @@ public partial class CloudCoverageNode : RenderPipelineNode
     [Input] private RenderTargetIdentifier exposure;
     [Input] private RenderTargetIdentifier atmosphereTransmittance;
     [Input] private RenderTargetIdentifier atmosphereMultiScatter;
-    [Input] private SmartComputeBuffer<DirectionalLightData> directionalLightBuffer;
 
     [Output] private readonly RenderTargetIdentifier result = cloudCoverageId;
     [Input, Output] private NodeConnection connection;

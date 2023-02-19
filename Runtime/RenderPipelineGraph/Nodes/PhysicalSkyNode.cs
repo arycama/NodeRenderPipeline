@@ -22,6 +22,7 @@ public partial class PhysicalSkyNode : RenderPipelineNode
     [Input] private RenderTargetIdentifier cloudDepth;
     [Input] private RenderTargetIdentifier volumetricLighting;
     [Input] private CullingResults cullingResults;
+    [Input] private RenderTargetIdentifier directionalShadows;
     [Input, Output] private RenderTargetIdentifier result;
     [Input, Output] private NodeConnection connection;
 
@@ -135,6 +136,7 @@ public partial class PhysicalSkyNode : RenderPipelineNode
         command.SetComputeTextureParam(computeShader, kernel, "_ScatterResult", scatter);
         command.SetComputeTextureParam(computeShader, kernel, "_VolumetricClouds", volumetricClouds);
         command.SetComputeTextureParam(computeShader, kernel, "_CloudDepth", cloudDepth);
+        command.SetComputeTextureParam(computeShader, kernel, "_DirectionalShadows", directionalShadows);
 
         var keyword = dirLightCount == 2 ? "LIGHT_COUNT_TWO" : (dirLightCount == 1 ? "LIGHT_COUNT_ONE" : string.Empty);
         using var keywordScope = command.KeywordScope(keyword);
