@@ -16,11 +16,8 @@ public partial class BeginSubPassNode : RenderPipelineNode
 
     public override void Execute(ScriptableRenderContext context, Camera camera)
     {
-        var colors = new NativeArray<int>(this.colors, Allocator.Temp);
-        var inputs = new NativeArray<int>(this.inputs, Allocator.Temp);
-
+        using var colors = new NativeArray<int>(this.colors, Allocator.Temp);
+        using var inputs = new NativeArray<int>(this.inputs, Allocator.Temp);
         context.BeginSubPass(colors, inputs, isDepthReadOnly, isStencilReadOnly);
-        colors.Dispose();
-        inputs.Dispose();
     }
 }

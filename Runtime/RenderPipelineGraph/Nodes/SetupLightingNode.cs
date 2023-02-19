@@ -414,7 +414,7 @@ public partial class SetupLightingNode : RenderPipelineNode
         }
     }
 
-    private void RenderShadowSubGraph(ScriptableRenderContext context, Camera camera, int visibleLightIndex, ShadowSplitData shadowSplitData, bool renderShadowCasters, Vector4[] cullingPlanes, int cullingPlanesCount)
+    private void RenderShadowSubGraph(ScriptableRenderContext context, Camera camera, int visibleLightIndex, ShadowSplitData shadowSplitData, bool renderShadowCasters, Vector4[] cullingPlanes, int cullingPlanesCount, ShadowRequestData shadowRequestData, RenderTargetIdentifier output, int resolution)
     {
         if (shadowsSubGraph == null)
             return;
@@ -426,6 +426,16 @@ public partial class SetupLightingNode : RenderPipelineNode
         shadowsSubGraph.AddRelayInput("CullingPlanes", new Vector4Array(cullingPlanes));
         shadowsSubGraph.AddRelayInput("CullingPlanesCount", cullingPlanesCount);
         shadowsSubGraph.AddRelayInput("GpuInstanceBuffers", gpuInstanceBuffers);
+
+        // Matrices
+        shadowsSubGraph.AddRelayInput("ViewProjMatrix", GL.GetGPUProjectionMatrix(shadowRequestData.ProjectionMatrix, true) * shadowRequestData.ViewMatrix);
+        shadowsSubGraph.AddRelayInput("ViewMatrix", shadowRequestData.ViewMatrix);
+        shadowsSubGraph.AddRelayInput("InvViewMatrix", shadowRequestData.ViewMatrix.inverse);
+
+        shadowsSubGraph.AddRelayInput("Output", output);
+
+        shadowsSubGraph.AddRelayInput("Resolution", resolution);
+
         shadowsSubGraph.Render(context, camera, FrameCount);
     }
 
@@ -451,8 +461,6 @@ public partial class SetupLightingNode : RenderPipelineNode
             scope.Command.GetTemporaryRT(directionalShadowsId, descriptor);
 
             // Clear all depth slices at once
-            scope.Command.SetRenderTarget(directionalShadowsId, 0, CubemapFace.Unknown, RenderTargetIdentifier.AllDepthSlices);
-            scope.Command.ClearRenderTarget(true, false, new Color());
             scope.Command.SetGlobalFloat("_ZClip", 0);
 
             for (var i = 0; i < requests.Count; i++)
@@ -461,28 +469,16 @@ public partial class SetupLightingNode : RenderPipelineNode
                 var visibleLightIndex = directionalShadowRequestData.VisibleLightIndex;
                 var visibleLight = cullingResults.visibleLights[visibleLightIndex];
                 scope.Command.SetGlobalDepthBias(directionalBias, visibleLight.light.shadowBias);
+                context.ExecuteCommandBuffer(scope.Command);
+                scope.Command.Clear();
 
                 for (var j = 0; j < directionalCascades; j++)
                 {
                     var cascadeIndex = i * directionalCascades + j;
-                    scope.Command.SetRenderTarget(directionalShadowsId, 0, CubemapFace.Unknown, cascadeIndex);
-
-                    using var profilerScope = scope.Command.ProfilerScope("Directional Shadow Cascade");
-
-                    var shadowRequestData = directionalShadowRequestData[j];
-                    scope.Command.SetGlobalMatrix("_ViewProjMatrix", GL.GetGPUProjectionMatrix(shadowRequestData.ProjectionMatrix, true) * shadowRequestData.ViewMatrix);
-                    scope.Command.SetGlobalMatrix("_ViewMatrix", shadowRequestData.ViewMatrix);
-                    scope.Command.SetGlobalMatrix("_InvViewMatrix", shadowRequestData.ViewMatrix.inverse);
-                    //scope.Command.SetGlobalVector("_ZBufferParams", GraphicsUtilities.ZBufferParams(shadowRequestData.Near, shadowRequestData.Far, false));
-
-                    context.ExecuteCommandBuffer(scope.Command);
-                    scope.Command.Clear();
-
-                    var viewMatrix = shadowRequestData.ViewMatrix;
-                    //viewMatrix.SetRow(2, -viewMatrix.GetRow(2));
 
                     // Shadow split has non-relative planes, as it uses unity's builtin culling. So re-extract the camera-relative planes
-                    GeometryUtility.CalculateFrustumPlanes(shadowRequestData.ProjectionMatrix * viewMatrix, frustumPlanes);
+                    var shadowRequestData = directionalShadowRequestData[j];
+                    GeometryUtility.CalculateFrustumPlanes(shadowRequestData.ProjectionMatrix * shadowRequestData.ViewMatrix, frustumPlanes);
 
                     for (var k = 0; k < 5; k++)
                     {
@@ -491,20 +487,9 @@ public partial class SetupLightingNode : RenderPipelineNode
                         cullingPlanes[k] = new Vector4(p.normal.x, p.normal.y, p.normal.z, p.distance);
                     }
 
-                    // Also add culling planes from camera whose dot product is opposite
-                    //var cameraPlanes = GeometryUtility.CalculateFrustumPlanes(camera);
+                    var output = new RenderTargetIdentifier(directionalShadowsId, 0, CubemapFace.Unknown, cascadeIndex);
 
-                    //for(var k= 0; k < cameraPlanes.Length; k++)
-                    //{
-                    //    // Skip near plane
-                    //    if (k == 4)
-                    //        continue;
-
-                    //    if (Vector3.Dot(cameraPlanes[k].normal, visibleLight.localToWorldMatrix.Forward()) > 0f)
-                    //        cullingPlanes.Add(cameraPlanes[k]);
-                    //}
-
-                    RenderShadowSubGraph(context, camera, visibleLightIndex, shadowRequestData.ShadowSplitData, shadowRequestData.RenderShadowCasters, cullingPlanes, 5);
+                    RenderShadowSubGraph(context, camera, visibleLightIndex, shadowRequestData.ShadowSplitData, shadowRequestData.RenderShadowCasters, cullingPlanes, 5, shadowRequestData, output, directionalResolution);
                     shadowMatrices.Add((shadowRequestData.ProjectionMatrix * shadowRequestData.ViewMatrix).ConvertToAtlasMatrix());
                 }
             }
@@ -549,10 +534,6 @@ public partial class SetupLightingNode : RenderPipelineNode
             scope.Command.GetTemporaryRT(pointShadowsId, descriptor);
 
             // Clear all slices at once
-            scope.Command.SetRenderTarget(pointShadowsId, 0, CubemapFace.Unknown,
-                RenderTargetIdentifier.AllDepthSlices);
-            scope.Command.ClearRenderTarget(true, false, new Color());
-
             for (var i = 0; i < pointShadowRequests.Count; i++)
             {
                 var pointShadowRequestData = pointShadowRequests[i];
@@ -579,16 +560,11 @@ public partial class SetupLightingNode : RenderPipelineNode
                     if (j == 2) index = 3;
                     else if (j == 3) index = 2;
 
-                    scope.Command.SetGlobalMatrix("_ViewProjMatrix", GL.GetGPUProjectionMatrix(shadowRequestData.ProjectionMatrix, true) * shadowRequestData.ViewMatrix);
-                    scope.Command.SetGlobalMatrix("_ViewMatrix", shadowRequestData.ViewMatrix);
-                    scope.Command.SetGlobalMatrix("_InvViewMatrix", shadowRequestData.ViewMatrix.inverse);
-                    scope.Command.SetRenderTarget(pointShadowsId, 0, CubemapFace.Unknown, i * 6 + index);
-
-                    context.ExecuteCommandBuffer(scope.Command);
-                    scope.Command.Clear();
+                    var output = new RenderTargetIdentifier(pointShadowsId, 0, CubemapFace.Unknown, i * 6 + index);
 
                     GeometryUtilities.CalculateFrustumPlanes(shadowRequestData.ProjectionMatrix * shadowRequestData.ViewMatrix, cullingPlanes);
-                    RenderShadowSubGraph(context, camera, visibleLightIndex, shadowRequestData.ShadowSplitData, shadowRequestData.RenderShadowCasters, cullingPlanes, 6);
+
+                    RenderShadowSubGraph(context, camera, visibleLightIndex, shadowRequestData.ShadowSplitData, shadowRequestData.RenderShadowCasters, cullingPlanes, 6, shadowRequestData, output, pointResolution);
                 }
             }
 
@@ -617,28 +593,22 @@ public partial class SetupLightingNode : RenderPipelineNode
             scope.Command.GetTemporaryRTArray(propertyId, resolution, resolution, shadowRequests.Count, depth, FilterMode.Bilinear, RenderTextureFormat.Shadowmap);
 
             // Clear all slices
-            scope.Command.SetRenderTarget(propertyId, 0, CubemapFace.Unknown, RenderTargetIdentifier.AllDepthSlices);
-            scope.Command.ClearRenderTarget(true, false, new Color());
-
             for (var i = 0; i < shadowRequests.Count; i++)
             {
                 var spotShadowRequest = shadowRequests[i];
                 var visibleLight = cullingResults.visibleLights[spotShadowRequest.VisibleLightIndex];
 
-                using var profilerScope = scope.Command.ProfilerScope("Spotlight Shadows");
-
                 var shadowRequestData = spotShadowRequest.ShadowRequestData;
-                scope.Command.SetGlobalMatrix("_ViewProjMatrix", GL.GetGPUProjectionMatrix(shadowRequestData.ProjectionMatrix, true) * shadowRequestData.ViewMatrix);
-                scope.Command.SetGlobalMatrix("_ViewMatrix", shadowRequestData.ViewMatrix);
-                scope.Command.SetGlobalMatrix("_InvViewMatrix", shadowRequestData.ViewMatrix.inverse);
-                scope.Command.SetRenderTarget(propertyId, 0, CubemapFace.Unknown, i);
                 scope.Command.SetGlobalDepthBias(bias, visibleLight.light.shadowBias * 2);
 
                 context.ExecuteCommandBuffer(scope.Command);
                 scope.Command.Clear();
 
                 GeometryUtilities.CalculateFrustumPlanes(shadowRequestData.ProjectionMatrix * shadowRequestData.ViewMatrix, cullingPlanes);
-                RenderShadowSubGraph(context, camera, spotShadowRequest.VisibleLightIndex, shadowRequestData.ShadowSplitData, shadowRequestData.RenderShadowCasters, cullingPlanes, 6);
+
+                var output = new RenderTargetIdentifier(propertyId, 0, CubemapFace.Unknown, i);
+
+                RenderShadowSubGraph(context, camera, spotShadowRequest.VisibleLightIndex, shadowRequestData.ShadowSplitData, shadowRequestData.RenderShadowCasters, cullingPlanes, 6, shadowRequestData, output, spotResolution);
 
                 // Add to shadow matrices list
                 var viewProjectionMatrix = (shadowRequestData.ProjectionMatrix * shadowRequestData.ViewMatrix).ConvertToAtlasMatrix();

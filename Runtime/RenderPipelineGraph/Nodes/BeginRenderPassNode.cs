@@ -9,14 +9,18 @@ public partial class BeginRenderPassNode : RenderPipelineNode
     [Input, SerializeField] private int samples = 1;
     [Input, SerializeField] private int depthAttachmentIndex = -1;
 
+    [Input] private int width;
+    [Input] private int height;
+
     [InputArray] private AttachmentDescriptor[] attachmentDescriptors;
     [Input, Output] private NodeConnection connection;
 
     public override void Execute(ScriptableRenderContext context, Camera camera)
     {
-        var attachmentDescriptors = new NativeArray<AttachmentDescriptor>(this.attachmentDescriptors, Allocator.Temp);
+        var width = NodeIsConnected("width") ? this.width : camera.pixelWidth;
+        var height = NodeIsConnected("height") ? this.height : camera.pixelHeight;
 
-        context.BeginRenderPass(camera.pixelWidth, camera.pixelHeight, samples, attachmentDescriptors, depthAttachmentIndex);
-        attachmentDescriptors.Dispose();
+        using var attachmentDescriptors = new NativeArray<AttachmentDescriptor>(this.attachmentDescriptors, Allocator.Temp);
+        context.BeginRenderPass(width, height, samples, attachmentDescriptors, depthAttachmentIndex);
     }
 }

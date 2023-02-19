@@ -13,7 +13,8 @@ public partial class SetupCameraPropertiesNode : RenderPipelineNode
     [SerializeField] private bool jitterDebug = false;
     [SerializeField] private Vector2 jitterOverride = Vector2.zero;
 
-    [Output] private Vector2Int resolution;
+    [Output] private int width;
+    [Output] private int height;
     [Output] private Vector2 jitter;
     [Output] private Vector4Array cullingPlanes;
     [Output] private int cullingPlanesCount = 6;
@@ -24,7 +25,8 @@ public partial class SetupCameraPropertiesNode : RenderPipelineNode
 
     public override void Execute(ScriptableRenderContext context, Camera camera)
     {
-        resolution = camera.Resolution();
+        width = camera.pixelWidth;
+        height = camera.pixelHeight;
 
         // Need to set this or it won't provide motion vectors
         camera.depthTextureMode = DepthTextureMode.Depth | DepthTextureMode.MotionVectors;
