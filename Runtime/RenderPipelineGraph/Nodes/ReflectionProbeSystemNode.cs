@@ -21,6 +21,8 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
     [SerializeField, Pow2(64)] private int clusterDepth = 32;
     [SerializeField, Pow2(64)] private int maxLightsPerTile = 32;
 
+    [SerializeField] private RenderPipelineSubGraph reflectionProbeSubGraph;
+
     [Input] private ComputeBuffer ambient;
     [Input] private RenderTargetIdentifier skyReflection;
     [Input] private RenderTargetIdentifier atmosphereTransmittance;
@@ -29,6 +31,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
     [Output] private SmartComputeBuffer<ReflectionProbeData> reflectionProbeDataBuffer;
     [Output] private ComputeBuffer ambientBuffer;
     [Output] private RenderTargetIdentifier reflectionProbeOutput;
+
     [Input, Output] private NodeConnection connection;
 
     private readonly List<ReadyProbeData> readyProbes = new();
@@ -86,6 +89,9 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 
         directionalLightBuffer = new();
         lightDataBuffer = new();
+
+        if (reflectionProbeSubGraph != null)
+            reflectionProbeSubGraph.Initialize();
     }
 
     public override void Cleanup()
@@ -112,6 +118,24 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
         counterBuffer.Release();
 
         readyProbes.Clear();
+
+        if (reflectionProbeSubGraph != null)
+            reflectionProbeSubGraph.Cleanup();
+    }
+
+    public override void NodeChanged()
+    {
+        if (reflectionProbeSubGraph != null)
+        {
+            reflectionProbeSubGraph.Cleanup();
+            reflectionProbeSubGraph.Initialize();
+        }
+    }
+
+    public override void FrameRenderComplete()
+    {
+        if (reflectionProbeSubGraph != null)
+            reflectionProbeSubGraph.FrameRenderComplete();
     }
 
     public override void Execute(ScriptableRenderContext context, Camera camera)
@@ -309,6 +333,54 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             var up = CoreUtils.upVectorList[i];
             camera.transform.rotation = Quaternion.LookRotation(fwd, up);
 
+            RelightProbeFace(context, relightData, camera, tempId, i, fwd, up);
+        }
+
+        // Convolve
+        using (var scope = context.ScopedCommandBuffer())
+        {
+            // Generate mips (Easier to do it here and then copy over, for now.. should eventually just do it with ComputeShader or something)
+            scope.Command.GenerateMips(tempConvolveProbe);
+
+            // Calculate ambient (Before convolution)
+            var convolveComputeShader = Resources.Load<ComputeShader>("AmbientConvolution");
+            scope.Command.SetComputeTextureParam(convolveComputeShader, 1, "_AmbientProbeInputCubemap", tempConvolveProbe);
+            scope.Command.SetComputeBufferParam(convolveComputeShader, 1, "_AmbientProbeOutputBuffer", ambientBuffer);
+            scope.Command.SetComputeIntParam(convolveComputeShader, "_DstOffset", index * 3);
+            scope.Command.DispatchCompute(convolveComputeShader, 1, 1, 1, 1);
+
+            ReflectionConvolution.Convolve(scope.Command, tempConvolveProbe, reflectionProbeArray, resolution, index * 6);
+        }
+    }
+
+    private void RelightProbeFace(ScriptableRenderContext context, ReadyProbeData relightData, Camera camera, int tempId, int i, Vector3 fwd, Vector3 up)
+    {
+        // Evaluate
+        if (reflectionProbeSubGraph != null)
+        {
+            reflectionProbeSubGraph.AddRelayInput("Depth", new RenderTargetIdentifier(relightData.AlbedoMetallic[i]));
+            reflectionProbeSubGraph.AddRelayInput("_GBuffer0", new RenderTargetIdentifier(relightData.AlbedoMetallic[i]));
+            reflectionProbeSubGraph.AddRelayInput("_GBuffer1", new RenderTargetIdentifier(relightData.NormalRoughness[i]));
+            reflectionProbeSubGraph.AddRelayInput("_GBuffer2", new RenderTargetIdentifier(relightData.Emission[i]));
+            reflectionProbeSubGraph.AddRelayInput("Result", new RenderTargetIdentifier(tempId));
+            reflectionProbeSubGraph.AddRelayInput("_ExposureValue", previousExposure);
+            reflectionProbeSubGraph.AddRelayInput("_ExposureValueRcp", 1f / previousExposure);
+            reflectionProbeSubGraph.AddRelayInput("_AmbientSh", ambient);
+            reflectionProbeSubGraph.AddRelayInput("_AtmosphereTransmittance", atmosphereTransmittance);
+            reflectionProbeSubGraph.AddRelayInput("_SkyReflection", skyReflection);
+            reflectionProbeSubGraph.AddRelayInput("_Resolution", resolution);
+            reflectionProbeSubGraph.AddRelayInput("_ReflectionProbeData", reflectionProbeDataBuffer.ComputeBuffer);
+            reflectionProbeSubGraph.AddRelayInput("_ReflectionProbes", new RenderTargetIdentifier(reflectionProbeArray));
+            reflectionProbeSubGraph.AddRelayInput("_ReflectionProbeCount", reflectionProbeDataBuffer.Count);
+            //reflectionProbeSubGraph.AddRelayInput("", );
+            reflectionProbeSubGraph.Render(context, camera, FrameCount);
+
+            // Copy to temp probe
+            using (var scope = context.ScopedCommandBuffer("Reflection Probe Relight", true))
+                scope.Command.CopyTexture(tempId, 0, 0, tempConvolveProbe, i, 0);
+        }
+        else
+        {
             // Setup lighting
             if (!camera.TryGetCullingParameters(out var cullingPrameters))
                 throw new InvalidOperationException();
@@ -316,11 +388,8 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             cullingPrameters.cullingOptions = CullingOptions.ForceEvenIfCameraIsNotActive | CullingOptions.DisablePerObjectCulling | CullingOptions.NeedsLighting;
             cullingPrameters.cullingMask = (uint)layerMask.value;
             var cullingResults = context.Cull(ref cullingPrameters);
-
-            // TODO: Lots of repeated code from setup lighting node, find a way to re-use?
-            using var directionalLightDatas = ScopedPooledList<DirectionalLightData>.Get();
-            using var lightDatas = ScopedPooledList<LightData>.Get();
-
+            var directionalLightDatas = ScopedPooledList<DirectionalLightData>.Get();
+            var lightDatas = ScopedPooledList<LightData>.Get();
             for (var j = 0; j < cullingResults.visibleLights.Length; j++)
             {
                 var visibleLight = cullingResults.visibleLights[j];
@@ -376,7 +445,6 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
                 scope.Command.SetComputeIntParam(deferredComputeShader, "_DirectionalLightCount", directionalLightBuffer.Count);
                 scope.Command.SetComputeIntParam(deferredComputeShader, "_LightCount", lightDataBuffer.Count);
 
-
                 scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_ReflectionProbeData", reflectionProbeDataBuffer);
                 scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_ReflectionProbes", reflectionProbeArray);
                 scope.Command.SetComputeIntParam(deferredComputeShader, "_ReflectionProbeCount", reflectionProbeDataBuffer.Count);
@@ -388,7 +456,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
                 scope.Command.SetComputeFloatParam(deferredComputeShader, "_ClusterBias", clusterBias);
                 scope.Command.SetComputeIntParam(deferredComputeShader, "_TileSize", tileSize);
 
-                var viewToWorld = Matrix4x4.Rotate(Quaternion.LookRotation(fwd, up));
+                var viewToWorld = Matrix4x4.Rotate(camera.transform.rotation);
                 var viewDirMatrix = Matrix4x4Extensions.ComputePixelCoordToWorldSpaceViewDirectionMatrix(Vector2Int.one * resolution, Vector2.zero, 90, 1, viewToWorld, true);
                 scope.Command.SetComputeMatrixParam(deferredComputeShader, "_PixelCoordToViewDirWS", viewDirMatrix);
 
@@ -399,22 +467,6 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
                 // Copy to temp probe
                 scope.Command.CopyTexture(tempId, 0, 0, tempConvolveProbe, i, 0);
             }
-        }
-
-        // Convolve
-        using (var scope = context.ScopedCommandBuffer())
-        {
-            // Generate mips (Easier to do it here and then copy over, for now.. should eventually just do it with ComputeShader or something)
-            scope.Command.GenerateMips(tempConvolveProbe);
-
-            // Calculate ambient (Before convolution)
-            var convolveComputeShader = Resources.Load<ComputeShader>("AmbientConvolution");
-            scope.Command.SetComputeTextureParam(convolveComputeShader, 1, "_AmbientProbeInputCubemap", tempConvolveProbe);
-            scope.Command.SetComputeBufferParam(convolveComputeShader, 1, "_AmbientProbeOutputBuffer", ambientBuffer);
-            scope.Command.SetComputeIntParam(convolveComputeShader, "_DstOffset", index * 3);
-            scope.Command.DispatchCompute(convolveComputeShader, 1, 1, 1, 1);
-
-            ReflectionConvolution.Convolve(scope.Command, tempConvolveProbe, reflectionProbeArray, resolution, index * 6);
         }
     }
 

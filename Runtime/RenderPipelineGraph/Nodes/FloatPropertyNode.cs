@@ -2,7 +2,7 @@
 using UnityEngine;
 using UnityEngine.Rendering;
 
-[NodeMenuItem("Property/Float")]
+[NodeMenuItem("Property/Float Property")]
 public partial class FloatPropertyNode : RenderPipelineNode
 {
     [SerializeField] private string category;

@@ -7,7 +7,7 @@ using UnityEngine.Rendering;
 public abstract class SmartComputeBuffer
 {
     private readonly ComputeBufferType type;
-    protected ComputeBuffer ComputeBuffer { get; private set; }
+    public ComputeBuffer ComputeBuffer { get; private set; }
 
     /// <summary>
     /// Stores how many elements are currently contained

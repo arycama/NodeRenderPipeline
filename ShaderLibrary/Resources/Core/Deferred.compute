@@ -7,7 +7,7 @@
 #ifdef REFLECTION_PROBE_RENDERING
 	#undef VOXEL_GI_ON
 	#undef SCREENSPACE_REFLECTIONS_ON
-	#define NO_SHADOWS
+	//#define NO_SHADOWS
 #endif
 
 #ifdef __INTELLISENSE__
