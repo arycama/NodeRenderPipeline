@@ -43,6 +43,8 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
 
         using var scope = context.ScopedCommandBuffer("Deferred Reflection Probe Lighting");
 
+        GraphicsUtilities.SetupCameraProperties(scope.Command, 0, camera, context, Vector2Int.one * resolution, true);
+
         scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "Depth", depth, 0, RenderTextureSubElement.Depth);
         scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_GBuffer0", gbuffer0, 0, RenderTextureSubElement.Color);
         scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_GBuffer1", gbuffer1, 0, RenderTextureSubElement.Color);

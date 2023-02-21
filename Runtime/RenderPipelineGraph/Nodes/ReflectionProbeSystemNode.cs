@@ -27,6 +27,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
     [Input] private RenderTargetIdentifier skyReflection;
     [Input] private RenderTargetIdentifier atmosphereTransmittance;
     [Input] private RenderTargetIdentifier exposure;
+    [Input] private GpuInstanceBuffers gpuInstanceBuffers;
 
     [Output] private SmartComputeBuffer<ReflectionProbeData> reflectionProbeDataBuffer;
     [Output] private ComputeBuffer ambientBuffer;
@@ -36,8 +37,6 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 
     private readonly List<ReadyProbeData> readyProbes = new();
 
-    private SmartComputeBuffer<DirectionalLightData> directionalLightBuffer;
-    private SmartComputeBuffer<LightData> lightDataBuffer;
     private RenderTexture reflectionProbeArray, tempConvolveProbe;
 
     // Needed to copy exposure, as its currently a RenderTargetIdentifier
@@ -45,10 +44,6 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 
     private float previousExposure;
     private int relightIndex;
-    private ComputeBuffer lightList;
-    private ComputeBuffer counterBuffer;
-    private static readonly uint[] zeroArray = new uint[1] { 0 };
-    private int lightClusterId;
     private Action<AsyncGPUReadbackRequest> exposureReadback;
 
     public override void Initialize()
@@ -76,19 +71,12 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 
         exposureTemp = new RenderTexture(1, 1, 0, RenderTextureFormat.RFloat) { hideFlags = HideFlags.HideAndDontSave };
 
-        // Clustered lighting
-        counterBuffer = new ComputeBuffer(1, sizeof(uint)) { name = nameof(counterBuffer) };
-        lightClusterId = GetShaderPropertyId();
-
         reflectionProbeDataBuffer = new();
         reflectionProbeDataBuffer.EnsureCapcity(1);
 
         ambientBuffer = new ComputeBuffer(maxActiveProbes * 3, sizeof(float) * 4);
 
         exposureReadback = OnExposureReadback;
-
-        directionalLightBuffer = new();
-        lightDataBuffer = new();
 
         if (reflectionProbeSubGraph != null)
             reflectionProbeSubGraph.Initialize();
@@ -115,7 +103,6 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
         DestroyImmediate(exposureTemp);
 
         ambientBuffer.Release();
-        counterBuffer.Release();
 
         readyProbes.Clear();
 
@@ -372,12 +359,22 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             reflectionProbeSubGraph.AddRelayInput("_ReflectionProbeData", reflectionProbeDataBuffer.ComputeBuffer);
             reflectionProbeSubGraph.AddRelayInput("_ReflectionProbes", new RenderTargetIdentifier(reflectionProbeArray));
             reflectionProbeSubGraph.AddRelayInput("_ReflectionProbeCount", reflectionProbeDataBuffer.Count);
-            //reflectionProbeSubGraph.AddRelayInput("", );
+            reflectionProbeSubGraph.AddRelayInput("GpuInstanceBuffers", gpuInstanceBuffers);
+
+            using (var scope = context.ScopedCommandBuffer("Reflection Probe Relight", true))
+            {
+                GraphicsUtilities.SetupCameraProperties(scope.Command, 0, camera, context, Vector2Int.one * resolution, true);
+                scope.Command.SetInvertCulling(true);
+            }
+
             reflectionProbeSubGraph.Render(context, camera, FrameCount);
 
             // Copy to temp probe
             using (var scope = context.ScopedCommandBuffer("Reflection Probe Relight", true))
+            {
                 scope.Command.CopyTexture(tempId, 0, 0, tempConvolveProbe, i, 0);
+                scope.Command.SetInvertCulling(false);
+            }
         }
     }
 
