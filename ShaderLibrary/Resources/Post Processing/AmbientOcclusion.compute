@@ -8,7 +8,6 @@
 #pragma kernel Temporal
 #pragma kernel Spatial
 #pragma kernel Combine
-#pragma enable_d3d11_debug_symbols
 
 RWTexture2D<float4> _VisibilityCone;
 RWTexture2D<float> _FrameCountResult;
@@ -52,7 +51,7 @@ float4 UnpackInput(float4 input)
 [numthreads(8, 8, 1)]
 void Compute(uint2 id : SV_DispatchThreadID)
 {
-	float2 pixelCenter = floor(2 * id + 1 + _Jitter * 0.5) + 0.5;
+	float2 pixelCenter = floor(id * 2 + 1 + _Jitter * _ScreenSize.xy) + 0.5;
 	
 	float3 N = GBufferNormal(pixelCenter);
 	float3 normalV = WorldToViewDir(N, true);
@@ -250,7 +249,7 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 	
 	float4 deltas = abs(depths - fullResDepth);
 	float closestDepth = Min4(deltas);
-	float4 depthWeights = exp2(-Square(deltas - closestDepth) * (_DepthWeight / fullResDepth));
+	float4 depthWeights = saturate(1.0 - abs(deltas - closestDepth) * _DepthWeight / fullResDepth);
 	
 	float2 fracUv = frac(uv * mipResolution - 0.5);
 	
@@ -260,20 +259,28 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 	weights.z = (1.0 - fracUv.x) * fracUv.y;
 	weights.w = fracUv.x * fracUv.y;
 	
-	float weightSum = 0.0;
+	float weightSum = 0.0, maxWeight = 0.0;
 	float4 minValue = 0.0, maxValue = 0.0;
 	
 	[unroll]
-	for (uint y = 0, i = 0; y < 2; y++)
+	for (int y = 0, i = 0; y < 2; y++)
 	{
 		[unroll]
-		for (uint x = 0; x < 2; x++, i++)
+		for (int x = 0; x < 2; x++, i++)
 		{
-			uint2 coord = floorUv + uint2(x, y);
-			float4 color = _Input.mips[mip][coord];
-			float sampleDepth = LinearEyeDepth(_Depth.mips[mip][coord], _ZBufferParams);
+			int2 lowResCoord = ((id - 1) >> 1) + int2(x, y);
+			float4 color = UnpackInput(_Input[lowResCoord]);
 			
-			float weight = weights[i] * depthWeights[i];
+			float2 fullResCoord = lowResCoord * 2 + 1 + _Jitter * _ScreenSize.xy;
+			float2 delta = abs(fullResCoord - id + 0.5);
+			
+			float weight = weights[i];// * depthWeights[i];
+			weight = saturate(1.0 - delta.x) * saturate(1.0 - delta.y);
+			//weight = exp2(-dot(delta, delta) * 2.29);
+			
+			weight = all(uint2(fullResCoord) == id);
+			maxWeight = max(maxWeight, weight);
+			
 			result += color * weight;
 			weightSum += weight;
 			
@@ -295,13 +302,13 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 	
 	if(all(saturate(previousUv) == previousUv))
 	{
-		float4 history = _History.SampleLevel(_LinearClampSampler, uv - motion, 0.0);
+		float4 history = UnpackInput(_History.SampleLevel(_LinearClampSampler, uv - motion, 0.0));
 		float4 window = (maxValue - minValue) * _ClampWindowScale;
-		history = clamp(history, minValue - window, maxValue + window);
-		result = lerp(history, result, 0.05);
+		//history = clamp(history, minValue - window, maxValue + window);
+		result = lerp(history, result, 0.2 * maxWeight);
 	}
 	
-	_Result[id] = result;
+	_Result[id] = PackOutput(result);
 }
 
 [numthreads(8, 8, 1)]
@@ -370,7 +377,7 @@ void Combine(uint2 dispatchThreadId : SV_DispatchThreadID)
 	float4 visibilityCone = _VisibilityCone[dispatchThreadId];
 	visibilityCone.xyz = GBufferNormal(visibilityCone);
 	visibilityCone = BlendVisibiltyCones(visibilityCone, result);
-	//visibilityCone = result;
+	visibilityCone = result;
 	
 	_VisibilityCone[dispatchThreadId] = PackGBufferNormal(visibilityCone.xyz, visibilityCone.w);
 }
