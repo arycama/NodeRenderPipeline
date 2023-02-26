@@ -42,7 +42,7 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
     [Input] private RenderTargetIdentifier motionVectors;
     [Input] private RenderTargetIdentifier visibilityCone;
 
-    [InputNoUpdate] private RenderTargetIdentifier previousDepth;
+    [Input] private RenderTargetIdentifier previousDepth;
 
     [Input, Output] private NodeConnection connection;
 

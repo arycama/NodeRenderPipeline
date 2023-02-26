@@ -18,7 +18,7 @@ float3 Fragment(float4 positionCS : SV_Position) : SV_Target
 	float linearEyeDepth = LinearEyeDepth(depth, _ZBufferParams);
 	
 	//return pow(surface.Emission, 1);
-	return surface.Occlusion ;
+	//return surface.Occlusion ;
 	
 	PbrInput input = SurfaceDataToPbrInput(surface);
 	float3x3 frame = GetLocalFrame(surface.Normal);

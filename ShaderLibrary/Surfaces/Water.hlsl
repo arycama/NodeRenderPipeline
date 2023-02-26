@@ -438,7 +438,7 @@ FragmentOutput Fragment(FragmentInput input)
 	float3 normalOct = PackFloat2To888(0.5 * PackNormalOctQuadEncode(N) + 0.5);
 
 	FragmentOutput output;
-	output.velocity = PackVelocity(MotionVectorFragment(input.nonJitteredPositionCS, input.previousPositionCS));
+	output.velocity = MotionVectorFragment(input.nonJitteredPositionCS, input.previousPositionCS);
 	output.normalFoam = float4(normalOct, foamFactor);
 
 	bool quad2or4 = (sinFrame * cosFrame) < 0;

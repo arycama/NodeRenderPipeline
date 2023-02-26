@@ -30,7 +30,7 @@ struct GBufferOut
 		#endif
 	
 		#ifdef MOTION_VECTORS_ON
-			uint motionVectors : SV_Target5;
+			float2 motionVectors : SV_Target5;
 		#endif
 	#endif
 };
@@ -209,7 +209,7 @@ GBufferOut SurfaceToGBuffer(SurfaceData surface, float2 positionCS)
 		#endif
 	
 		#ifdef MOTION_VECTORS_ON
-			output.motionVectors = PackVelocity(surface.Velocity);
+			output.motionVectors = surface.Velocity;
 		#endif
 	#endif
 

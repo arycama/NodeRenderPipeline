@@ -7,13 +7,15 @@
 #pragma kernel Temporal
 #pragma kernel Spatial
 #pragma kernel Combine
+#pragma enable_d3d11_debug_symbols
 
 RWTexture2D<float4> _VisibilityCone;
 RWTexture2D<float> _FrameCountResult;
 RWTexture2D<uint> _Result;
 Texture2D<float3> _PreviousFrame;
+Texture2D<float2> _Motion;
 Texture2D<float> _Depth, _PreviousDepth, _FrameCountPrevious, _FrameCount;
-Texture2D<uint> _Motion, _Input, _History;
+Texture2D<uint> _Input, _History;
 
 cbuffer AOConstants
 {
@@ -142,14 +144,13 @@ void Compute(uint2 id : SV_DispatchThreadID)
 }
 
 [numthreads(8, 8, 1)]
-void Temporal(uint2 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId : SV_GroupThreadID, uint2 groupId : SV_GroupID)
+void Temporal(uint2 id : SV_DispatchThreadID)
 {
-	float2 pixCenter = dispatchThreadId + 0.5;
-	float2 uv = pixCenter * _ScreenSize.zw;
+	float2 uv = (id + 0.5) * _ScreenSize.zw;
 	uint4 input = _Input.Gather(_PointClampSampler, uv).xywz;
 	
+	float4 result = 0.0, mean = 0.0, stdDev = 0.0;
 	float maxWeight = 0.0, weightSum = 0.0;
-	float4 current = 0.0, mean = 0.0, stdDev = 0.0;
 	
 	[unroll]
 	for (uint y = 0, i = 0; y < 2; y++)
@@ -157,110 +158,77 @@ void Temporal(uint2 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId 
 		[unroll]
 		for (uint x = 0; x < 2; x++, i++)
 		{
-			int2 lowResCoord = clamp(((dispatchThreadId - 1) >> 1) + int2(x, y), 0, floor(_ScreenSize.xy * 0.5) - 1);
-			float4 color = UnpackInput(_Input[lowResCoord]);
-			
-			float2 fullResCoord = lowResCoord * 2 + 1 + _Jitter * _ScreenSize.xy;
-			float2 delta = abs(fullResCoord - dispatchThreadId + 0.5);
+			float4 color = UnpackInput(input[i]);
+			float2 fullResCoord = (((id - 1) >> 1) + int2(x, y)) * 2 + 1 + _Jitter * _ScreenSize.xy;
+			float2 delta = abs(fullResCoord - id + 0.5);
 			float weight = saturate(1.0 - delta.x) * saturate(1.0 - delta.y);
 			
 			maxWeight = max(maxWeight, weight);
 			weightSum += weight;
-			current += color * weight;
+			result += color * weight;
 			mean += color;
 			stdDev += color * color;
 		}
 	}
 	
 	if(weightSum > 0.0)
-		current /= weightSum;
+		result /= weightSum;
 	
 	mean /= 4.0;
 	stdDev = sqrt(abs(stdDev / 4.0 - mean * mean));
-	
-	float3 velocity = UnpackVelocity(_Motion[dispatchThreadId]);
-	float2 previousUv = (dispatchThreadId + 0.5) * _ScreenSize.zw - velocity.xy;
-		
-	// Sample history, remove weighting from history and current, blend, re-apply weight
-	uint4 packedHistory = _History.Gather(_PointClampSampler, previousUv).xywz;
-	float4 previousDepths = _PreviousDepth.Gather(_PointClampSampler, previousUv).xywz;
-	float4 frameCounts = _FrameCountPrevious.Gather(_PointClampSampler, previousUv).xywz * 255.0;
-	float4 bilinearWeights = BilinearWeights(previousUv, _ScreenSize.xy).xywz;
-		
-	float2 previousCoord = floor(previousUv * _ScreenSize.xy - 0.5);
-	float2 previousFrac = frac(previousUv * _ScreenSize.xy - 0.5);
-	
-	float4 history = 0.0;
-	float historyWeightSum = 0.0, accumWeightSum = 0.0, accumSpeed = 0.0;
-	float currentDepth = Linear01ToDeviceDepth(Linear01Depth(_Depth[dispatchThreadId], _ZBufferParams) - velocity.z, _ZBufferParams);
-	
-	// Compute disocclusion basing on plane distance
-	float3 Xprev = MultiplyPointProj(_PrevInvViewProjMatrix, float3(previousUv * 2.0 - 1.0, currentDepth)).xyz;
-	float3 Xvprev = MultiplyPoint(_PrevViewMatrix, Xprev);
-	//float NoXprev = dot(N, Xprev);
-	//float NoVprev = NoXprev / Xvprev.z;
-	//float4 planeDist = abs(NoVprev * viewZprev - NoXprev);
-	float invDistToPoint = rcp(LinearEyeDepth(_Depth[dispatchThreadId], _ZBufferParams));
-	//float4 occlusion = step(gDisocclusionThreshold, planeDist * invDistToPoint);
-	//occlusion = saturate(float(isInScreen) - occlusion);
-	
-	[unroll]
-	for (y = 0, i = 0; y < 2; y++)
+
+	float accumSpeed = 0.0;
+	float2 velocity = _Motion[id];
+	float2 previousUv = uv - velocity;
+	if (all(saturate(previousUv) == previousUv))
 	{
+		// Sample history, remove weighting from history and result, blend, re-apply weight
+		uint4 packedHistory = _History.Gather(_PointClampSampler, previousUv);
+		float4 currentDepths = LinearEyeDepth(_Depth.Gather(_PointClampSampler, uv));
+		float4 previousDepths = LinearEyeDepth(_PreviousDepth.Gather(_PointClampSampler, previousUv));
+		float4 accumSpeedPrev = _FrameCountPrevious.Gather(_PointClampSampler, previousUv) * 255.0;
+		float4 bilinearWeights = BilinearWeights(previousUv, _ScreenSize.xy);
+	
+		float distanceToPoint = LinearEyeDepth(_Depth[id], _ZBufferParams);
+		
+		float4 history = 0.0;
+	
 		[unroll]
-		for (int x = 0; x < 2; x++, i++)
+		for (i = 0; i < 4; i++)
 		{
-			float2 coord = previousCoord + float2(x, y);
-			
-			if (any(coord < 0 || coord >= _ScreenSize.xy))
-				continue;
-			
-			float3 previousPositionWS = MultiplyPointProj(_PrevInvViewProjMatrix, float3(((coord + 0.5) / _ScreenSize.xy) * 2 - 1, previousDepths[i])).xyz;
-			float weight = saturate(1.0 - distance(Xprev, previousPositionWS) * _DepthRejection * invDistToPoint);
-			weight *= saturate(1.0 - length(velocity) * _VelocityRejection);
-			weight *= bilinearWeights[i];
-			
+			float bilateralWeight = saturate(1.0 - (currentDepths[i] - previousDepths[i]) * _DepthRejection / distanceToPoint);
 			float4 historySample = UnpackInput(packedHistory[i]);
-			history += historySample * weight;
-			historyWeightSum += weight;
-			accumSpeed += frameCounts[i] * weight;
-			accumWeightSum += bilinearWeights[i];
+			history += bilinearWeights[i] * lerp(result, historySample, bilateralWeight);
+			accumSpeed += bilinearWeights[i] * bilateralWeight * accumSpeedPrev[i];
 		}
+	
+		accumSpeed = min(accumSpeed, _AccumFrameCount);
+		float speed = 1.0 / (1.0 + accumSpeed * 0.25);
+	
+		float velocityWeight = saturate(1.0 - length(velocity) * _ClampVelocityWeight);
+		float4 extents = stdDev * (1.0 + _ClampWindowScale * velocityWeight);
+		history = clamp(history, mean - extents, mean + extents);
+	
+		float t = speed * maxWeight;
+		result = lerp(history, result, t);
 	}
 	
-	if (historyWeightSum > 0.0)
-		history /= historyWeightSum;
-	
-	if (accumWeightSum > 0.0)
-		accumSpeed /= accumWeightSum;
-	
-	accumSpeed = min(accumSpeed, _AccumFrameCount);
-	float speed = 1.0 / (1.0 + accumSpeed);
-	
-	float velocityWeight = saturate(1.0 - length(velocity) * _ClampVelocityWeight);
-	float4 extents = stdDev * (1.0 + _ClampWindowScale * velocityWeight);
-	history = clamp(history, mean - extents, mean + extents);
-	
-	float t = speed * maxWeight;
-	current = lerp(history, current, t);
-	
-	_Result[dispatchThreadId] = PackOutput(current);
-	_FrameCountResult[dispatchThreadId] = (accumSpeed + 1.0) / 255.0;
-	//_Result[dispatchThreadId] = _Input[dispatchThreadId >> 1];
+	_Result[id] = PackOutput(result);
+	_FrameCountResult[id] = (accumSpeed + 1.0) / 255.0;
 }
 
 [numthreads(8, 8, 1)]
-void Spatial(uint2 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId : SV_GroupThreadID, uint2 groupId : SV_GroupID)
+void Spatial(uint2 id : SV_DispatchThreadID)
 {
-	float frameCount = _FrameCount[dispatchThreadId] * 255.0;
-	float phi = _BlueNoise1D[dispatchThreadId % 128] * TWO_PI;
-	float depth = _Depth[dispatchThreadId];
-	float3 positionWS = PixelToWorld(dispatchThreadId + 0.5, depth);
+	float frameCount = _FrameCount[id] * 255.0;
+	float phi = _BlueNoise1D[id % 128] * TWO_PI;
+	float depth = _Depth[id];
+	float3 positionWS = PixelToWorld(id + 0.5, depth);
  
-	float4 result = UnpackInput(_Input[dispatchThreadId]);
+	float4 result = UnpackInput(_Input[id]);
 	float weightSum = 1.0;
 	
-	float3 normal = GBufferNormal(dispatchThreadId);
+	float3 normal = GBufferNormal(id);
 	float3x3 frame = GetLocalFrame(normal);
 	
 	float rcpEyeDepth = rcp(LinearEyeDepth(depth, _ZBufferParams));
@@ -291,14 +259,13 @@ void Spatial(uint2 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId :
 	
 	result /= weightSum;
 	
-	_Result[dispatchThreadId] = PackOutput(result);
-	//_Result[dispatchThreadId] = _Input[dispatchThreadId];
+	_Result[id] = PackOutput(result);
 }
 
 [numthreads(8, 8, 1)]
-void Combine(uint2 dispatchThreadId : SV_DispatchThreadID)
+void Combine(uint2 id : SV_DispatchThreadID)
 {
-	float2 uv = (dispatchThreadId + 0.5) * _ScreenSize.zw + _Jitter;
+	float2 uv = (id + 0.5) * _ScreenSize.zw + _Jitter;
 	uint4 inputs = _Input.Gather(_PointClampSampler, uv);
 	float4 weights = BilinearWeights(uv, _ScreenSize.xy);
 	
@@ -314,10 +281,10 @@ void Combine(uint2 dispatchThreadId : SV_DispatchThreadID)
 	// Apply final modifier after temporal to reduce variance
 	result.a = pow(result.a, _Strength);
 	
-	float4 visibilityCone = _VisibilityCone[dispatchThreadId];
+	float4 visibilityCone = _VisibilityCone[id];
 	visibilityCone.xyz = GBufferNormal(visibilityCone);
 	visibilityCone = BlendVisibiltyCones(visibilityCone, result);
-	//visibilityCone = result;
+	visibilityCone = result;
 	
-	_VisibilityCone[dispatchThreadId] = PackGBufferNormal(visibilityCone.xyz, visibilityCone.w);
+	_VisibilityCone[id] = PackGBufferNormal(visibilityCone.xyz, visibilityCone.w);
 }

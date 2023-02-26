@@ -143,7 +143,7 @@ struct SurfaceData
 	float Metallic;
 	float3 Emission;
 	float Alpha;
-	float3 Velocity;
+	float2 Velocity;
 	float3 Translucency;
 	float3 tangentWS;
 	bool blurryRefractions;
