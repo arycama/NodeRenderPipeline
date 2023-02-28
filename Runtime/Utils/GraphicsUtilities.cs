@@ -81,7 +81,7 @@ public static class GraphicsUtilities
     /// </summary>
     public static Vector4 ThreadIdScaleOffset(int width, int height)
     {
-        return new Vector4(1f / width, 1f / height, 0.5f / width, 0.5f / height);
+        return new Vector4((float)(1.0 / width), (float)(1.0 / height), (float)(0.5 / width), (float)(0.5 / height));
     }
 
     /// <summary>

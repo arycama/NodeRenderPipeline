@@ -33,6 +33,7 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
 
     [Header("Spatial Denoising")]
     [Input, SerializeField, Range(1, 32)] private int blurSamples = 8;
+    [Input, SerializeField,] private float blurRadius = 0.5f;
     [Input, SerializeField] private float distanceWeight = 1f;
     [Input, SerializeField] private float normalWeight = 1f;
     [Input, SerializeField] private float tangentWeight = 1f;
@@ -71,7 +72,7 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
         if (!isEnabled)
             return;
 
-        var desc0 = new RenderTextureDescriptor(camera.pixelWidth >> 1, camera.pixelHeight >> 1, GraphicsFormat.R32_UInt, 0) { enableRandomWrite = true };
+        var desc0 = new RenderTextureDescriptor(camera.pixelWidth >> 1, camera.pixelHeight >> 1, GraphicsFormat.R32_SInt, 0) { enableRandomWrite = true };
 
         using var scope = context.ScopedCommandBuffer("Ambient Occlusion", true);
         scope.Command.SetRenderTarget(BuiltinRenderTextureType.None);
@@ -79,7 +80,7 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
         scope.Command.GetTemporaryRT(aoTempId0, desc0);
         ComputeAO(scope.Command, camera, aoTempId0);
 
-        var desc1 = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, GraphicsFormat.R32_UInt, 0) { enableRandomWrite = true };
+        var desc1 = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, GraphicsFormat.R32_SInt, 0) { enableRandomWrite = true };
         aoCache.GetTexture(camera, desc1, out var current, out var previous, FrameCount);
 
         var frameCountDesc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, GraphicsFormat.R8_UNorm, 0) { enableRandomWrite = true };
@@ -98,7 +99,6 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
 
         scope.Command.SetComputeTextureParam(computeShader, temporalKernel, "_FrameCountResult", currentFrameCount);
         scope.Command.SetComputeTextureParam(computeShader, temporalKernel, "_FrameCountPrevious", previousFrameCount);
-        scope.Command.SetComputeTextureParam(computeShader, temporalKernel, "_History", previous);
         scope.Command.SetComputeTextureParam(computeShader, temporalKernel, "_GBuffer1", gbuffer1);
 
         scope.Command.SetComputeFloatParam(computeShader, "_ClampWindowScale", clampWindowScale);
@@ -106,6 +106,7 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
         scope.Command.SetComputeFloatParam(computeShader, "_VelocityRejection", velocityRejection);
         scope.Command.SetComputeFloatParam(computeShader, "_ClampVelocityWeight", clampVelocityWeight);
         scope.Command.SetComputeFloatParam(computeShader, "_AccumFrameCount", frameCount);
+        scope.Command.SetComputeVectorParam(computeShader, "_ScaleOffset", GraphicsUtilities.ThreadIdScaleOffset(camera.pixelWidth, camera.pixelHeight));
 
         using (var profilerScope = scope.Command.ProfilerScope("Temporal"))
             scope.Command.DispatchNormalized(computeShader, temporalKernel, camera.pixelWidth, camera.pixelHeight, 1);
@@ -118,6 +119,7 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
         scope.Command.SetComputeTextureParam(computeShader, spatialKernel, "_FrameCount", currentFrameCount);
         scope.Command.SetComputeTextureParam(computeShader, spatialKernel, "_Depth", depth);
 
+        scope.Command.SetComputeFloatParam(computeShader, "_BlurRadius", blurRadius);
         scope.Command.SetComputeFloatParam(computeShader, "_DistanceWeight", distanceWeight);
         scope.Command.SetComputeFloatParam(computeShader, "_NormalWeight", normalWeight);
         scope.Command.SetComputeFloatParam(computeShader, "_TangentWeight", tangentWeight);
@@ -132,6 +134,10 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
         // Combine
         scope.Command.SetComputeTextureParam(computeShader, combineKernel, "_Input", current);
         scope.Command.SetComputeTextureParam(computeShader, combineKernel, "_VisibilityCone", visibilityCone);
+
+        scope.Command.SetGlobalTexture("_AoFrameCountDebug", currentFrameCount);
+        scope.Command.SetGlobalTexture("_MotionDebug", motionVectors);
+
 
         using (var profilerScope = scope.Command.ProfilerScope("Combine"))
             scope.Command.DispatchNormalized(computeShader, combineKernel, camera.pixelWidth, camera.pixelHeight, 1);
@@ -161,6 +167,8 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
 
         command.SetComputeIntParam(computeShader, "_MaxWidth", camera.pixelWidth - 1);
         command.SetComputeIntParam(computeShader, "_MaxHeight", camera.pixelHeight - 1);
+        command.SetComputeIntParam(computeShader, "_Width", camera.pixelWidth);
+        command.SetComputeIntParam(computeShader, "_Height", camera.pixelHeight);
 
         command.SetComputeTextureParam(computeShader, computeKernel, "_BlueNoise2D", blueNoise2D);
         command.SetComputeTextureParam(computeShader, computeKernel, "_Result", result);
