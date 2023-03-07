@@ -87,7 +87,7 @@ struct FragmentOutput
 {
 	float4 normalFoam : SV_Target0;
 	float4 roughnessMask : SV_Target1;
-	uint velocity : SV_Target2;
+	float2 velocity : SV_Target2;
 };
 
 bool CheckTerrainMask(float3 p0, float3 p1, float3 p2, float3 p3)
