@@ -56,7 +56,6 @@ float3 EvaluateLight(PbrInput input, float3 T, float3 B, float3 N, float3 L, flo
 
 	// Impl from Cod WWII, but with bent NdotL
 	float microShadow = saturate(Sq(dot(bentNormal, L) * rsqrt(1.0 - input.occlusion)));
-	//microShadow = 1;
 	
 	illuminance = diffuseTerm * saturate(NdotL);
 	float3 diffuse = input.albedo * microShadow * diffuseTerm * saturate(NdotL) * input.opacity;
