@@ -15,7 +15,7 @@
 RWTexture2D<float> _HitResult, _FrameCountResult;
 RWTexture2D<float4> _Result;
 Texture2D<float4> _HitInput, _Input, _History;
-Texture2D<uint> _MotionVectors;
+Texture2D<float2> _MotionVectors;
 Texture2D<float> _PrevFrameCount, _Depth, _FrameCountPrevious, _PreviousDepth;
 float4x4 _PixelCoordToViewDirWS;
 float2 _Resolution, _ResolutionMinusOne;
@@ -150,7 +150,7 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 	mean /= 9.0;
 	stdDev = sqrt(abs(stdDev / 9.0 - Square(mean)));
 	
-	float3 velocity = UnpackVelocity(_MotionVectors[id << 1]);
+	float2 velocity = _MotionVectors[id << 1];
 	
 	float hitData = _HitInput[id];
 	float depth = _Depth.mips[1][id];
@@ -164,7 +164,7 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 	
 	float4 history = 0.0;
 	float weightSum = 0.0, accumSpeed = 0.0;
-	float currentDepth = Linear01ToDeviceDepth(Linear01Depth(_Depth.mips[1][id], _ZBufferParams) - velocity.z, _ZBufferParams);
+	float currentDepth = Linear01ToDeviceDepth(Linear01Depth(_Depth.mips[1][id], _ZBufferParams), _ZBufferParams);
 	
 	float3 Xprev = MultiplyPointProj(_PrevInvViewProjMatrix, float3((previousUv / _Resolution) * 2 - 1, currentDepth)).xyz;
 	float invDistToPoint = rcp(LinearEyeDepth(_Depth.mips[1][id], _ZBufferParams));

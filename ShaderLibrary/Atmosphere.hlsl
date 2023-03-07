@@ -68,6 +68,11 @@ struct AtmosphereResult
 	bool hasPlanetHit;
 };
 
+float4 AtmosphereTransmittance(float centerDistance)
+{
+	return saturate(exp2(centerDistance * _AtmosphereExtinctionScale + _AtmosphereExtinctionOffset));
+}
+
 // Returns rayleigh (rgb and mie (a) scatter coefficient
 float4 AtmosphereScatter(float centerDistance)
 {
@@ -76,7 +81,7 @@ float4 AtmosphereScatter(float centerDistance)
 
 float3 AtmosphereOpticalDepth(float centerDistance)
 {
-	float4 opticalDepthSumExtinction = AtmosphereScatter(centerDistance);
+	float4 opticalDepthSumExtinction = AtmosphereTransmittance(centerDistance);
 	float3 ozone = max(0.0, _OzoneAbsorption - abs(centerDistance * _AtmosphereOzoneScale + _AtmosphereOzoneOffset));
 	return opticalDepthSumExtinction.xyz + opticalDepthSumExtinction.w + ozone;
 }

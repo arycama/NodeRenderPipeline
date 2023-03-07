@@ -13,7 +13,7 @@ public class AtmosphereProfile : ScriptableObject
 
     [Header("Aerosol Properties")]
     [SerializeField, Range(0, 0.001f)] private float aerosolScatter = 3.996e-6f;
-    [SerializeField, Range(0, 0.1f)] private float aerosolAbsorption = 4.4e-6f;
+    [SerializeField, Range(0, 0.001f)] private float aerosolAbsorption = 4.4e-6f;
     [SerializeField, Range(-1, 1)] private float aerosolAnisotropy = 0.73f;
     [SerializeField, Min(0)] private float aerosolAverageHeight = 1.2e+3f;
 

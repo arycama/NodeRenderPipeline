@@ -25,8 +25,8 @@ public partial class ScreenSpaceReflectionsNode : RenderPipelineNode
     [Input, SerializeField, Range(0f, 32f)] private float blurRadius = 1f;
 
     // Kind of weird, but should work for now
-    [InputNoUpdate] private RenderTargetIdentifier previousFrame;
-    [InputNoUpdate] private RenderTargetIdentifier previousDepth;
+    [Input] private RenderTargetIdentifier previousFrame;
+    [Input] private RenderTargetIdentifier previousDepth;
 
     [Input] private RenderTargetIdentifier cameraMinZTexture;
     [Input] private RenderTargetIdentifier gBuffer1;

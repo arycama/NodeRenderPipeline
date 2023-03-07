@@ -15,7 +15,7 @@ public partial class PreviousFrameTextureNode : RenderPipelineNode
 
     [Input, Output] private NodeConnection connection;
 
-    private SingleTextureCache cache;
+    private CameraTextureCache cache;
 
     public override void Initialize()
     {
@@ -37,8 +37,14 @@ public partial class PreviousFrameTextureNode : RenderPipelineNode
             useMipMap = useMipMap,
         };
 
-        var texture = cache.GetTexture(camera, descriptor);
-        scope.Command.CopyTexture(result, texture);
-        previousFrame = texture;
+        if(cache.GetTexture(camera, descriptor, out var current, out var previous, FrameCount))
+        {
+            // If textures did not exist, copy into previous as well as current
+            scope.Command.CopyTexture(result, previous);
+        }
+
+        scope.Command.CopyTexture(result, current);
+
+        previousFrame = previous;
     }
 }

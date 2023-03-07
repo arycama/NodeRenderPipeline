@@ -533,20 +533,21 @@ public partial class VirtualTerrainPostRenderNode : RenderPipelineNode
     {
         foreach (var node in activeNodes)
         {
-            var start = Vector2Int.FloorToInt((Vector2)texelRegion.min / terrain.terrainData.alphamapResolution * node.IndirectionTextureResolution);
-            var end = Vector2Int.CeilToInt((Vector2)texelRegion.max / terrain.terrainData.alphamapResolution * node.IndirectionTextureResolution);
+            var start = Vector2Int.FloorToInt(texelRegion.min * node.IndirectionTextureResolution / terrain.terrainData.alphamapResolution);
+            var end = Vector2Int.CeilToInt(texelRegion.max * node.IndirectionTextureResolution / terrain.terrainData.alphamapResolution);
 
             // TODO: We also need to clear these pixels from the GPU copy. However, that would require filling a big buffer with pixels to clear, so just clear all for now
             node.needsClear = true;
 
             for (var mip = 0; mip < node.indirectionTexture.mipmapCount; mip++)
             {
-                var mipStart = Vector2Int.FloorToInt((Vector2)start / Mathf.Pow(2, mip));
-                var mipEnd = Vector2Int.CeilToInt((Vector2)end / Mathf.Pow(2, mip));
 
                 // Offset in bytes for this mip in the array
                 var targetOffset = Texture2DExtensions.MipOffset(mip, node.IndirectionTextureResolution);
-                var mipSize = node.IndirectionTextureResolution / (int)Mathf.Pow(2, mip);
+                var mipSize = node.IndirectionTextureResolution >> mip;
+
+                var mipStart = Vector2Int.Max(Vector2Int.zero, new Vector2Int(start.x >> mip, start.y >> mip));
+                var mipEnd = Vector2Int.Min(Vector2Int.one * mipSize, new Vector2Int(end.x >> mip, end.y >> mip));
 
                 var width = mipEnd.x - mipStart.x;
                 var height = mipEnd.y - mipStart.y;

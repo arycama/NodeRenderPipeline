@@ -4,14 +4,14 @@
 
 RWTexture2D<float4> _ReprojectResult;
 Texture2D<float4> _PreviousFrame;
-Texture2D<uint> _MotionVectors;
+Texture2D<float2> _MotionVectors;
 float4 _ScaleOffset;
 
 [numthreads(8, 8, 1)]
 void Reproject(uint2 id : SV_DispatchThreadID)
 {
 	float2 uv = id * _ScaleOffset.xy + _ScaleOffset.zw;
-	float2 motion = UnpackVelocity(_MotionVectors[id]).xy;
+	float2 motion = _MotionVectors[id];
 	float2 previousUv = uv - motion ;
 	
 	float isInBounds = all(previousUv > 0 && previousUv < 1);

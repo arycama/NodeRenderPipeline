@@ -329,9 +329,9 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 	
 		// Blend with result
 		float speed = 1.0 / (1.0 + oldFrameCount);
-		newFrameCount = min(oldFrameCount + 1.0, 16.0);
-		scatter = lerp(previousScatter, scatter, 0.05);
-		transmittance = lerp(previousTransmittance, transmittance, 0.05);
+		newFrameCount = min(oldFrameCount + 1.0, 20.0);
+		scatter = lerp(previousScatter, scatter, speed);
+		transmittance = lerp(previousTransmittance, transmittance, speed);
 	}
 	
 	scatter /= 1.0 - Luminance(scatter);

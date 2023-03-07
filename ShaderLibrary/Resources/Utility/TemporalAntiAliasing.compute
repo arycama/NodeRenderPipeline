@@ -5,7 +5,7 @@
 
 RWTexture2D<float3> _Result;
 Texture2D<float3> _Input, _History;
-Texture2D<uint> _MotionVectors;
+Texture2D<float2> _MotionVectors;
 Texture2D<float> _Depth;
 uint _MaxWidth, _MaxHeight;
 
@@ -13,7 +13,7 @@ uint _MaxWidth, _MaxHeight;
 void Temporal(uint2 id : SV_DispatchThreadID)
 {
 	float3 result = 0.0, mean = 0.0, stdDev = 0.0;
-	uint2 closestDepthUv = uint2(0, 0);
+	uint2 closestDepthUv = id;
 	float closestDepth = 0.0, weightSum = 0.0;
 	
 	[unroll]
@@ -50,13 +50,13 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 	stdDev = sqrt(abs(stdDev / 9.0 - mean * mean)) * 1.5;
 	
 	// Calculate previosu Uv
-	float2 uv = (id + 0.5) * _ScreenSize.zw;
-	float2 previousUv = uv - UnpackVelocity(_MotionVectors[closestDepthUv]).xy;
+	float2 uv = (id + 0.5) / _ScreenSize.xy;
+	float2 previousUv = uv - _MotionVectors[closestDepthUv];
 		
 	// Sample history
 	if (all(saturate(previousUv) == previousUv))
 	{
-		float3 history = Bicubic5Tap(_History, previousUv, 0.5, _ScreenSize);
+		float3 history = Bicubic5Tap(_History, previousUv, 0.25, _ScreenSize);
 		history = RGBToYCoCg(history);
 		history *= rcp(1.0 + history.r);
 		
