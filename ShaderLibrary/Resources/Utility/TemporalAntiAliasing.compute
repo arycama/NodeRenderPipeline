@@ -12,62 +12,20 @@ uint _MaxWidth, _MaxHeight;
 [numthreads(8, 8, 1)]
 void Temporal(uint2 id : SV_DispatchThreadID)
 {
-	float3 result = 0.0, mean = 0.0, stdDev = 0.0;
-	uint2 closestDepthUv = id;
-	float closestDepth = 0.0, weightSum = 0.0;
+	// Reprojection
+	float2 motion = _MotionVectors[id];
+	float2 uv = (id + 0.5) * _ScreenSize.zw;
+	float2 previousUv = uv - motion;
 	
-	[unroll]
-	for (int y = -1; y <= 1; y++)
-	{
-		[unroll]
-		for (int x = -1; x <= 1; x++)
-		{
-			float2 delta = float2(x, y) - _Jitter * _ScreenSize.xy;
-			float weight = exp(-2.29 * dot(delta, delta));
-			weightSum += weight;
-			
-			uint2 coord = clamp(id + int2(x, y), 0, uint2(_MaxWidth, _MaxHeight));
-			float3 color = _Input[coord];
-			float depth = _Depth[coord];
-			
-			color = RGBToYCoCg(color);
-			color *= rcp(1.0 + color.r);
-			
-			result += color * weight;
-			mean += color;
-			stdDev += color * color;
-			
-			if(depth > closestDepth)
-			{
-				closestDepthUv = coord;
-				closestDepth = depth;
-			}
-		}
-	}
+	float3 input = _Input[id];
+	//input = RGBToYCoCg(input);
 	
-	result /= weightSum;
-	mean /= 9.0;
-	stdDev = sqrt(abs(stdDev / 9.0 - mean * mean)) * 1.5;
+	float3 history = _History.SampleLevel(_LinearClampSampler, previousUv, 0.0);
+	//history = RGBToYCoCg(history);
 	
-	// Calculate previosu Uv
-	float2 uv = (id + 0.5) / _ScreenSize.xy;
-	float2 previousUv = uv - _MotionVectors[closestDepthUv];
-		
-	// Sample history
-	if (all(saturate(previousUv) == previousUv))
-	{
-		float3 history = Bicubic5Tap(_History, previousUv, 0.25, _ScreenSize);
-		history = RGBToYCoCg(history);
-		history *= rcp(1.0 + history.r);
-		
-		history = ClipToAABB(history, mean, stdDev);
-		result = lerp(history, result, 0.05);
-	}
+	float3 result = lerp(history, input, 0.05);
+	//result = YCoCgToRGB(result);
 	
-	if(AnyIsNaN(result))
-		result = 0;
-	
-	result *= rcp(1.0 - result.r);
-	result = YCoCgToRGB(result);
 	_Result[id] = result;
+	_Result[id] = _Input[id];
 }

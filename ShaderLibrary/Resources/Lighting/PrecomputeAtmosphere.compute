@@ -93,6 +93,6 @@ void KERNEL(uint2 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, uint gro
 		}
 	
 		if (groupIndex == 0)
-			Result[groupId] = ScatterShared[0] / (1.0 - MultiScatterShared[0] / (4.0 * PI)) * 4.0 * PI;
+			Result[groupId] = ScatterShared[0] / (1.0 - MultiScatterShared[0] / (4.0 * PI));
 	#endif
 }

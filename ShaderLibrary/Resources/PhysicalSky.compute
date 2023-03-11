@@ -225,6 +225,9 @@ void SpatialDenoise(int2 id : SV_DispatchThreadID)
 	
 	_ScatterResult[id] = scatter;
 	_TransmittanceResult[id] = transmittance;
+		
+	_ScatterResult[id] = _Scatter[id];
+	_TransmittanceResult[id] = _Transmittance[id];
 }
 
 static const float MAX_FRAME_NUM = 16.0;
@@ -339,6 +342,9 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 	_ScatterResult[id] = scatter;
 	_TransmittanceResult[id] = transmittance;
 	_NewFrameCount[id] = newFrameCount / 255.0;
+	
+	_ScatterResult[id] = _Scatter[id];
+	_TransmittanceResult[id] = _Transmittance[id];
 }
 
 float4 LinearEyeDepth(float4 depth, float4 zBufferParam)

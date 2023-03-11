@@ -191,7 +191,7 @@ void Downsample(uint2 id : SV_DispatchThreadID)
 	downsample += (j + k + l + m) * 0.125;
 	
 #ifdef LENS_FLARE
-	downsample += LensFlare(uv);
+	//downsample += LensFlare(uv);
 #endif
 	
 	_Result[id] = downsample;
@@ -242,5 +242,5 @@ void Upsample(uint2 id : SV_DispatchThreadID)
 	
 	result = lerp(result, upsample, _Strength * dirt);
 	
-	_Result[id] = result;
+	//_Result[id] = result;
 }

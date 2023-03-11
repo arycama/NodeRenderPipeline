@@ -29,17 +29,49 @@ Texture2D<float3> _MultipleScatter;
 
 float2 TransmittanceUv(float viewHeight, float viewZenithCosAngle)
 {
-	float2 uv;
-	uv.x = 0.5 * (FastATanPos(max(viewZenithCosAngle, -0.45) * tan(1.26 * 0.75)) / 0.75 + (1.0 - 0.26));
-	uv.y = sqrt((viewHeight - _PlanetRadius) / _AtmosphereHeight);
-	return uv;
+	#if 1
+		float H = sqrt(max(0.0f, _TopRadius * _TopRadius - _PlanetRadius * _PlanetRadius));
+		float rho = sqrt(max(0.0f, viewHeight * viewHeight - _PlanetRadius * _PlanetRadius));
+
+		float discriminant = viewHeight * viewHeight * (viewZenithCosAngle * viewZenithCosAngle - 1.0) + _TopRadius * _TopRadius;
+		float d = max(0.0, (-viewHeight * viewZenithCosAngle + sqrt(discriminant))); // Distance to atmosphere boundary
+
+		float d_min = _TopRadius - viewHeight;
+		float d_max = rho + H;
+		float x_mu = (d - d_min) / (d_max - d_min);
+		float x_r = rho / H;
+
+		return float2(x_mu, x_r);
+	#else
+		float2 uv;
+		uv.x = 0.5 * (FastATanPos(max(viewZenithCosAngle, -0.45) * tan(1.26 * 0.75)) / 0.75 + (1.0 - 0.26));
+		uv.y = sqrt((viewHeight - _PlanetRadius) / _AtmosphereHeight);
+		return uv;
+	#endif
 }
 
 float2 UvToSkyParams(float2 uv)
 {
-	float r = uv.y * uv.y * _AtmosphereHeight + _PlanetRadius;
-	float mu = tan((2.0 * uv.x - 1.0 + 0.26) * 0.75) / tan(1.26 * 0.75);
-	return float2(mu, r);
+	#if 1
+		float x_mu = uv.x;
+		float x_r = uv.y;
+
+		float H = sqrt(_TopRadius * _TopRadius - _PlanetRadius * _PlanetRadius);
+		float rho = H * x_r;
+		float viewHeight = sqrt(rho * rho + _PlanetRadius * _PlanetRadius);
+
+		float d_min = _TopRadius - viewHeight;
+		float d_max = rho + H;
+		float d = d_min + x_mu * (d_max - d_min);
+		float viewZenithCosAngle = d == 0.0 ? 1.0f : (H * H - rho * rho - d * d) / (2.0 * viewHeight * d);
+		viewZenithCosAngle = clamp(viewZenithCosAngle, -1.0, 1.0);
+	
+		return float2(viewZenithCosAngle, viewHeight);
+	#else
+		float r = uv.y * uv.y * _AtmosphereHeight + _PlanetRadius;
+		float mu = tan((2.0 * uv.x - 1.0 + 0.26) * 0.75) / tan(1.26 * 0.75);
+		return float2(mu, r);
+	#endif
 }
 
 float3 TransmittanceToAtmosphere(float viewHeight, float viewZenithCosAngle, SamplerState samplerState)
