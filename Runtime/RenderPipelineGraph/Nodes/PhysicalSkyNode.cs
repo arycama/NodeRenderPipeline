@@ -8,7 +8,7 @@ public partial class PhysicalSkyNode : RenderPipelineNode
     private static readonly IndexedString noiseIds = new("STBN/Scalar/stbn_scalar_2Dx1Dx1D_128x128x64x1_");
 
     [SerializeField] private AtmosphereProfile atmosphereProfile;
-    [SerializeField, Range(1, 64)] private int sampleCount = 16;
+    [Input, SerializeField, Range(1, 64)] private int sampleCount = 16;
 
     [Header("Sky")]
     [Input] private RenderTargetIdentifier exposure;
@@ -66,18 +66,8 @@ public partial class PhysicalSkyNode : RenderPipelineNode
         scope.Command.SetComputeVectorParam(computeShader, "_LightColor0", lightColor);
         scope.Command.SetComputeVectorParam(computeShader, "_GroundColor", atmosphereProfile.GroundColor.linear);
 
-        scope.Command.SetComputeVectorParam(computeShader, "_RayleighScatter", atmosphereProfile.AirScatter);
-        scope.Command.SetComputeVectorParam(computeShader, "_OzoneAbsorption", atmosphereProfile.AirAbsorption);
-
-        scope.Command.SetComputeFloatParam(computeShader, "_RayleighHeight", atmosphereProfile.AirAverageHeight);
-        scope.Command.SetComputeFloatParam(computeShader, "_MieHeight", atmosphereProfile.AerosolAverageHeight);
-        scope.Command.SetComputeFloatParam(computeShader, "_MieScatter", atmosphereProfile.AerosolScatter);
-        scope.Command.SetComputeFloatParam(computeShader, "_MieAbsorption", atmosphereProfile.AerosolAbsorption);
-
-        scope.Command.SetComputeFloatParam(computeShader, "_OzoneWidth", atmosphereProfile.OzoneWidth);
-        scope.Command.SetComputeFloatParam(computeShader, "_OzoneHeight", atmosphereProfile.OzoneHeight);
-
         scope.Command.SetComputeFloatParam(computeShader, "_SampleCount", sampleCount);
+        scope.Command.SetComputeFloatParam(computeShader, "_ViewHeight", (float)((double)atmosphereProfile.PlanetRadius + camera.transform.position.y));
 
         scope.Command.DispatchNormalized(computeShader, 0, camera.pixelWidth, camera.pixelHeight, 1);
     }
