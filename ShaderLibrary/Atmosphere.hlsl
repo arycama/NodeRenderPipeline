@@ -24,17 +24,19 @@ cbuffer AtmosphereProperties
 	float _AtmospherePropertiesPad;
 };
 
+float4 _AtmosphereTransmittanceRemap, _AtmosphereMultiScatterRemap;
+
 Texture2D<float3> _AtmosphereTransmittance;
 Texture2D<float3> _MultipleScatter;
 
 float2 TransmittanceUv(float viewHeight, float viewZenithCosAngle)
 {
 	#if 1
-		float H = sqrt(max(0.0f, _TopRadius * _TopRadius - _PlanetRadius * _PlanetRadius));
-		float rho = sqrt(max(0.0f, viewHeight * viewHeight - _PlanetRadius * _PlanetRadius));
+		float H = sqrt(_TopRadius * _TopRadius - _PlanetRadius * _PlanetRadius);
+		float rho = sqrt(viewHeight * viewHeight - _PlanetRadius * _PlanetRadius);
 
 		float discriminant = viewHeight * viewHeight * (viewZenithCosAngle * viewZenithCosAngle - 1.0) + _TopRadius * _TopRadius;
-		float d = max(0.0, (-viewHeight * viewZenithCosAngle + sqrt(discriminant))); // Distance to atmosphere boundary
+		float d = -viewHeight * viewZenithCosAngle + sqrt(discriminant); // Distance to atmosphere boundary
 
 		float d_min = _TopRadius - viewHeight;
 		float d_max = rho + H;
@@ -64,7 +66,6 @@ float2 UvToSkyParams(float2 uv)
 		float d_max = rho + H;
 		float d = d_min + x_mu * (d_max - d_min);
 		float viewZenithCosAngle = d == 0.0 ? 1.0f : (H * H - rho * rho - d * d) / (2.0 * viewHeight * d);
-		viewZenithCosAngle = clamp(viewZenithCosAngle, -1.0, 1.0);
 	
 		return float2(viewZenithCosAngle, viewHeight);
 	#else

@@ -4,71 +4,87 @@
 #pragma kernel MultiScatter KERNEL=MultiScatter MULTI_SCATTER
 
 RWTexture2D<float3> Result;
-float4 _ScaleOffset;
+float2 _ScaleOffset;
 uint _SampleCount;
 
 static const uint _ThreadCount = 64;
 
 groupshared float3 MultiScatterShared[_ThreadCount], ScatterShared[_ThreadCount];
 
+bool RayIntersectsGround(float viewHeight, float mu)
+{
+	return (mu < 0.0) && ((viewHeight * viewHeight * (mu * mu - 1.0) + _PlanetRadius * _PlanetRadius) >= 0.0);
+}
+
 [numthreads(_ThreadCount, 1, 1)]
 void KERNEL(uint2 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
 {
 	#ifdef TRANSMITTANCE
-		float2 uv = id * _ScaleOffset.xy + _ScaleOffset.zw;
+		float2 uv = id * _ScaleOffset;
 		float2 skyParams = UvToSkyParams(uv);
-		float3 rayOrigin = float3(0.0, skyParams.y, 0.0);
 		float3 V = float3(SinFromCos(skyParams.x), skyParams.x, 0.0);
 		float3 L = 0.0;
-		bool checkPlanetHit = false;
 	#else
-		float2 uv = groupId * _ScaleOffset.xy + _ScaleOffset.zw;
+		float2 uv = groupId * _ScaleOffset;
 		float2 skyParams = UvToSkyParams(uv);
-		float3 rayOrigin = float3(0.0, skyParams.y, 0.0);
 		float3 L = float3(SinFromCos(skyParams.x), skyParams.x, 0.0);
 		float2 u = Hammersley2dSeq(groupIndex, _ThreadCount);
 		float3 V = SampleSphereUniform(u.x, u.y);
-		bool checkPlanetHit = true;
 	#endif
 	
+	float viewHeight = skyParams.y;
 	float3 luminance = 0.0, multiScatter = 0.0, transmittance = 1.0;
 	
-	float rayDistance;
-	float2 intersections;
-	bool hasPlanetHit = IntersectRaySphere(rayOrigin, V, _PlanetRadius, intersections) && intersections.x >= 0.0;
-	if (checkPlanetHit && hasPlanetHit)
+	// Compute the distance to the top atmosphere boundary along the view ray,
+    // assuming the viewer is in space (or NaN if the view ray does not intersect the atmosphere).
+	float dx;
+	if (RayIntersectsGround(viewHeight, V.y))
 	{
-		rayDistance = intersections.x;
+		float discriminant = viewHeight * viewHeight * (V.y * V.y - 1.0) + _PlanetRadius * _PlanetRadius;
+		dx = -viewHeight * V.y - sqrt(discriminant);
 	}
 	else
 	{
-		rayDistance = IntersectRaySphereSimple(rayOrigin, V, _TopRadius);
+		float discriminant = viewHeight * viewHeight * (V.y * V.y - 1.0) + _TopRadius * _TopRadius;
+		dx = -viewHeight * V.y + sqrt(discriminant);
 	}
 	
-	float ds = rayDistance / _SampleCount;
-	float3 rayStep = V * ds;
-
+	dx /= _SampleCount;
+	
 	for (float i = 0.5; i < _SampleCount; i++)
 	{
-		float3 P = rayOrigin + i * rayStep;
-		float3 opticalDepth = AtmosphereOpticalDepth(length(P));
+		float d = i * dx;
+		float centerDist = sqrt(d * d + 2.0 * viewHeight * V.y * d + viewHeight * viewHeight);
+			
+		float4 extinctionCombined = saturate(exp2(centerDist * _AtmosphereExtinctionScale + _AtmosphereExtinctionOffset));
+		float3 extinction = extinctionCombined.xyz + extinctionCombined.w + max(0.0, _OzoneAbsorption - abs(centerDist * _AtmosphereOzoneScale + _AtmosphereOzoneOffset));
 		
-		float3 lighting = AtmosphereLight(P, V, L, _LinearClampSampler);
-		luminance += transmittance * lighting * (1.0 - exp(-opticalDepth * ds)) / opticalDepth;
+		float LdotV = dot(V, L);
+		float sunAngle = (viewHeight * L.y + d * LdotV) / centerDist;
+		if (!RayIntersectsGround(centerDist, sunAngle))
+		{
+			float2 uv = TransmittanceUv(centerDist, sunAngle);
+			float3 transmittanceToAtmosphere = _AtmosphereTransmittance.SampleLevel(_LinearClampSampler, uv, 0.0);
+			
+			float4 scatter = saturate(exp2(centerDist * _AtmosphereExtinctionScale + _AtmosphereScatterOffset));
+			float3 lighting = RayleighPhaseFunction(LdotV) * transmittanceToAtmosphere * scatter.xyz;
+			lighting += CornetteShanksPhasePartVarying(_MiePhase, LdotV) * _MiePhaseConstant * transmittanceToAtmosphere * scatter.w;
+			luminance += transmittance * lighting * (1.0 - exp(-extinction * dx)) / extinction;
+			
+			multiScatter += transmittance * (scatter.xyz + scatter.w) * (1.0 - exp(-extinction * dx)) / extinction;
+		}
 		
-		float4 opticalDepthSumScatter = AtmosphereScatter(length(P));
-		multiScatter += transmittance * (opticalDepthSumScatter.xyz + opticalDepthSumScatter.w) * (1.0 - exp(-opticalDepth * ds)) / opticalDepth;
-		
-		transmittance *= exp(-opticalDepth * ds);
+		transmittance *= exp(-extinction * dx);
 	}
 	
-	if(hasPlanetHit)
-	{
 		// Account for bounced light off the earth
-		float3 P = rayOrigin + V * rayDistance;
-		float3 N = P / _PlanetRadius;
-        
-		float NdotL = dot(N, L);
+	if (RayIntersectsGround(viewHeight, V.y))
+	{
+		float d = dx * _SampleCount;
+		float centerDist = sqrt(d * d + 2.0 * viewHeight * V.y * d + viewHeight * viewHeight);
+
+		float LdotV = dot(V, L);
+		float NdotL = (viewHeight * L.y + d * LdotV) / centerDist;
 		float3 sunTransmittance = TransmittanceToAtmosphere(_PlanetRadius, NdotL, _LinearClampSampler);
 		luminance += sunTransmittance * transmittance * saturate(NdotL) * _GroundColor / PI;
 	}

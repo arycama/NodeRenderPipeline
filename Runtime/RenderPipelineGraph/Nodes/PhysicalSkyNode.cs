@@ -44,7 +44,7 @@ public partial class PhysicalSkyNode : RenderPipelineNode
         var viewToWorld = Matrix4x4.Rotate(camera.transform.rotation);
         var mat = Matrix4x4Extensions.ComputePixelCoordToWorldSpaceViewDirectionMatrix(camera.Resolution(), new Vector2(jitterX, jitterY), camera.fieldOfView, camera.aspect, viewToWorld, false);
 
-        var blueNoise1D = Resources.Load<Texture2D>(noiseIds.GetString(FrameCount % 64));
+        var blueNoise1D = Resources.Load<Texture2D>(noiseIds.GetString(FrameCount % 64 * 1));
         var planetCenterRws = new Vector3(0f, (float)((double)atmosphereProfile.PlanetRadius + camera.transform.position.y), 0f);
 
         using var scope = context.ScopedCommandBuffer("Physical Sky");
@@ -68,6 +68,12 @@ public partial class PhysicalSkyNode : RenderPipelineNode
 
         scope.Command.SetComputeFloatParam(computeShader, "_SampleCount", sampleCount);
         scope.Command.SetComputeFloatParam(computeShader, "_ViewHeight", (float)((double)atmosphereProfile.PlanetRadius + camera.transform.position.y));
+
+        // For some testing
+        scope.Command.SetComputeVectorParam(computeShader, "_RayleighScatter", atmosphereProfile.AirScatter);
+        scope.Command.SetComputeVectorParam(computeShader, "_OzoneAbsorption", atmosphereProfile.AirAbsorption);
+        scope.Command.SetComputeFloatParam(computeShader, "_MieScatter", atmosphereProfile.AerosolScatter);
+        scope.Command.SetComputeFloatParam(computeShader, "_MieAbsorption", atmosphereProfile.AerosolAbsorption);
 
         scope.Command.DispatchNormalized(computeShader, 0, camera.pixelWidth, camera.pixelHeight, 1);
     }

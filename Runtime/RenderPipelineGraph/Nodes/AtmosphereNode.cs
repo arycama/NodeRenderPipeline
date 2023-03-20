@@ -28,7 +28,7 @@ public partial class AtmosphereNode : RenderPipelineNode
     {
         base.Initialize();
 
-        transmittanceTexture = new RenderTexture(transmittanceResolution.x, transmittanceResolution.y, 0, transmittanceFormat) { enableRandomWrite = true, hideFlags = HideFlags.HideAndDontSave }.Created();
+        transmittanceTexture = new RenderTexture(transmittanceResolution.x, transmittanceResolution.y, 0, RenderTextureFormat.ARGBFloat) { enableRandomWrite = true, hideFlags = HideFlags.HideAndDontSave }.Created();
         multiScatterTexture = new RenderTexture(multiScatterResolution.x, multiScatterResolution.y, 0, multiScatterFormat) { enableRandomWrite = true, hideFlags = HideFlags.HideAndDontSave }.Created();
 
         transmittance = transmittanceTexture;
@@ -55,6 +55,12 @@ public partial class AtmosphereNode : RenderPipelineNode
         // Required for now, but place somewhere else maybe
         var planetCenterRws = new Vector3(0f, (float)(double)atmosphereProfile.PlanetRadius + camera.transform.position.y, 0f);
         scope.Command.SetGlobalVector("_PlanetOffset", planetCenterRws);
+
+        var transmittanceRemap = GraphicsUtilities.HalfTexelRemap(transmittanceResolution.x, transmittanceResolution.y);
+        scope.Command.SetGlobalVector("_AtmosphereTransmittanceRemap", transmittanceRemap);
+
+        var multiScatterRemap = GraphicsUtilities.HalfTexelRemap(multiScatterResolution.x, multiScatterResolution.y);
+        scope.Command.SetGlobalVector("_AtmosphereMultiScatterRemap", multiScatterRemap);
 
         if (atmosphereProfile == null || atmosphereProfile.Version == version)
             return;
@@ -121,7 +127,7 @@ public partial class AtmosphereNode : RenderPipelineNode
         {
             var transmittanceKernel = computeShader.FindKernel("Transmittance");
             scope.Command.SetComputeTextureParam(computeShader, transmittanceKernel, "Result", transmittanceTexture);
-            scope.Command.SetComputeVectorParam(computeShader, "_ScaleOffset", GraphicsUtilities.ThreadIdScaleOffset(transmittanceResolution.x, transmittanceResolution.y));
+            scope.Command.SetComputeVectorParam(computeShader, "_ScaleOffset", GraphicsUtilities.ThreadIdScaleOffset01(transmittanceResolution.x, transmittanceResolution.y));
             scope.Command.SetComputeIntParam(computeShader, "_SampleCount", transmittanceSamples);
             scope.Command.DispatchNormalized(computeShader, transmittanceKernel, transmittanceResolution.x, transmittanceResolution.y, 1);
         }
@@ -132,7 +138,7 @@ public partial class AtmosphereNode : RenderPipelineNode
             var multiScatterKernel = computeShader.FindKernel("MultiScatter");
             scope.Command.SetComputeTextureParam(computeShader, multiScatterKernel, "_AtmosphereTransmittance", transmittanceTexture);
             scope.Command.SetComputeTextureParam(computeShader, multiScatterKernel, "Result", multiScatterTexture);
-            scope.Command.SetComputeVectorParam(computeShader, "_ScaleOffset", GraphicsUtilities.ThreadIdScaleOffset(multiScatterResolution.x, multiScatterResolution.y));
+            scope.Command.SetComputeVectorParam(computeShader, "_ScaleOffset", GraphicsUtilities.ThreadIdScaleOffset01(multiScatterResolution.x, multiScatterResolution.y));
             scope.Command.SetComputeIntParam(computeShader, "_SampleCount", multiScatterSamples);
             scope.Command.DispatchCompute(computeShader, multiScatterKernel, multiScatterResolution.x, multiScatterResolution.y, 1);
         }
