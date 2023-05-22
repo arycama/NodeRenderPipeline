@@ -4,7 +4,6 @@
 	{
 		[Header(Scattering)]
 		[IntRange] _Steps("Steps", Range(1, 32)) = 8
-		_MaxDistance("Max Scatter Distance", Float) = 128
 
 		[Header(Tessellation)]
 		_EdgeLength("Edge Length", Float) = 16

@@ -49,7 +49,6 @@ public partial class DeferredWaterNode : RenderPipelineNode
         propertyBlock.SetVector("_Extinction", material.GetColor("_Extinction").linear);
 
         propertyBlock.SetFloat("_RefractOffset", material.GetFloat("_RefractOffset"));
-        propertyBlock.SetFloat("_MaxDistance", material.GetFloat("_MaxDistance"));
         propertyBlock.SetFloat("_Steps", material.GetFloat("_Steps"));
 
         var gBuffer0 = new AttachmentDescriptor(GraphicsFormat.R8G8B8A8_UNorm);

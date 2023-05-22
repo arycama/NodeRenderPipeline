@@ -173,6 +173,7 @@ public partial class RenderWaterNode : RenderPipelineNode
         // Foam
         scope.Command.SetComputeFloatParam(computeShader, "_FoamStrength", profile.FoamStrength);
         scope.Command.SetComputeFloatParam(computeShader, "_FoamDecay", profile.FoamDecay);
+        scope.Command.SetComputeFloatParam(computeShader, "_FoamThreshold", profile.FoamThreshold);
         scope.Command.SetComputeTextureParam(computeShader, 4, "_NormalFoamSmoothness", foamSmoothness);
         scope.Command.SetComputeTextureParam(computeShader, 4, "_NormalMap", normalMap);
         scope.Command.DispatchNormalized(computeShader, 4, resolution, resolution, 4);

@@ -14,15 +14,14 @@
 	#define LIGHT_COUNT_TWO
 #endif
 
-Texture2D<float4> _WaterNormalFoam;
-Texture2D<float4> _WaterRoughnessMask;
+Texture2D<float4> _WaterNormalFoam, _WaterRoughnessMask;
 Texture2D<float3> _WaterEmission, _UnderwaterResult;
 Texture2D<float> _Depth, _UnderwaterDepth;
 
 Texture2D<float> _UnityFBInput0;
 
 float3 _Extinction, _Color, _LightColor0, _LightDirection0, _LightColor1, _LightDirection1;
-float _RefractOffset, _MaxDistance, _Steps, _ScatterAttenuation, _ScatterContribution, _ScatterEccentricity, _BackwardScatter, _ForwardScatter, _ScatterBlend, _ScatterOctaves;
+float _RefractOffset, _Steps;
 
 float4 Vertex(uint id : SV_VertexID) : SV_Position
 {
@@ -33,7 +32,6 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 {
 	float waterDepth = _UnityFBInput0[positionCS.xy];
 	float4 waterNormalFoam = _WaterNormalFoam[positionCS.xy];
-	float4 waterRoughnessMask = _WaterRoughnessMask[positionCS.xy];
 	
 	float3 positionWS = PixelToWorld(positionCS.xy, waterDepth);
 	float linearWaterDepth = LinearEyeDepth(waterDepth, _ZBufferParams);
@@ -57,13 +55,6 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 	float3 V = normalize(positionWS);
 	underwaterDistance /= dot(V, _InvViewMatrix._m02_m12_m22);
 	
-	float offset = BlueNoise1D(positionCS.xy);
-	float3 rayStep = V * min(underwaterDistance, _MaxDistance) / _Steps;
-	float ds = length(rayStep);
-	float3 refractedDir = refract(V, N, 1.0 / 1.34);
-	
-	float perceptualRoughness = ConvertAnisotropicPerceptualRoughnessToPerceptualRoughness(waterRoughnessMask.gb);
-	
 	#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
 		// Slight optimisation, only calculate atmospheric transmittance at surface
 		float3 lightColor0 = INV_FOUR_PI * ApplyExposure(_LightColor0) * TransmittanceToAtmosphere(positionWS + _PlanetOffset, _LightDirection0, _LinearClampSampler);
@@ -74,14 +65,20 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 		float3 lightColor1 = INV_FOUR_PI * ApplyExposure(_LightColor1) * TransmittanceToAtmosphere(positionWS + _PlanetOffset, _LightDirection1, _LinearClampSampler);
 	#endif
 
-	float3 intTransmittance = 1.0, intScatter = 0.0;
+	float3 scatter = 0.0;
+	
+	float offset = BlueNoise1D(positionCS.xy);
 	for (float i = offset; i < _Steps; i++)
 	{
-		float3 P = positionWS + rayStep * i;
-		float3 transmittance = exp(-ds * _Extinction);
+		float xi = i / _Steps;
+		float c = Max3(_Extinction);
+		float b = underwaterDistance;
+		float t = -log(1.0 - xi * (1.0 - exp(-c * b))) / c;
+		float weight = exp(c * t) / c - rcp(c * exp(c * (b - t)));
+		float3 P = positionWS + V * t;
 
 		#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
-			float attenuation = DirectionalLightShadow(P, 0, 0.5, false, false);
+			float attenuation = DirectionalLightShadow(P, 0, 0.5, false);
 			if(attenuation > 0.0)
 			{
 				attenuation *= CloudTransmittanceLevelZero(P);
@@ -95,26 +92,30 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 						shadowDistance0 = saturate(shadowDepth - shadowPosition.z) * _WaterShadowFar;
 					}
 
-					intScatter.rgb += lightColor0 * attenuation * exp(-shadowDistance0 * _Extinction) * (1.0 - transmittance) * intTransmittance;
+					scatter += lightColor0 * attenuation * exp(-_Extinction * (shadowDistance0 + t)) * weight;
 				}
 			}
 		#endif
 		
 		#ifdef LIGHT_COUNT_TWO
 			float shadowDistance1 = max(0.0, positionWS.y - P.y) / max(1e-6, saturate(_LightDirection1.y));
-			intScatter.rgb += lightColor1 * exp(-shadowDistance1 * _Extinction) * (1.0 - transmittance) * intTransmittance;
+		scatter += lightColor1 * exp(-_Extinction * (shadowDistance1 + t)) * weight;
 		#endif
-		
-		intTransmittance *= transmittance;
 	}
 	
+	scatter = scatter / _Steps * _Extinction;
+	
 	// Ambient 
-	intScatter += _AmbientSh[0].xyz * rcp(2.0 * sqrt(PI)) * (1.0 - intTransmittance);
+	float3 finalTransmittance = exp(-underwaterDistance * _Extinction);
+	scatter += _AmbientSh[0].xyz * rcp(2.0 * sqrt(PI)) * (1.0 - finalTransmittance);
 
-	float3 waterEmission = intScatter * _Color;
+	float3 waterEmission = scatter * _Color;
 	if(underwaterDepth != UNITY_RAW_FAR_CLIP_VALUE)
 		waterEmission += _UnderwaterResult[refractionUv] * exp(-_Extinction * underwaterDistance);
 	
+	// Apply roughness to transmission
+	float4 waterRoughnessMask = _WaterRoughnessMask[positionCS.xy];
+	float perceptualRoughness = ConvertAnisotropicPerceptualRoughnessToPerceptualRoughness(waterRoughnessMask.gb);
 	waterEmission *= (1.0 - waterNormalFoam.a) * GGXDiffuse(1.0, dot(N, -V), perceptualRoughness, 0.04) * PI;
 
 	GBufferOut output;

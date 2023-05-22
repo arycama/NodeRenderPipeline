@@ -34,9 +34,9 @@ Buffer<float4> _CullingSpheres;
 TextureCubeArray<float> _PointShadows;
 Texture2DArray<float> _SpotlightShadows, _AreaShadows;
 float _ShadowPcfRadius;
-uint _CascadeCount;
+float _CascadeCount;
 
-Texture2DArray<float> _DirectionalShadows, _ExponentialShadowmap;
+Texture2DArray<float> _DirectionalShadows;
 Texture2D<float> _OtherShadowAtlas;
 float4 _ShadowMapTexture_TexelSize;
 float _ShadowmapExponent;
@@ -64,6 +64,7 @@ float _VolumeWidth, _VolumeHeight, _VolumeSlices, _VolumeDepth;
 Texture3D<float3> _VolumetricLighting;
 
 float _EVSMExponent, _LightLeakBias, _VarianceBias;
+float _DirectionalShadowDistance, _DirectionalShadowCascadeScale, _DirectionalShadowCascadeBias, _DirectionalShadowCascadeFade, _DirectionalShadowCascadeFadeScale, _DirectionalShadowCascadeFadeBias;
 
 float VoxelGI(float3 positionWS, float3 normalWS)
 {
@@ -234,43 +235,26 @@ float GetNoHSquared(float radiusTan, float NoL, float NoV, float VoL)
     return max(0.0, NoH * NoH / HoH);
 }
 
-float DirectionalLightShadow(float3 positionWS, uint shadowIndex, float jitter = 0.5, bool softShadows = false, bool exponentialShadows = false)
+float DirectionalLightShadow(float3 positionWS, float shadowIndex, float jitter = 0.5, bool softShadows = false)
 {
-	for (uint i = 0; i < _CascadeCount; i++)
-	{
-		uint slice = shadowIndex * _CascadeCount + i;
-
-		float3x4 cascadeData = _DirectionalShadowMatrices[slice];
-		float3 positionLS = MultiplyPoint3x4(cascadeData, positionWS);
-
-		if (any(positionLS < 0.0 || positionLS > 1.0))
-			continue;
-
-		if (exponentialShadows)
-		{
-			float occluder = _ExponentialShadowmap.SampleLevel(_LinearClampSampler, float3(positionLS.xy, slice), 0.0);
-			float receiver = exp2(-(1.0 - positionLS.z) * _ShadowmapExponent);
-			return saturate(occluder * receiver);
-		}
-		else if (softShadows)
-		{
-            // Vogel disk randomised PCF
-			float sum = 0.0;
-			for (uint j = 0; j < _PcfSamples; j++)
-			{
-				float2 offset = VogelDiskSample(j, _PcfSamples, jitter * TWO_PI) * _ShadowPcfRadius;
-				sum += _DirectionalShadows.SampleCmpLevelZero(_LinearClampCompareSampler, float3(positionLS.xy + offset, slice), positionLS.z);
-			}
-
-			return sum / _PcfSamples; //return PCSSArray(positionLS, slice, _Softness, dither);
-		}
-		else
-		{
-			return _DirectionalShadows.SampleCmpLevelZero(_LinearClampCompareSampler, float3(positionLS.xy, slice), positionLS.z);
-		}
-	}
+	float viewZ = WorldToClip(positionWS).w;
     
-	return 1.0;
+    // Calculate the cascade from near plane distance. Max(0) required because shadow near plane for cascades may be further than camera
+    // near plane, causing nearby pixels to be below 0
+	float cascade = max(0.0, log2(viewZ) * _DirectionalShadowCascadeScale + _DirectionalShadowCascadeBias);
+
+    // Cascade blending
+	float fraction = frac(cascade) * _DirectionalShadowCascadeFadeScale + _DirectionalShadowCascadeFadeBias;
+	if (fraction > jitter)
+		cascade++;
+    
+	if (cascade >= _CascadeCount)
+		return 1.0;
+
+	float slice = shadowIndex * _CascadeCount + cascade;
+	float3x4 cascadeData = _DirectionalShadowMatrices[slice];
+	float3 positionLS = MultiplyPoint3x4(cascadeData, positionWS);
+	return _DirectionalShadows.SampleCmpLevelZero(_LinearClampCompareSampler, float3(positionLS.xy, floor(slice)), positionLS.z);
 }
 
 float3 DirectionalLightColor(uint index, float3 positionWS, bool softShadows = false, float jitter = 0.5, bool applyShadow = true, bool exponentialShadows = false, bool atmosphereTransmittance = true)
@@ -307,7 +291,7 @@ float3 DirectionalLightColor(uint index, float3 positionWS, bool softShadows = f
 
     if (applyShadow && lightData.ShadowIndex != UINT_MAX)
     {
-		attenuation *= DirectionalLightShadow(positionWS, lightData.ShadowIndex, jitter, softShadows, exponentialShadows);
+		attenuation *= DirectionalLightShadow(positionWS, lightData.ShadowIndex, jitter, softShadows);
 		if (attenuation == 0.0)
 			return 0.0;
 	}

@@ -213,7 +213,7 @@ void vert(inout VertexData data)
 
 void surf(inout FragmentData input, inout SurfaceData surface)
 {
-	//input.uv0.xy = UnjitterTextureUV(input.uv0.xy);
+	input.uv0.xy = UnjitterTextureUV(input.uv0.xy);
 	
 	float4 color = _MainTex.Sample(_TrilinearRepeatAniso4Sampler, input.uv0);
 	color.a *= input.color.a;

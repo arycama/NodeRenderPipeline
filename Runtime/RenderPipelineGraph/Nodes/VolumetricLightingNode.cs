@@ -80,7 +80,7 @@ public partial class VolumetricLightingNode : RenderPipelineNode
         scope.Command.SetComputeIntParam(computeShader, "_DirectionalLightCount", directionalLightBuffer.Count);
         scope.Command.SetComputeIntParam(computeShader, "_LightCount", lightData.Count);
         scope.Command.SetComputeIntParam(computeShader, "_TileSize", clusterTileSize);
-        scope.Command.SetComputeIntParam(computeShader, "_CascadeCount", cascadeCount);
+        scope.Command.SetComputeFloatParam(computeShader, "_CascadeCount", cascadeCount);
         scope.Command.SetComputeIntParam(computeShader, "_VolumeTileSize", tileSize);
         scope.Command.SetComputeBufferParam(computeShader, 0, "_SpotlightShadowMatrices", spotlightShadowMatrices);
 

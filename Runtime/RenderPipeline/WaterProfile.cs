@@ -13,6 +13,8 @@ public class WaterProfile : ScriptableObject
 
     [SerializeField] private float cascadeScale = 5.23f;
 
+    [SerializeField, Range(0f, 2f)] private float foamThreshold = 0.5f;
+
     [SerializeField, Range(0f, 1f)] private float foamStrength = 0.5f;
 
     [SerializeField, Range(0f, 1f)] private float foamDecay = 0.85f;
@@ -26,6 +28,7 @@ public class WaterProfile : ScriptableObject
     public float CascadeScale => cascadeScale;
     public float PatchSize => patchSize;
     public float MaxWaveNumber => cascadeScale * 10f;
+    public float FoamThreshold => foamThreshold;
     public float FoamStrength => foamStrength;
     public float FoamDecay => foamDecay;
     public float MaxWaterHeight => maxWaterHeight;

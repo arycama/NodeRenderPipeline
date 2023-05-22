@@ -17,6 +17,8 @@ public partial class SetupLightingNode : RenderPipelineNode
     [SerializeField, Input, Output, Tooltip("Higher values reduce self-shadowing, but can result in peter-panning")] private float directionalBias = 1f;
     [SerializeField, Tooltip("Depth of shadowmap, 16 is faster but less precise")] private DepthBits directionalDepth = DepthBits.Depth16;
     [SerializeField, Input, Output, Range(1, 8), Tooltip("Number of cascades, more cascades distributes resolution more evenly, but is more expensive to render and sample")] private int directionalCascades = 4;
+    [SerializeField, Input, Output, Range(0f, 1f)] private float directionalCascadeFade = 0.1f;
+    [SerializeField, Input, Output, Range(0f, 10f)] private float directionalShadowNearPlane = 0.1f;
 
     [SerializeField, Range(0f, 1f)] private float cascadeDistribution = 0.5f;
     [SerializeField, Range(1, 16)] private int pcfSamples = 4;
@@ -154,8 +156,15 @@ public partial class SetupLightingNode : RenderPipelineNode
             for (var i = 0; i < directionalCascades; i++)
             {
                 // Calculate logarithmic split ratios
-                var cascadeStart = CalculateCascadePosition(camera.nearClipPlane, shadowDistance, i);
-                var cascadeEnd = CalculateCascadePosition(camera.nearClipPlane, shadowDistance, i + 1);
+                var cascadeStart = i == 0 ? camera.nearClipPlane : directionalShadowNearPlane * Mathf.Pow(shadowDistance / directionalShadowNearPlane, (float)i / directionalCascades);
+                var cascadeEnd = directionalShadowNearPlane * Mathf.Pow(shadowDistance / directionalShadowNearPlane, (float)(i + 1) / directionalCascades);
+
+                // To fade between cascades, slightly decrease the start distance of subsequent cascades
+                if(i > 0)
+                {
+                    var previousEnd = directionalShadowNearPlane * Mathf.Pow(shadowDistance / directionalShadowNearPlane, (float)(i - 1) / directionalCascades);
+                    cascadeStart = Mathf.Lerp(cascadeStart, previousEnd, directionalCascadeFade);
+                }
 
                 // Transform camera bounds to light space
                 var viewBounds = new Bounds();
@@ -231,13 +240,6 @@ public partial class SetupLightingNode : RenderPipelineNode
 
         var direction = -visibleLight.localToWorldMatrix.GetColumn(2);
         return new DirectionalLightData((Vector4)visibleLight.finalColor, angularDiameter, direction, shadowIndex);
-    }
-
-    private float CalculateCascadePosition(float near, float far, float index)
-    {
-        var linearSplitStart = near + (far - near) * (index / directionalCascades);
-        var logSplitStart = near * Mathf.Pow(shadowDistance / near, index / directionalCascades);
-        return Mathf.Lerp(linearSplitStart, logSplitStart, cascadeDistribution);
     }
 
     private LightData SetupLight(VisibleLight visibleLight, int index, CullingResults cullingResults, List<SpotShadowRequestData> spotShadowRequests, List<PointLightShadowRequestData> pointShadowRequests, List<SpotShadowRequestData> areaShadowRequests, Camera camera)
@@ -504,9 +506,17 @@ public partial class SetupLightingNode : RenderPipelineNode
         scope.Command.SetBufferData(directionalShadowMatrices, shadowMatrices);
         ListPool<Matrix3x4>.Release(shadowMatrices);
 
+        var log2e = Mathf.Log(Mathf.Exp(1f), 2f);
+
         // Other data
         scope.Command.SetGlobalInt("_PcfSamples", pcfSamples);
         scope.Command.SetGlobalFloat("_ShadowPcfRadius", pcfRadius);
+        scope.Command.SetGlobalFloat("_DirectionalShadowDistance", shadowDistance);
+        scope.Command.SetGlobalFloat("_DirectionalShadowCascadeScale", directionalCascades / Mathf.Log(shadowDistance / directionalShadowNearPlane) * (1/log2e));
+        scope.Command.SetGlobalFloat("_DirectionalShadowCascadeBias", -directionalCascades * Mathf.Log(directionalShadowNearPlane) / Mathf.Log(shadowDistance / directionalShadowNearPlane));
+        scope.Command.SetGlobalFloat("_DirectionalShadowCascadeFade", directionalCascadeFade);
+        scope.Command.SetGlobalFloat("_DirectionalShadowCascadeFadeScale", 1f / directionalCascadeFade);
+        scope.Command.SetGlobalFloat("_DirectionalShadowCascadeFadeBias", (directionalCascadeFade - 1f) / directionalCascadeFade);
     }
 
     private void RenderPointShadows(ScriptableRenderContext context, List<PointLightShadowRequestData> pointShadowRequests, Camera camera)

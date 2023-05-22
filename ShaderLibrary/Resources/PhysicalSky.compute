@@ -98,7 +98,7 @@ void KERNEL_NAME(uint2 id : SV_DispatchThreadID)
 		
 			if (useShadow)
 			{
-				attenuation *= DirectionalLightShadow(P - _PlanetOffset, 0, 0.5, false, false);
+				attenuation *= DirectionalLightShadow(P - _PlanetOffset, 0, 0.5, false);
 				attenuation *= CloudTransmittanceLevelZero(P - _PlanetOffset);
 			}
 		

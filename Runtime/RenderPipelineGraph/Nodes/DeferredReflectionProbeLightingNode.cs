@@ -66,7 +66,7 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
         scope.Command.SetComputeIntParam(deferredComputeShader, "_LightCount", lightDataBuffer.Count);
 
         scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_DirectionalShadowMatrices", directionalShadowMatrices);
-        scope.Command.SetComputeIntParam(deferredComputeShader, "_CascadeCount", cascadeCount);
+        scope.Command.SetComputeFloatParam(deferredComputeShader, "_CascadeCount", cascadeCount);
 
         scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_ReflectionProbeData", reflectionProbeDataBuffer);
         scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_ReflectionProbes", reflectionProbeArray);

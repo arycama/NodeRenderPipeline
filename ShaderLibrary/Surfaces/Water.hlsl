@@ -412,22 +412,25 @@ FragmentOutput Fragment(FragmentInput input)
 	
 	float3 B = cross(T, N);
 	float3x3 tangentToWorld = float3x3(T, B, N);
-	
 	float3 oceanN = float3(normalData * lerp(1.0, 0.0, shoreFactor * 0.75), 1.0);
-	N = normalize(mul(oceanN, tangentToWorld));
 	
-	float foamFactor = saturate(lerp(_WaveFoamStrength * (-foam + _WaveFoamFalloff), breaker + shoreFoam, shoreFactor));
-
 	// Foam calculations
+	float foamFactor = saturate(lerp(_WaveFoamStrength * (-foam + _WaveFoamFalloff), breaker + shoreFoam, shoreFactor));
 	if (foamFactor > 0)
 	{
 		float2 foamUv = input.uv0.xz * _FoamTex_ST.xy + _FoamTex_ST.zw;
 		foamUv.xy = UnjitterTextureUV(foamUv.xy);
 		foamFactor *= _FoamTex.Sample(_TrilinearRepeatAniso4Sampler, foamUv).r;
-		//float3 foamBump = UnpackNormalScale(_FoamBump.Sample(_TrilinearRepeatAniso4Sampler, foamUv), _FoamNormalScale);
-		//N = normalize(mul(tangentToWorld, oceanN));
+		
+		// Sample/unpack normal, reconstruct partial derivatives, scale these by foam factor and normal scale and add.
+		float3 foamNormal = UnpackNormal(_FoamBump.Sample(_TrilinearRepeatAniso4Sampler, foamUv));
+		float2 foamDerivs = foamNormal.xy / foamNormal.z;
+		oceanN.xy += foamDerivs * _FoamNormalScale * foamFactor;
+		smoothness = lerp(smoothness, _FoamSmoothness, foamFactor);
 	}
 
+	N = normalize(mul(oceanN, tangentToWorld));
+	
 	float3x3 frame = GetLocalFrame(N);
 	float sinFrame = dot(T, frame[1]);
 	float cosFrame = dot(T, frame[0]);

@@ -460,7 +460,10 @@ void GenerateFoam(uint3 id : SV_DispatchThreadID)
 	float4 current = _NormalFoamSmoothness[uint3(id.xy, id.z + _OceanTextureSliceOffset)];
 	float4 previous = _NormalFoamSmoothness[uint3(id.xy, id.z + (_OceanTextureSliceOffset ? 0 : 4))];
 
-	current.b = (1 - current.b) * _FoamStrength * 1 + (1 - previous.b) * lerp(1.0, _FoamDecay, 1);
-	current.b = 1 - current.b;
+	float result = (1.0 - current.b) * _FoamStrength;
+	result += (1.0 - previous.b) * _FoamDecay;
+	result = 1.0 - result;
+	
+	current.b = result;
 	_NormalFoamSmoothness[uint3(id.xy, id.z + _OceanTextureSliceOffset)] = current;
 }
