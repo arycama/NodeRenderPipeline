@@ -286,7 +286,7 @@ void InitSpectrum(uint3 id : SV_DispatchThreadID)
 		
 		float kLen = length(k);
 		float w = sqrt(_OceanGravity * kLen);
-		float t = Time;
+		float t = Time * 0;
 		
 		// Eq 43
 		h = cmul(h0(k, A, rx, id, LocalSpectrum()), cexp(cimg(w * t)));

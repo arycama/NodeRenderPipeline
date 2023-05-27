@@ -71,7 +71,7 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 	for (float i = offset; i < _Steps; i++)
 	{
 		float xi = i / _Steps;
-		float c = Max3(_Extinction);
+		float c = Min3(_Extinction);
 		float b = underwaterDistance;
 		float t = -log(1.0 - xi * (1.0 - exp(-c * b))) / c;
 		float weight = exp(c * t) / c - rcp(c * exp(c * (b - t)));
@@ -91,8 +91,20 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 						float shadowDepth = _WaterShadows.SampleLevel(_LinearClampSampler, shadowPosition.xy, 0.0).r;
 						shadowDistance0 = saturate(shadowDepth - shadowPosition.z) * _WaterShadowFar;
 					}
+				
+					float3 lightTransmittance = exp(-_Extinction * shadowDistance0);
+					float3 viewTransmittance = exp(-_Extinction * t);
+				
+					float LdotV = dot(_LightDirection0, V);
+					float asymmetry = lightTransmittance * viewTransmittance;
+				
+					float _BackScatter = 0.25;
+					float _FrontScatter = 0.65;
 
-					scatter += lightColor0 * attenuation * exp(-_Extinction * (shadowDistance0 + t)) * weight;
+					float phase = lerp(CornetteShanksPhaseFunction(-_BackScatter, LdotV) * 2.16, CornetteShanksPhaseFunction(_FrontScatter, LdotV), asymmetry);
+				
+					phase = 1;
+					scatter += phase * lightColor0 * attenuation * exp(-_Extinction * (shadowDistance0 + t)) * weight;
 				}
 			}
 		#endif

@@ -68,6 +68,7 @@ public partial class PhysicalSkyNode : RenderPipelineNode
 
         scope.Command.SetComputeFloatParam(computeShader, "_SampleCount", sampleCount);
         scope.Command.SetComputeFloatParam(computeShader, "_ViewHeight", (float)((double)atmosphereProfile.PlanetRadius + camera.transform.position.y));
+        scope.Command.SetComputeFloatParam(computeShader, "_RayleighHeight", atmosphereProfile.AirAverageHeight);
 
         // For some testing
         scope.Command.SetComputeVectorParam(computeShader, "_RayleighScatter", atmosphereProfile.AirScatter);
