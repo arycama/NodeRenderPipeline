@@ -65,16 +65,25 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 		float3 lightColor1 = INV_FOUR_PI * ApplyExposure(_LightColor1) * TransmittanceToAtmosphere(positionWS + _PlanetOffset, _LightDirection1, _LinearClampSampler);
 	#endif
 
-	float3 scatter = 0.0;
+	float2 noise = BlueNoise2D(positionCS.xy);
 	
-	float offset = BlueNoise1D(positionCS.xy);
-	for (float i = offset; i < _Steps; i++)
+	// Select random channel
+	float3 channelMask = float3(noise.y < 1.0 / 3.0, noise.y >= 1.0 / 3.0 && noise.y < 2.0 / 3.0, noise.y > 2.0 / 3.0);
+	
+	float3 luminance = 0.0;
+	
+	#ifdef SINGLE_SAMPLE
+	{
+		float xi = noise.x;
+	#else
+	for (float i = noise.x; i < _Steps; i++)
 	{
 		float xi = i / _Steps;
-		float c = Min3(_Extinction);
-		float b = underwaterDistance;
-		float t = -log(1.0 - xi * (1.0 - exp(-c * b))) / c;
-		float weight = exp(c * t) / c - rcp(c * exp(c * (b - t)));
+	#endif
+		
+		float t = -log(1.0 - xi * (1.0 - exp(-dot(_Extinction, channelMask) * underwaterDistance))) / dot(_Extinction, channelMask);
+		float3 tr = exp(_Extinction * t) / _Extinction - rcp(_Extinction * exp(_Extinction * (underwaterDistance - t)));
+		float weight = rcp(dot(rcp(tr), 1.0 / 3.0));
 		float3 P = positionWS + V * t;
 
 		#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
@@ -88,54 +97,46 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 					float3 shadowPosition = MultiplyPoint3x4(_WaterShadowMatrix, P);
 					if (all(saturate(shadowPosition) == shadowPosition))
 					{
-						float shadowDepth = _WaterShadows.SampleLevel(_LinearClampSampler, shadowPosition.xy, 0.0).r;
+						float shadowDepth = _WaterShadows.SampleLevel(_LinearClampSampler, shadowPosition.xy, 0.0);
 						shadowDistance0 = saturate(shadowDepth - shadowPosition.z) * _WaterShadowFar;
 					}
-				
-					float3 lightTransmittance = exp(-_Extinction * shadowDistance0);
-					float3 viewTransmittance = exp(-_Extinction * t);
-				
-					float LdotV = dot(_LightDirection0, V);
-					float asymmetry = lightTransmittance * viewTransmittance;
-				
-					float _BackScatter = 0.25;
-					float _FrontScatter = 0.65;
 
-					float phase = lerp(CornetteShanksPhaseFunction(-_BackScatter, LdotV) * 2.16, CornetteShanksPhaseFunction(_FrontScatter, LdotV), asymmetry);
-				
-					phase = 1;
-					scatter += phase * lightColor0 * attenuation * exp(-_Extinction * (shadowDistance0 + t)) * weight;
+					luminance += lightColor0 * attenuation * exp(-_Extinction * (shadowDistance0 + t)) * weight;
 				}
 			}
 		#endif
 		
 		#ifdef LIGHT_COUNT_TWO
 			float shadowDistance1 = max(0.0, positionWS.y - P.y) / max(1e-6, saturate(_LightDirection1.y));
-		scatter += lightColor1 * exp(-_Extinction * (shadowDistance1 + t)) * weight;
+			luminance += lightColor1 * exp(-_Extinction * (shadowDistance1 + t)) * weight;
 		#endif
 	}
 	
-	scatter = scatter / _Steps * _Extinction;
+	#ifndef SINGLE_SAMPLE
+		luminance /= _Steps;
+	#endif
+
+	luminance *= _Extinction;
 	
 	// Ambient 
 	float3 finalTransmittance = exp(-underwaterDistance * _Extinction);
-	scatter += _AmbientSh[0].xyz * rcp(2.0 * sqrt(PI)) * (1.0 - finalTransmittance);
+	luminance += _AmbientSh[0].xyz * rcp(2.0 * sqrt(PI)) * (1.0 - finalTransmittance);
+	luminance *= _Color;
 
-	float3 waterEmission = scatter * _Color;
 	if(underwaterDepth != UNITY_RAW_FAR_CLIP_VALUE)
-		waterEmission += _UnderwaterResult[refractionUv] * exp(-_Extinction * underwaterDistance);
+		luminance += _UnderwaterResult[refractionUv] * exp(-_Extinction * underwaterDistance);
 	
 	// Apply roughness to transmission
 	float4 waterRoughnessMask = _WaterRoughnessMask[positionCS.xy];
 	float perceptualRoughness = ConvertAnisotropicPerceptualRoughnessToPerceptualRoughness(waterRoughnessMask.gb);
-	waterEmission *= (1.0 - waterNormalFoam.a) * GGXDiffuse(1.0, dot(N, -V), perceptualRoughness, 0.04) * PI;
+	luminance *= (1.0 - waterNormalFoam.a) * GGXDiffuse(1.0, dot(N, -V), perceptualRoughness, 0.04) * PI;
 
 	GBufferOut output;
 	output.gBuffer0 = PackGBufferAlbedoTranslucency(waterNormalFoam.a, 0.0, positionCS.xy);
 	output.gBuffer1 = float4(waterNormalFoam.xyz, 0.0);
 	output.gBuffer2 = waterRoughnessMask;
 	output.gBuffer3 = float4(waterNormalFoam.xyz, 1.0);
-	output.emission = waterEmission;
+	output.emission = luminance;
 	return output;
 }
 

@@ -25,7 +25,7 @@ float _CloudDepthInvScale;
 float3 _GroundColor;
 float _CloudMaxAvgExtinction, _CloudMaxOpticalDepth;
 
-Texture2D<float2> _WaterShadows;
+Texture2D<float> _WaterShadows;
 float4x4 _WaterShadowMatrix;
 
 StructuredBuffer<float3x4> _DirectionalShadowMatrices;
@@ -255,6 +255,25 @@ float DirectionalLightShadow(float3 positionWS, float shadowIndex, float jitter 
 	float3x4 cascadeData = _DirectionalShadowMatrices[slice];
 	float3 positionLS = MultiplyPoint3x4(cascadeData, positionWS);
 	return _DirectionalShadows.SampleCmpLevelZero(_LinearClampCompareSampler, float3(positionLS.xy, floor(slice)), positionLS.z);
+    
+    //float2 offset = VogelDiskSample(j, _PcfSamples, jitter * TWO_PI) * _ShadowPcfRadius;
+    
+	//float sum = 0.0;
+	//for (uint j = 0; j < _PcfSamples; j++)
+	//{
+	//	float GoldenAngle = 2.4f;
+
+	//	float r = sqrt(j + 0.5) / sqrt(_PcfSamples);
+	//	float theta = j * GoldenAngle + jitter * TWO_PI;
+
+	//	float sine, cosine;
+	//	sincos(theta, sine, cosine);
+
+	//	float2 offset = float2(r * cosine, r * sine);
+	//	sum += _DirectionalShadows.SampleCmpLevelZero(_LinearClampCompareSampler, float3(positionLS.xy + offset, floor(slice)), positionLS.z);
+	//}
+    
+	//return sum / _PcfSamples;
 }
 
 float3 DirectionalLightColor(uint index, float3 positionWS, bool softShadows = false, float jitter = 0.5, bool applyShadow = true, bool exponentialShadows = false, bool atmosphereTransmittance = true)

@@ -7,9 +7,10 @@ using UnityEngine.Rendering;
 [NodeMenuItem("Rendering/Deferred Water")]
 public partial class DeferredWaterNode : RenderPipelineNode
 {
-    private static readonly IndexedString noiseIds = new("STBN/Scalar/stbn_scalar_2Dx1Dx1D_128x128x64x1_");
+    private static readonly IndexedString noiseIds = new("STBN/Vec2/stbn_vec2_2Dx1D_128x128x64_");
 
     [SerializeField] private Material material;
+    [SerializeField] private AtmosphereProfile atmosphere;
 
     [Input] private CullingResults cullingResults;
     [Input] private RenderTargetIdentifier underwaterLighting;
@@ -50,6 +51,9 @@ public partial class DeferredWaterNode : RenderPipelineNode
 
         propertyBlock.SetFloat("_RefractOffset", material.GetFloat("_RefractOffset"));
         propertyBlock.SetFloat("_Steps", material.GetFloat("_Steps"));
+
+        var radius = atmosphere == null ? 0f : atmosphere.PlanetRadius;
+        propertyBlock.SetVector("_PlanetOffset", new Vector3(0f, radius + camera.transform.position.y, 0f));
 
         var gBuffer0 = new AttachmentDescriptor(GraphicsFormat.R8G8B8A8_UNorm);
         var gBuffer1 = new AttachmentDescriptor(GraphicsFormat.R8G8B8A8_UNorm);
@@ -103,7 +107,7 @@ public partial class DeferredWaterNode : RenderPipelineNode
                 scope.Command.SetGlobalTexture("_Exposure", exposure);
 
                 var blueNoise1D = Resources.Load<Texture2D>(noiseIds.GetString(FrameCount % 64));
-                scope.Command.SetGlobalTexture("_BlueNoise1D", blueNoise1D);
+                scope.Command.SetGlobalTexture("_BlueNoise2D", blueNoise1D);
 
                 // Find first 2 directional lights
                 var dirLightCount = 0;

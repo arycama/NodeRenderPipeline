@@ -11,11 +11,6 @@ static const uint _ThreadCount = 64;
 
 groupshared float3 MultiScatterShared[_ThreadCount], ScatterShared[_ThreadCount];
 
-bool RayIntersectsGround(float viewHeight, float mu)
-{
-	return (mu < 0.0) && ((viewHeight * viewHeight * (mu * mu - 1.0) + _PlanetRadius * _PlanetRadius) >= 0.0);
-}
-
 [numthreads(_ThreadCount, 1, 1)]
 void KERNEL(uint2 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
 {

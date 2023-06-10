@@ -109,6 +109,17 @@ public partial class AtmosphereNode : RenderPipelineNode
         scope.Command.SetGlobalVector("_AtmosphereOzoneScale", ozoneScale);
         scope.Command.SetGlobalVector("_AtmosphereOzoneOffset", ozoneOffset);
 
+        scope.Command.SetGlobalFloat("_RayleighHeight", atmosphereProfile.AirAverageHeight);
+        scope.Command.SetGlobalFloat("_MieHeight", atmosphereProfile.AerosolAverageHeight);
+
+        // For some testing
+        scope.Command.SetGlobalVector("_RayleighScatter", atmosphereProfile.AirScatter);
+        scope.Command.SetGlobalVector("_OzoneAbsorption", atmosphereProfile.AirAbsorption);
+        scope.Command.SetGlobalFloat("_MieScatter", atmosphereProfile.AerosolScatter);
+        scope.Command.SetGlobalFloat("_MieAbsorption", atmosphereProfile.AerosolAbsorption);
+        scope.Command.SetGlobalFloat("_OzoneHeight", atmosphereProfile.OzoneHeight);
+        scope.Command.SetGlobalFloat("_OzoneWidth", atmosphereProfile.OzoneWidth);
+
         // Basically the same, except for mie there is no absorption
         var rayleighScatterOffsetX = (double)atmosphereProfile.PlanetRadius * log2e / (double)atmosphereProfile.AirAverageHeight + Math.Log(atmosphereProfile.AirScatter.x, 2.0);
         var rayleighScatterOffsetY = (double)atmosphereProfile.PlanetRadius * log2e / (double)atmosphereProfile.AirAverageHeight + Math.Log(atmosphereProfile.AirScatter.y, 2.0);
