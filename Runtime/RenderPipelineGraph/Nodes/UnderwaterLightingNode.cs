@@ -101,7 +101,7 @@ public partial class UnderwaterLightingNode : RenderPipelineNode
         propertyBlock.SetFloat("_ClusterScale", clusterScale);
         propertyBlock.SetFloat("_ClusterBias", clusterBias);
 
-        propertyBlock.SetVector("_WaterExtinction", material.GetColor("_Extinction").linear);
+        propertyBlock.SetVector("_WaterExtinction", material.GetColor("_Extinction"));
 
         scope.Command.SetRenderTarget(underwaterResultId, depth);
         scope.Command.DrawProcedural(Matrix4x4.identity, renderMaterial, 0, MeshTopology.Triangles, 3, 1, propertyBlock);

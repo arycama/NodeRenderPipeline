@@ -45,7 +45,7 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 	float underwaterDistance = LinearEyeDepth(underwaterDepth, _ZBufferParams) - linearWaterDepth;
 
 	// Clamp underwater depth if sampling a non-underwater pixel
-	if (underwaterDistance < 0.0)
+	if (underwaterDistance <= 0.0)
 	{
 		underwaterDepth = _UnderwaterDepth[positionCS.xy];
 		underwaterDistance = max(0.0, LinearEyeDepth(underwaterDepth, _ZBufferParams) - linearWaterDepth);

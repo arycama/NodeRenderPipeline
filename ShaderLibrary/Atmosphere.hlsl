@@ -253,12 +253,12 @@ float3 TransmittanceToPoint(float height0, float cosAngle0, float height1, float
 
 float3 TransmittanceToAtmosphere(float viewHeight, float viewZenithCosAngle, SamplerState samplerState)
 {
-	//return TransmittanceToAtmosphere(viewHeight, viewZenithCosAngle);
+	return TransmittanceToAtmosphere(viewHeight, viewZenithCosAngle);
 	//if (RayIntersectsGround(viewHeight, viewZenithCosAngle))
 	//	return 0.0;
 	
-	float2 uv = TransmittanceUv(viewHeight, viewZenithCosAngle);
-	return _AtmosphereTransmittance.SampleLevel(samplerState, uv, 0.0);
+	//float2 uv = TransmittanceUv(viewHeight, viewZenithCosAngle);
+	//return _AtmosphereTransmittance.SampleLevel(samplerState, uv, 0.0);
 }
 
 // P must be relative to planet center

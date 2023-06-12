@@ -9,7 +9,7 @@ public partial class WaterShadowNode : RenderPipelineNode
 
     [SerializeField] private WaterProfile profile;
     [SerializeField] private float shadowRadius = 8192;
-    [SerializeField, Pow2(2048)] private int shadowResolution = 512;
+    [SerializeField, Pow2(4096)] private int shadowResolution = 512;
 
     [Input] private CullingResults cullingResults;
     [Output] private RenderTargetIdentifier waterShadow;

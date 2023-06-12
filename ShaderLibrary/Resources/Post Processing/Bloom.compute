@@ -242,5 +242,5 @@ void Upsample(uint2 id : SV_DispatchThreadID)
 	
 	result = lerp(result, upsample, _Strength * dirt);
 	
-	//_Result[id] = result;
+	_Result[id] = result;
 }

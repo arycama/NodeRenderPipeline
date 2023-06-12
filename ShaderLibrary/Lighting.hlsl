@@ -286,36 +286,39 @@ float3 DirectionalLightColor(uint index, float3 positionWS, bool softShadows = f
 		return 0.0;
     
 	float attenuation = 1.0;
+    if (applyShadow)
+    {
+		if (lightData.ShadowIndex != UINT_MAX)
+		{
+			attenuation *= DirectionalLightShadow(positionWS, lightData.ShadowIndex, jitter, softShadows);
+			if (attenuation == 0.0)
+				return 0.0;
+		}
+        
+		if (index == 0)
+		{
+			attenuation *= CloudTransmittanceLevelZero(positionWS);
+			if (attenuation == 0.0)
+				return 0.0;
+		}
+	}
     
-    #ifdef WATER_SHADOW_ON
+	float3 color = attenuation;
+    
+     #ifdef WATER_SHADOW_ON
 	    float shadowDistance = max(0.0, -_WorldSpaceCameraPos.y - positionWS.y) / max(1e-6, saturate(lightData.Direction.y));
 	    float3 shadowPosition = MultiplyPoint3x4(_WaterShadowMatrix, positionWS);
-	    if (index == 0 && all(shadowPosition > 0 && shadowPosition < 1))
+	    if (index == 0 && all(saturate(shadowPosition) == shadowPosition))
 	    {
 		    float shadowDepth = _WaterShadows.SampleLevel(_LinearClampSampler, shadowPosition.xy, 0.0).r;
 		    shadowDistance = saturate(shadowDepth - shadowPosition.z) * _WaterShadowFar;
 	    }
     
-	    attenuation *= exp(-shadowDistance * _WaterExtinction);
-        if(attenuation == 0.0)
+	    color *= exp(-shadowDistance * _WaterExtinction);
+        if(all(color == 0.0))
 			return 0.0;
     #endif
     
-    if(applyShadow && index == 0)
-    {
-		attenuation *= CloudTransmittanceLevelZero(positionWS);
-		if (attenuation == 0.0)
-			return 0.0;
-	}
-
-    if (applyShadow && lightData.ShadowIndex != UINT_MAX)
-    {
-		attenuation *= DirectionalLightShadow(positionWS, lightData.ShadowIndex, jitter, softShadows);
-		if (attenuation == 0.0)
-			return 0.0;
-	}
-    
-	float3 color = attenuation;
 	if (atmosphereTransmittance)
 		color *= TransmittanceToAtmosphere(positionWS + _PlanetOffset, lightData.Direction, _LinearClampSampler);
 
