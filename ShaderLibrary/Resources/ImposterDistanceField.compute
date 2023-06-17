@@ -3,7 +3,6 @@
 #pragma kernel Resolve
 
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 
 Texture2DArray<float4> _Texture0, _Texture1, _Texture2, _Texture3, _Texture4, _Texture5, _Texture6;
 RWTexture2DArray<float4> _Texture0Write, _Texture1Write, _Texture2Write, _Texture3Write, _Texture4Write, _Texture5Write, _Texture6Write, _Texture7Write;

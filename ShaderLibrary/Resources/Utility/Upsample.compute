@@ -1,7 +1,7 @@
 #pragma kernel Upsample
 #pragma kernel Upsample BICUBIC
 
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Utility.hlsl"
 
 RWTexture2D<float4> Result;
 Texture2D<float4> Input;

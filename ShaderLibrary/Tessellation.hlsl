@@ -4,8 +4,6 @@
 #define TESSELLATION_UTILS_INCLUDED
 
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GeometricTools.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Tessellation.hlsl"
 
 // Returns true if triangle with given 3 world positions is outside of camera's view frustum.
 // cullEps is distance outside of frustum that is still considered to be inside (i.e. max displacement)

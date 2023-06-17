@@ -3,9 +3,9 @@
 
 #pragma multi_compile_local _ FIRST
 
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Color.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/PhysicalCamera.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Utility.hlsl"
 
 #define GROUP_SIZE 256
 #define HISTOGRAM_BINS 256
@@ -42,6 +42,23 @@ groupshared uint histogramShared[256];
 float ExposureToEV100(float exposure)
 {
 	return -log2(1.2 * exposure);
+}
+
+float ComputeEV100FromAvgLuminance(float avgLuminance)
+{
+	return log2(avgLuminance * 100.0 / 12.5);
+}
+
+float ConvertEV100ToExposure(float EV100)
+{
+    // Compute the maximum luminance possible with H_sbs sensitivity
+    // maxLum = 78 / ( S * q ) * N^2 / t
+    //        = 78 / ( S * q ) * 2^ EV_100
+    //        = 78 / (100 * s_LensAttenuation) * 2^ EV_100
+    //        = exposureScale * 2^ EV
+    // Reference: http://en.wikipedia.org/wiki/Film_speed
+	float maxLuminance = 1.2 * pow(2.0, EV100);
+	return 1.0 / maxLuminance;
 }
 
 // Because atomics are only on uint and we need a weighted value, we need to convert.

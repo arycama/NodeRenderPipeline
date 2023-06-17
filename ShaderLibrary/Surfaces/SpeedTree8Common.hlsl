@@ -227,7 +227,7 @@ void surf(inout FragmentData input, inout SurfaceData surface)
 	#else
 	
 	float4 normalData = _BumpMap.Sample(_TrilinearRepeatAniso4Sampler, input.uv0);
-	float3 normalMap = UnpackNormal(normalData);
+	float3 normalMap = UnpackNormalAG(normalData);
 	float3 extra = _ExtraTex.Sample(_TrilinearRepeatAniso4Sampler, input.uv0);
 
 	surface.Albedo = color.rgb;

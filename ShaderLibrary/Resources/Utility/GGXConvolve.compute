@@ -1,6 +1,11 @@
 #pragma kernel GGXConvolve
 
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Geometry.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/GGX.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Material.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/MatrixUtils.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Sampling.hlsl"
 
 RWTexture2DArray<float3> Result;
 TextureCube<float3> Input;

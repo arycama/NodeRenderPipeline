@@ -3,11 +3,8 @@
 
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Lighting.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/GGXExtensions.hlsl"
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/MaterialUtils.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Brdf.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Deferred.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/VolumeRendering.hlsl"
 
 #ifdef __INTELLISENSE__
 	#define LIGHT_COUNT_ONE 
@@ -34,7 +31,7 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 	float4 waterNormalFoam = _WaterNormalFoam[positionCS.xy];
 	
 	float3 positionWS = PixelToWorld(positionCS.xy, waterDepth);
-	float linearWaterDepth = LinearEyeDepth(waterDepth, _ZBufferParams);
+	float linearWaterDepth = LinearEyeDepth(waterDepth);
 	float distortion = _RefractOffset * _ScreenSize.y * abs(CameraAspect) * 0.25 / linearWaterDepth;
 	
 	float3 N = UnpackNormalOctQuadEncode(2.0 * Unpack888ToFloat2(waterNormalFoam.xyz) - 1.0);
@@ -42,13 +39,13 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 	float2 refractionUv = uvOffset * _ScreenSize.xy + positionCS.xy;
 	float2 refractedPositionSS = clamp(refractionUv, 0, _ScreenSize.xy - 1);
 	float underwaterDepth = _UnderwaterDepth[refractedPositionSS];
-	float underwaterDistance = LinearEyeDepth(underwaterDepth, _ZBufferParams) - linearWaterDepth;
+	float underwaterDistance = LinearEyeDepth(underwaterDepth) - linearWaterDepth;
 
 	// Clamp underwater depth if sampling a non-underwater pixel
 	if (underwaterDistance <= 0.0)
 	{
 		underwaterDepth = _UnderwaterDepth[positionCS.xy];
-		underwaterDistance = max(0.0, LinearEyeDepth(underwaterDepth, _ZBufferParams) - linearWaterDepth);
+		underwaterDistance = max(0.0, LinearEyeDepth(underwaterDepth) - linearWaterDepth);
 		refractionUv = positionCS.xy;
 	}
 	
@@ -57,18 +54,18 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 	
 	#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
 		// Slight optimisation, only calculate atmospheric transmittance at surface
-		float3 lightColor0 = INV_FOUR_PI * ApplyExposure(_LightColor0) * TransmittanceToAtmosphere(positionWS + _PlanetOffset, _LightDirection0, _LinearClampSampler);
+		float3 lightColor0 = RcpFourPi * ApplyExposure(_LightColor0) * TransmittanceToAtmosphere(positionWS + _PlanetOffset, _LightDirection0, _LinearClampSampler);
 	#endif
 	
 	#ifdef LIGHT_COUNT_TWO
 		// Slight optimisation, only calculate atmospheric transmittance at surface
-		float3 lightColor1 = INV_FOUR_PI * ApplyExposure(_LightColor1) * TransmittanceToAtmosphere(positionWS + _PlanetOffset, _LightDirection1, _LinearClampSampler);
+		float3 lightColor1 = RcpFourPi * ApplyExposure(_LightColor1) * TransmittanceToAtmosphere(positionWS + _PlanetOffset, _LightDirection1, _LinearClampSampler);
 	#endif
 
 	float2 noise = BlueNoise2D(positionCS.xy);
 	
 	// Select random channel
-	float3 channelMask = float3(noise.y < 1.0 / 3.0, noise.y >= 1.0 / 3.0 && noise.y < 2.0 / 3.0, noise.y > 2.0 / 3.0);
+	float3 channelMask = floor(noise.y * 3.0) == float3(0.0, 1.0, 2.0);
 	
 	float3 luminance = 0.0;
 	
@@ -120,16 +117,16 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 	
 	// Ambient 
 	float3 finalTransmittance = exp(-underwaterDistance * _Extinction);
-	luminance += _AmbientSh[0].xyz * rcp(2.0 * sqrt(PI)) * (1.0 - finalTransmittance);
+	luminance += _AmbientSh[0].xyz * rcp(2.0 * sqrt(Pi)) * (1.0 - finalTransmittance);
 	luminance *= _Color;
 
-	if(underwaterDepth != UNITY_RAW_FAR_CLIP_VALUE)
+	if(underwaterDepth != _FarClipValue)
 		luminance += _UnderwaterResult[refractionUv] * exp(-_Extinction * underwaterDistance);
 	
 	// Apply roughness to transmission
 	float4 waterRoughnessMask = _WaterRoughnessMask[positionCS.xy];
 	float perceptualRoughness = ConvertAnisotropicPerceptualRoughnessToPerceptualRoughness(waterRoughnessMask.gb);
-	luminance *= (1.0 - waterNormalFoam.a) * GGXDiffuse(1.0, dot(N, -V), perceptualRoughness, 0.04) * PI;
+	luminance *= (1.0 - waterNormalFoam.a) * GGXDiffuse(1.0, dot(N, -V), perceptualRoughness, 0.04) * Pi;
 
 	GBufferOut output;
 	output.gBuffer0 = PackGBufferAlbedoTranslucency(waterNormalFoam.a, 0.0, positionCS.xy);

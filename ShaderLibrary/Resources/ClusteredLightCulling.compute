@@ -1,8 +1,10 @@
 ﻿#pragma kernel ClusteredLighting
 
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Geometry.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/LightingCommon.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GeometricTools.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/SpaceTransforms.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Utility.hlsl"
 
 RWStructuredBuffer<uint> _LightCounter, _LightClusterListWrite;
 RWTexture3D<uint2> _LightClusterIndicesWrite;
@@ -24,10 +26,7 @@ void ClusteredLighting(uint3 id : SV_DispatchThreadId, uint groupIndex : SV_Grou
 			[unroll]
 			for (uint x = 0; x < 2; x++)
 			{
-				float near = _ProjectionParams.y;
-				float far = _ProjectionParams.z;
-				
-				float eyeDepth = near * pow(far / near, (id.z + z) * _RcpClusterDepth);
+				float eyeDepth = _NearClipPlane * pow(_FarClipPlane / _NearClipPlane, (id.z + z) * _RcpClusterDepth);
                 
 				float3 positionSS;
 				positionSS.x = (id.x + x) * _TileSize;

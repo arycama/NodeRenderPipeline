@@ -2,6 +2,7 @@
 #define GGX_EXTENSIONS_INCLUDED
 
 #include "GgxLookupTables.hlsl"
+#include "Math.hlsl"
 
 Texture3D<float> _GGXSpecularOcclusion;
 
@@ -12,11 +13,10 @@ float3 AverageFresnel(float3 f0)
 
 float GGXDiffuse(float NdotL, float NdotV, float perceptualRoughness, float f0)
 {
-	return INV_PI;
 	float Ewi = GGXDirectionalAlbedoMS(NdotL, perceptualRoughness, f0);
 	float Ewo = GGXDirectionalAlbedoMS(NdotV, perceptualRoughness, f0);
 	float Eavg = GGXAverageAlbedoMS(perceptualRoughness, f0);
-	return INV_PI * (1.0 - Ewo) * (1.0 - Ewi) / (max(REAL_EPS, 1.0 - Eavg));
+	return RcpPi * (1.0 - Ewo) * (1.0 - Ewi) / (max(HalfEps, 1.0 - Eavg));
 }
 
 float3 GGXMultiScatter(float NdotV, float NdotL, float perceptualRoughness, float3 f0)
@@ -25,16 +25,16 @@ float3 GGXMultiScatter(float NdotV, float NdotL, float perceptualRoughness, floa
 	float Ewo = GGXDirectionalAlbedo(NdotL, perceptualRoughness).g;
 	float Eavg = GGXAverageAlbedo(perceptualRoughness);
 
-	float ms = INV_PI * (1.0 - Ewi) * (1.0 - Ewo) * rcp(max(REAL_EPS, 1.0 - Eavg));
+	float ms = RcpPi * (1.0 - Ewi) * (1.0 - Ewo) * rcp(max(HalfEps, 1.0 - Eavg));
 
 	float3 FAvg = AverageFresnel(f0);
-	float3 f = Square(FAvg) * Eavg * rcp(max(REAL_EPS, 1.0 - FAvg * (1.0 - Eavg)));
+	float3 f = Sq(FAvg) * Eavg * rcp(max(HalfEps, 1.0 - FAvg * (1.0 - Eavg)));
 	return ms * f;
 }
 
 float SpecularOcclusion(float NdotV, float perceptualRoughness, float visibility, float BdotR)
 {
-	float4 specUv = float4(NdotV, Square(perceptualRoughness), visibility, BdotR);
+	float4 specUv = float4(NdotV, Sq(perceptualRoughness), visibility, BdotR);
 	
 	// Remap to half texel
 	float4 start = 0.5 * rcp(32.0);

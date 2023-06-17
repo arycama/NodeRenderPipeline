@@ -1,4 +1,6 @@
-﻿#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+﻿#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Math.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/MatrixUtils.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Random.hlsl"
 
 sampler1D _Gradient;
 sampler2D _MainTex;
@@ -49,7 +51,7 @@ float3 ColorTemperatureToRGB(float temperatureInKelvins)
 
 float3 RandomPointInSphere(float u, float v, float w)
 {
-	float theta = u * TWO_PI;
+	float theta = u * TwoPi;
 	float phi = acos(2.0 * v - 1.0);
 	float r = pow(w, 1.0 / 3.0);
 	float sinTheta = sin(theta);
@@ -91,7 +93,7 @@ void geom(point uint p[1] : TEXCOORD, inout TriangleStream<g2f> outStream)
 	double3 luminosity = (double3) ColorTemperatureToRGB(lerp(1000, 40000, colorValue)) * lerp(_MinBrightness, _MaxBrightness, luminosityValue);
 	double starDistance = length(position);
 
-	luminosity = luminosity / (4 * PI * pow(starDistance, 2));
+	luminosity = luminosity / (4 * Pi * pow(starDistance, 2));
 
 	double3 forward = position / starDistance;
 	double3 right = normalize(cross(double3(0, 1, 0), forward));

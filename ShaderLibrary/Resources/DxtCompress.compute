@@ -2,8 +2,7 @@
 
 #pragma kernel BC3Compress
 
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Color.hlsl"
  
 RWTexture2D<uint4> _AlbedoResult0, _AlbedoResult1, _NormalResult0, _NormalResult1;
 RWTexture2D<uint2> _HeightResult0, _HeightResult1;
@@ -679,7 +678,7 @@ void BC3Compress(uint2 threadIDWithinDispatch : SV_DispatchThreadID,
 	for (uint i = 0; i < 16; i++)
 	{
 		// Need to convert srgb 
-		blockRGB[i] = LinearToSRGB(blockRGB[i]);
+		blockRGB[i] = LinearToSrgb(blockRGB[i]);
 	}
 	
 	_AlbedoResult0[threadIDWithinDispatch] = CompressBC3Block(blockRGB, blockA);
@@ -693,7 +692,7 @@ void BC3Compress(uint2 threadIDWithinDispatch : SV_DispatchThreadID,
 		for (uint i = 0; i < 16; i++)
 		{
 			// Need to convert srgb 
-			gs_mip1BlocksRGB[threadIndexWithinGroup][i] = LinearToSRGB(gs_mip1BlocksRGB[threadIndexWithinGroup][i]);
+			gs_mip1BlocksRGB[threadIndexWithinGroup][i] = LinearToSrgb(gs_mip1BlocksRGB[threadIndexWithinGroup][i]);
 		}
 		
         // Pass a scale value of 0.25 to CompressBC3 block to average the four source values contributing to each pixel

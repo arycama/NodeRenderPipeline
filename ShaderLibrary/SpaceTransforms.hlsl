@@ -2,23 +2,8 @@
 #define SPACE_TRANSFORMS_INCLUDED
 
 #include "Core.hlsl"
+#include "MatrixUtils.hlsl"
 #include "Utility.hlsl"
-
-// Fast matrix muls (3 mads)
-float4 MultiplyPoint(float3 p, float4x4 mat) { return p.x * mat[0] + (p.y * mat[1] + (p.z * mat[2] + mat[3])); }
-float4 MultiplyPoint(float4x4 mat, float3 p) { return MultiplyPoint(p, transpose(mat)); }
-float4 MultiplyPointProj(float4x4 mat, float3 p) { return PerspectiveDivide(MultiplyPoint(p, transpose(mat))); }
-
-// 3x4, for non-projection matrices
-float3 MultiplyPoint3x4(float3 p, float4x3 mat) { return p.x * mat[0] + (p.y * mat[1] + (p.z * mat[2] + mat[3])); }
-float3 MultiplyPoint3x4(float4x4 mat, float3 p) { return MultiplyPoint3x4(p, transpose((float3x4) mat)); }
-float3 MultiplyPoint3x4(float3x4 mat, float3 p) { return MultiplyPoint3x4(p, transpose(mat)); }
-
-float3 MultiplyVector(float3 v, float3x3 mat, bool doNormalize) { return ConditionalNormalize(v.x * mat[0] + v.y * mat[1] + v.z * mat[2], doNormalize); }
-float3 MultiplyVector(float3 v, float4x4 mat, bool doNormalize) { return MultiplyVector(v, (float3x3)mat, doNormalize); }
-float3 MultiplyVector(float3x3 mat, float3 v, bool doNormalize) { return MultiplyVector(v, transpose(mat), doNormalize); }
-float3 MultiplyVector(float4x4 mat, float3 v, bool doNormalize) { return MultiplyVector((float3x3) mat, v, doNormalize); }
-float3 MultiplyVector(float3x4 mat, float3 v, bool doNormalize) { return MultiplyVector((float3x3) mat, v, doNormalize); }
 
 // World Space Transforms
 float3 PixelToWorld(float3 position) { return MultiplyPointProj(_InvViewProjMatrix, float3(position.xy * _ScreenSize.zw * 2 - 1, position.z)).xyz; }
@@ -104,6 +89,26 @@ float3x3 CreateTangentToWorld(float3 normal, float3 tangent, float flipSign)
     float3 bitangent = cross(normal, tangent) * sgn;
 
 	return float3x3(tangent, bitangent, normal);
+}
+
+float LinearEyeDepth(float depth) { return rcp(_ZBufferParams.z * depth + _ZBufferParams.w); }
+
+// Z buffer to linear 0..1 depth (0 at near plane, 1 at far plane).
+// zBufferParam = { (f-n)/n, 1, (f-n)/n*f, 1/f }
+float Linear01DepthFromNearPlane(float depth, float4 zBufferParam)
+{
+	float eye = LinearEyeDepth(depth);
+	return (eye - _NearClipPlane) / (_FarClipPlane - _NearClipPlane);
+
+	zBufferParam.x = -1 + _FarClipPlane / _NearClipPlane;
+	zBufferParam.y = 1;
+	zBufferParam.z = (-1 + _FarClipPlane / _NearClipPlane) / _FarClipPlane;
+	zBufferParam.w = 1 / _FarClipPlane;
+
+	// from camera
+	return 1.0 / (zBufferParam.x * depth + zBufferParam.y);
+
+	//return 1.0 / (zBufferParam.x + zBufferParam.y / depth);
 }
 
 #endif

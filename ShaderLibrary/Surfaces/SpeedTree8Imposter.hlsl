@@ -1,9 +1,9 @@
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/IndirectRendering.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Deferred.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Geometry.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/ImposterCommon.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/IndirectRendering.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Lighting.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/MotionVectors.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GeometricTools.hlsl"
 
 #ifdef __INTELLISENSE__
 #define PIXEL_DEPTH_OFFSET_ON

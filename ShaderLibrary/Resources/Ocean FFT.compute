@@ -1,5 +1,9 @@
-﻿#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Complex.hlsl"
+﻿#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Complex.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Math.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Material.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Random.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Utility.hlsl"
 
 #pragma kernel InitSpectrum
 #pragma kernel FftColumns
@@ -124,7 +128,7 @@ void Fft(uint3 id, inout complex height, inout complex slopeX, inout complex slo
 		if (i == 0)
 			indices = reversebits(indices) >> (32 - passCount) & (_Resolution - 1);
 		
-		complex weights = cexp(cimg(2.0 * PI * sectionOffset / sectionWidth));
+		complex weights = cexp(cimg(2.0 * Pi * sectionOffset / sectionWidth));
 
 		height = _HShared[textureIndices.y][id.x] = cadd(_HShared[textureIndices.x][indices.x], cmul(_HShared[textureIndices.x][indices.y], weights));
 		slopeX = _SxShared[textureIndices.y][id.x] = cadd(_SxShared[textureIndices.x][indices.x], cmul(_SxShared[textureIndices.x][indices.y], weights));
@@ -138,7 +142,7 @@ void Fft(uint3 id, inout complex height, inout complex slopeX, inout complex slo
 
 float AlphaBetaSpectrum(float a, float b, float g, float w, float wm)
 {
-	return a * Square(g) / pow(w, 5.0) * exp(-b * pow(wm / w, 4.0));
+	return a * Sq(g) / pow(w, 5.0) * exp(-b * pow(wm / w, 4.0));
 }
 
 float PhillipsSpectrum(float w, OceanSpectrum spectrum)
@@ -156,12 +160,12 @@ float PiersonMoskowitzSpectrum(float w, OceanSpectrum spectrum)
 
 float JonswapSpectrum(float w, OceanSpectrum spectrum)
 {
-	float a = 0.076 * pow(Square(spectrum.windSpeed) / (spectrum.fetch * 1000 * _OceanGravity), 0.22);
+	float a = 0.076 * pow(Sq(spectrum.windSpeed) / (spectrum.fetch * 1000 * _OceanGravity), 0.22);
 	float b = 5.0 / 4.0;
-	float wp = 22.0 * pow(Square(_OceanGravity) / (spectrum.windSpeed * spectrum.fetch * 1000), 1.0 / 3.0);
+	float wp = 22.0 * pow(Sq(_OceanGravity) / (spectrum.windSpeed * spectrum.fetch * 1000), 1.0 / 3.0);
 	float gamma = spectrum.peakEnhancement;
 	float sigma = w <= wp ? 0.07 : 0.09;
-	float r = exp(-Square(w - wp) / (2.0 * Square(sigma) * Square(wp)));
+	float r = exp(-Sq(w - wp) / (2.0 * Sq(sigma) * Sq(wp)));
 	return AlphaBetaSpectrum(a, b, _OceanGravity, w, wp) * pow(gamma, r);
 }
 
@@ -196,8 +200,8 @@ float Cosine2s(float theta, float s)
 float DirectionSpectrum(float theta, float omega, OceanSpectrum spectrum, float wp)
 {
 	float s = SpreadPower(omega, wp) + 16 * tanh(min(omega / wp, 20)) * spectrum.swell * spectrum.swell;
-	return lerp(2 / PI * cos(theta) * cos(theta), Cosine2s(theta - spectrum.windAngle * TWO_PI, s), spectrum.spreadBlend);
-	//return Cosine2s(theta - spectrum.windAngle * TWO_PI, s);
+	return lerp(2 / Pi * cos(theta) * cos(theta), Cosine2s(theta - spectrum.windAngle * TwoPi, s), spectrum.spreadBlend);
+	//return Cosine2s(theta - spectrum.windAngle * TwoPi, s);
 }
 
 float FrequencyDerivative(float k, float g, float depth)
@@ -213,9 +217,9 @@ complex h0(float2 k, float A, complex r, uint3 id, OceanSpectrum spectrum)
 	float lengthScale = rcp(_OceanScale[id.z]);
 	float fftNorm = pow(_Resolution, -0.25);
 	float philNorm = exp(1) * _OceanScale[id.z];
-	A = Square(fftNorm * philNorm);
+	A = Sq(fftNorm * philNorm);
 	
-	float deltaK = TWO_PI / lengthScale;
+	float deltaK = TwoPi / lengthScale;
 	
 	float kl = length(k);
 	
@@ -223,10 +227,10 @@ complex h0(float2 k, float A, complex r, uint3 id, OceanSpectrum spectrum)
 	float V = spectrum.windSpeed;
 	float g = _OceanGravity; // Gravitational constant
 
-	float windFactor = dot(normalize(k), float2(cos(spectrum.windAngle * TWO_PI), sin(spectrum.windAngle * TWO_PI)));
-	float L = Square(V) / g; // Largest possible waves arising from a continuous wind speed of V
+	float windFactor = dot(normalize(k), float2(cos(spectrum.windAngle * TwoPi), sin(spectrum.windAngle * TwoPi)));
+	float L = Sq(V) / g; // Largest possible waves arising from a continuous wind speed of V
 
-	float p = A * exp(-1.0 / Square(kl * L)) / pow(kl, 4.0) * pow(windFactor, 6.0); // Eq 40: Phillips spectrum
+	float p = A * exp(-1.0 / Sq(kl * L)) / pow(kl, 4.0) * pow(windFactor, 6.0); // Eq 40: Phillips spectrum
 	
 	float omega = sqrt(kl * _OceanGravity);
 	float kAngle = atan2(k.y, k.x);
@@ -239,15 +243,15 @@ complex h0(float2 k, float A, complex r, uint3 id, OceanSpectrum spectrum)
 	p = 2 * p * abs(dOmegadk) / kl * deltaK * deltaK;
 	//p *= philNorm;
 	
-	float wp = 22.0 * pow(Square(_OceanGravity) / (spectrum.windSpeed * spectrum.fetch * 1000), 1.0 / 3.0);
+	float wp = 22.0 * pow(Sq(_OceanGravity) / (spectrum.windSpeed * spectrum.fetch * 1000), 1.0 / 3.0);
 	//wp = 0.877 * _OceanGravity / spectrum.windSpeed;
 	
 	p *= DirectionSpectrum(kAngle, omega, spectrum, wp);
 	
 	// Move waves along wind direction
-	//p *= dot(normalize(k), float2(cos(spectrum.windAngle * TWO_PI), sin(spectrum.windAngle * TWO_PI))) < 0 ? (1 - spectrum.swell) : 1;
+	//p *= dot(normalize(k), float2(cos(spectrum.windAngle * TwoPi), sin(spectrum.windAngle * TwoPi))) < 0 ? (1 - spectrum.swell) : 1;
 	
-	p *= exp(-dot(k, k) * Square(spectrum.shortWavesFade)); // Eq 41: Supress small wavelengths
+	p *= exp(-dot(k, k) * Sq(spectrum.shortWavesFade)); // Eq 41: Supress small wavelengths
 
 	// Eq 42
 	complex result = cmul(creal(rcp(sqrt(2.0))), r);
@@ -272,13 +276,13 @@ void InitSpectrum(uint3 id : SV_DispatchThreadID)
 	
 	if ((n || m) && nr >= SpectrumStart[id.z] && nr < SpectrumEnd[id.z])
 	{
-		float kx = 2.0 * PI * n / Lx;
-		float kz = 2.0 * PI * m / Lz;
+		float kx = 2.0 * Pi * n / Lx;
+		float kz = 2.0 * Pi * m / Lz;
 		float2 k = float2(kx, kz);
 		
 		float fftNorm = pow(_Resolution, -0.25);
 		float philNorm = exp(1) * _OceanScale[id.z];
-		float A = Square(fftNorm * philNorm);
+		float A = Sq(fftNorm * philNorm);
 		
 		float4 r = GaussianFloat4(id.x + id.y * _Resolution);
 		complex rx = { r.xy };

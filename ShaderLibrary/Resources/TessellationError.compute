@@ -1,6 +1,6 @@
 ﻿#pragma kernel TessellationError
 
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Utility.hlsl"
 
 Texture2D Input;
 RWTexture2D<float> Result;

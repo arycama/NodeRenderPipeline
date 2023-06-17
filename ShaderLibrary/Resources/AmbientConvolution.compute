@@ -1,4 +1,7 @@
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Math.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Random.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Sampling.hlsl"
 
 #pragma kernel AmbientProbeConvolution
 #pragma kernel AmbientProbeConvolution PROBE
@@ -31,29 +34,29 @@ void AmbientProbeConvolution(uint dispatchThreadId : SV_DispatchThreadID)
     //
     // - OmegaS: Solid angle associated with the sample
     // - OmegaP: Solid angle associated with the texel of the cubemap
-    float invOmegaP = (6.0 * cubeSize.x * cubeSize.y) / FOUR_PI;
-    float pdf = 1.0 / FOUR_PI; // Solid angle of the sphere is 4*PI
+    float invOmegaP = (6.0 * cubeSize.x * cubeSize.y) / FourPi;
+	float pdf = 1.0 / FourPi; // Solid angle of the sphere is 4*PI
     float omegaS = rcp(_SampleCount) * rcp(pdf);
     float mipLevel = 0.5 * log2(omegaS * invOmegaP);
 
-    float2 u = Hammersley2d(dispatchThreadId, _SampleCount);
+    float2 u = Hammersley2dSeq(dispatchThreadId, _SampleCount);
     float3 n = SampleSphereUniform(u.x, u.y);
 
     // Sample once per thread
-    float weight = 4.0 * PI / _SampleCount;
+    float weight = 4.0 * Pi / _SampleCount;
     float3 value = _AmbientProbeInputCubemap.SampleLevel(_LinearClampSampler, n, mipLevel) * weight;
 
     float3 outputSHCoeffs[_ShCoeffCount];
 
-    outputSHCoeffs[0] = value * 1.0 / (2.0 * sqrt(PI));
-    outputSHCoeffs[1] = value * sqrt(3.0) / (2.0 * sqrt(PI)) * n.y;
-    outputSHCoeffs[2] = value * sqrt(3.0) / (2.0 * sqrt(PI)) * n.z;
-    outputSHCoeffs[3] = value * sqrt(3.0) / (2.0 * sqrt(PI)) * n.x;
-    outputSHCoeffs[4] = value * sqrt(15.0) / (2.0 * sqrt(PI)) * n.y * n.x;
-    outputSHCoeffs[5] = value * sqrt(15.0) / (2.0 * sqrt(PI)) * n.y * n.z;
-    outputSHCoeffs[6] = value * sqrt(5.0) / (4.0 * sqrt(PI)) * (3.0 * n.z * n.z - 1.0);
-    outputSHCoeffs[7] = value * sqrt(15.0) / (2.0 * sqrt(PI)) * n.x * n.z;
-    outputSHCoeffs[8] = value * sqrt(15.0) / (4.0 * sqrt(PI)) * (n.x * n.x - n.y * n.y);
+    outputSHCoeffs[0] = value * 1.0 / (2.0 * SqrtPi);
+	outputSHCoeffs[1] = value * sqrt(3.0) / (2.0 * SqrtPi) * n.y;
+	outputSHCoeffs[2] = value * sqrt(3.0) / (2.0 * SqrtPi) * n.z;
+	outputSHCoeffs[3] = value * sqrt(3.0) / (2.0 * SqrtPi) * n.x;
+	outputSHCoeffs[4] = value * sqrt(15.0) / (2.0 * SqrtPi) * n.y * n.x;
+	outputSHCoeffs[5] = value * sqrt(15.0) / (2.0 * SqrtPi) * n.y * n.z;
+	outputSHCoeffs[6] = value * sqrt(5.0) / (4.0 * SqrtPi) * (3.0 * n.z * n.z - 1.0);
+	outputSHCoeffs[7] = value * sqrt(15.0) / (2.0 * SqrtPi) * n.x * n.z;
+	outputSHCoeffs[8] = value * sqrt(15.0) / (4.0 * SqrtPi) * (n.x * n.x - n.y * n.y);
 
     // Parallel reduction of all threads result.
 	for (uint k = 0; k < (uint) log2(_SampleCount); ++k)

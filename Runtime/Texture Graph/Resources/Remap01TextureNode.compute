@@ -1,6 +1,6 @@
 ﻿#pragma kernel Math
 
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Utility.hlsl"
 
 #pragma multi_compile _ DIMENSION_3D
 

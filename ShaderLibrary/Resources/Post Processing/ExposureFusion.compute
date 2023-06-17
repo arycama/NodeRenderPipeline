@@ -3,8 +3,8 @@
 #pragma kernel BlendLaplacian
 #pragma kernel FinalCombinePass
 
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Color.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 
 RWTexture2D<float3> _Result, _LuminanceResult, _WeightsResult;
 RWTexture2D<float> _WeightResult;

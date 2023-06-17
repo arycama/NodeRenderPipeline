@@ -1,7 +1,6 @@
 #pragma kernel Temporal
 
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Deferred.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GeometricTools.hlsl"
 
 RWTexture2D<float3> _Result;
 Texture2D<float3> _Input, _History;
@@ -17,31 +16,31 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 	float2 uv = (id + 0.5) * _ScreenSize.zw;
 	float2 previousUv = uv - motion;
 	
-	float3 minValue = FLT_MAX, maxValue = FLT_MIN;
+	float3 minValue = FloatMax, maxValue = FloatMin;
 	for (int y = -1; y <= 1; y++)
 	{
 		for (int x = -1; x <= 1; x++)
 		{
 			float3 sample = _Input[id + int2(x, y)];
-			//sample = RGBToYCoCg(sample);
-			//sample *= rcp(1.0 + sample.r);
+			sample = RGBToYCoCg(sample);
+			sample *= rcp(1.0 + sample.r);
 			minValue = min(minValue, sample);
 			maxValue = max(maxValue, sample);
 		}
 	}
 	
 	float3 input = _Input[id];
-	//input = RGBToYCoCg(input);
-	//input *= rcp(1.0 + input.r);
+	input = RGBToYCoCg(input);
+	input *= rcp(1.0 + input.r);
 	
 	float3 history = _History.SampleLevel(_LinearClampSampler, previousUv, 0.0);
-	//history = RGBToYCoCg(history);
-	//history *= rcp(1.0 + history.r);
+	history = RGBToYCoCg(history);
+	history *= rcp(1.0 + history.r);
 	history = clamp(history, minValue, maxValue);
 	
 	float3 result = lerp(history, input, 0.05);
-	//result *= rcp(1.0 - result.r);
-	//result = YCoCgToRGB(result);
+	result *= rcp(1.0 - result.r);
+	result = YCoCgToRGB(result);
 	
 	_Result[id] = result;
 	_Result[id] = _Input[id];

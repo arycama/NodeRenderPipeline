@@ -1,14 +1,12 @@
 ﻿#ifndef DEFERRED_INCLUDED
 #define DEFERRED_INCLUDED
 
-#include "Core.hlsl"
+#include "Color.hlsl"
+#include "Geometry.hlsl"
+#include "Material.hlsl"
 #include "MotionVectors.hlsl"
-#include "MaterialUtils.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl"
+#include "Packing.hlsl"
+#include "Utility.hlsl"
 
 Texture2D<float4> _GBuffer0, _GBuffer1, _GBuffer2, _GBuffer3;
 Texture2D<float3> _GBuffer4;

@@ -1,5 +1,8 @@
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Brdf.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/GgxExtensions.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Material.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/MatrixUtils.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Random.hlsl"
 
 #pragma kernel DirectionalAlbedo
 #pragma kernel AverageAlbedo
@@ -39,7 +42,7 @@ void DirectionalAlbedo(uint2 id : SV_DispatchThreadID)
 {
 	float2 uv = id * _DirectionalAlbedoScaleOffset;
 
-	float NdotV = max(uv.x * uv.x, REAL_EPS);
+	float NdotV = max(uv.x * uv.x, HalfEps);
 	float roughness = uv.y * uv.y;
 	float3 V = float3(SinFromCos(NdotV), 0, NdotV);
 
@@ -50,7 +53,7 @@ void DirectionalAlbedo(uint2 id : SV_DispatchThreadID)
 
 		float VdotH, NdotL, weightOverPdf;
 		float3 L; // Unused
-		ImportanceSampleGGX(u, V, k_identity3x3, roughness, NdotV, L, VdotH, NdotL, weightOverPdf);
+		ImportanceSampleGGX(u, V, Identity3x3, roughness, NdotV, L, VdotH, NdotL, weightOverPdf);
 
 		if (NdotL > 0.0)
 		{
@@ -82,7 +85,7 @@ void DirectionalAlbedoMs(uint3 id : SV_DispatchThreadID)
 {
 	float3 uv = id * _DirectionalAlbedoMsScaleOffset;
 
-	float NdotV = max(uv.x * uv.x, REAL_EPS);
+	float NdotV = max(uv.x * uv.x, HalfEps);
 	float perceptualRoughness = uv.y;
 	float roughness = PerceptualRoughnessToRoughness(perceptualRoughness);
 	float f0 = uv.z;
@@ -96,7 +99,7 @@ void DirectionalAlbedoMs(uint3 id : SV_DispatchThreadID)
 
 		float NdotL, NdotH, VdotH;
 		float3 L; // Unused
-		SampleGGXDir(u, V, k_identity3x3, roughness, L, NdotL, NdotH, VdotH);
+		SampleGGXDir(u, V, Identity3x3, roughness, L, NdotL, NdotH, VdotH);
 
 		if (NdotL > 0.0)
 		{
@@ -144,7 +147,7 @@ void SpecularOcclusion(uint3 id : SV_DispatchThreadID)
 
 	float4 uv = uint4(id.xy, z, w) / (_SpecularOcclusionResolution - 1.0);
 
-	float NdotV = max(REAL_EPS, uv.x);
+	float NdotV = max(HalfEps, uv.x);
 	float roughness = max(1e-3, uv.y);
 	
 	float alphaV = acos(sqrt(1.0 - uv.z));
@@ -161,7 +164,7 @@ void SpecularOcclusion(uint3 id : SV_DispatchThreadID)
 
 		float VdotH, NdotL, weightOverPdf;
 		float3 L;
-		ImportanceSampleGGX(u, V, k_identity3x3, roughness, NdotV, L, VdotH, NdotL, weightOverPdf);
+		ImportanceSampleGGX(u, V, Identity3x3, roughness, NdotV, L, VdotH, NdotL, weightOverPdf);
 
 		if (NdotL > 0.0)
 		{

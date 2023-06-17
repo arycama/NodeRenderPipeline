@@ -27,12 +27,12 @@
 #endif
 
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/CommonSurface.hlsl"
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Terrain.hlsl"
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/VirtualTexturing.hlsl"
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/IndirectRendering.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/GGXExtensions.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ParallaxMapping.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/IndirectRendering.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Packing.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Terrain.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Utility.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/VirtualTexturing.hlsl"
 
 Texture2D<float4> _BentNormal, _MainTex, _BumpMap, _MetallicGlossMap, _DetailAlbedoMap, _DetailNormalMap, _EmissionMap, _OcclusionMap, _ParallaxMap;
 Texture2D<float> _AnisotropyMap;
@@ -69,13 +69,13 @@ void surf(inout FragmentData input, inout SurfaceData surface)
 	input.uv0.xy = UnjitterTextureUV(input.uv0.xy);
 	
 	#ifdef _PARALLAXMAP
-		float height = _ParallaxMap.Sample(sampler_MainTex, TRANSFORM_TEX(input.uv0, _MainTex)).b;
+		float height = _ParallaxMap.Sample(sampler_MainTex, ApplyScaleOffset(input.uv0, _MainTex_ST)).b;
 		input.uv0.xy += ParallaxOffset1Step(height, _Parallax, input.uv1);
 	#endif
 
 	#if !defined(UNITY_PASS_SHADOWCASTER) || defined(MODE_CUTOUT) || defined(MODE_FADE)|| defined(MODE_TRANSPARENT)
-		float2 uv = TRANSFORM_TEX(input.uv0, _MainTex);
-		float2 detailUv = TRANSFORM_TEX(input.uv0, _DetailAlbedoMap);
+		float2 uv = ApplyScaleOffset(input.uv0, _MainTex_ST);
+		float2 detailUv = ApplyScaleOffset(input.uv0, _DetailAlbedoMap_ST);
 
 		float4 albedo = _MainTex.Sample(sampler_MainTex, uv);
 		float4 detail = _DetailAlbedoMap.Sample(sampler_MainTex, detailUv);
@@ -96,10 +96,10 @@ void surf(inout FragmentData input, inout SurfaceData surface)
 			input.normal *= input.isFrontFace ? 1 : - 1;
 		#endif
 
-		surface.Normal = UnpackNormalScale(_BumpMap.Sample(sampler_MainTex, uv), _BumpScale);
+		surface.Normal = UnpackNormalAG(_BumpMap.Sample(sampler_MainTex, uv), _BumpScale);
 
 		// Detail Normal Map
-		float3 detailNormalTangent = UnpackNormalScale(_DetailNormalMap.Sample(sampler_MainTex, detailUv), _DetailNormalMapScale);
+		float3 detailNormalTangent = UnpackNormalAG(_DetailNormalMap.Sample(sampler_MainTex, detailUv), _DetailNormalMapScale);
 		surface.Normal = BlendNormalRNM(surface.Normal, detailNormalTangent);
 
 		float4 metallicGloss = _MetallicGlossMap.Sample(sampler_MainTex, uv);
@@ -115,7 +115,7 @@ void surf(inout FragmentData input, inout SurfaceData surface)
 		else
 			perceptualSmoothness = metallicGloss.a * _Smoothness;
 
-		perceptualSmoothness = GeometricNormalFiltering(perceptualSmoothness, input.normal,  0.25, 0.25);
+		//perceptualSmoothness = GeometricNormalFiltering(perceptualSmoothness, input.normal,  0.25, 0.25);
 		float roughness = PerceptualSmoothnessToPerceptualRoughness(perceptualSmoothness);
 
 		// convert pRoughness/aniso to pRoughnessT/B
@@ -171,7 +171,7 @@ void surf(inout FragmentData input, inout SurfaceData surface)
 		// Extract some additional data from input structure + surface function result
 		float3x3 tangentToWorld = float3x3(input.tangent, input.binormal, input.normal);
 		float3 N = normalize(mul(surface.Normal, tangentToWorld));
-		surface.bentNormal = BentNormal ? UnpackNormal(_BentNormal.Sample(sampler_MainTex, uv)) : surface.Normal;
+		surface.bentNormal = BentNormal ? UnpackNormalAG(_BentNormal.Sample(sampler_MainTex, uv)) : surface.Normal;
 		surface.blurryRefractions = Blurry_Refractions;
 	#endif
 }

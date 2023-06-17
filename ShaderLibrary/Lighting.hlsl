@@ -5,12 +5,12 @@
     #define VOXEL_GI_ON
 #endif
 
-#include "Core.hlsl"
-#include "LightingCommon.hlsl"
 #include "Atmosphere.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/AreaLighting.hlsl"
+#include "Geometry.hlsl"
+#include "LightingCommon.hlsl"
+#include "MatrixUtils.hlsl"
+#include "SpaceTransforms.hlsl"
+#include "Utility.hlsl"
 
 Texture2D<float4> _CloudTransmittance, _ReflectionBuffer;
 Texture2D<float3> _CloudShadow;
@@ -66,6 +66,24 @@ Texture3D<float3> _VolumetricLighting;
 float _EVSMExponent, _LightLeakBias, _VarianceBias;
 float _DirectionalShadowDistance, _DirectionalShadowCascadeScale, _DirectionalShadowCascadeBias, _DirectionalShadowCascadeFade, _DirectionalShadowCascadeFadeScale, _DirectionalShadowCascadeFadeBias;
 
+// ref: Practical Realtime Strategies for Accurate Indirect Occlusion
+// Update ambient occlusion to colored ambient occlusion based on statitics of how light is bouncing in an object and with the albedo of the object
+float3 GTAOMultiBounce(float visibility, float3 albedo)
+{
+	float3 a = 2.0404 * albedo - 0.3324;
+	float3 b = -4.7951 * albedo + 0.6417;
+	float3 c = 2.7552 * albedo + 0.6903;
+
+	float x = visibility;
+	return max(x, ((x * a + b) * x + c) * x);
+}
+
+// Ref: Steve McAuley - Energy-Conserving Wrapped Diffuse
+float ComputeWrappedDiffuseLighting(float NdotL, float w)
+{
+	return saturate((NdotL + w) / ((1.0 + w) * (1.0 + w)));
+}
+
 float VoxelGI(float3 positionWS, float3 normalWS)
 {
     #ifdef VOXEL_GI_ON
@@ -76,7 +94,7 @@ float VoxelGI(float3 positionWS, float3 normalWS)
 			float3 uv = voxelPos;
 
 			// Convert to integer, wrap, convert back to normalized
-			uv = mod(uv * _VoxelResolution + _VoxelOffset, _VoxelResolution);
+			uv = Mod(uv * _VoxelResolution + _VoxelOffset, _VoxelResolution);
         
             // Offset based on normal
 		    uv = floor(uv + normalWS * IntersectRayAABBSimple(frac(uv), normalWS, 0, 1)) + 0.5;
@@ -105,7 +123,7 @@ float VoxelOcclusion(float3 positionWS)
 			float3 uv = voxelPos;
 
 			// Convert to integer, wrap, convert back to normalized
-			uv = mod(uv * _VoxelResolution + _VoxelOffset, _VoxelResolution) / _VoxelResolution;
+			uv = Mod(uv * _VoxelResolution + _VoxelOffset, _VoxelResolution) / _VoxelResolution;
     
             return _VoxelOcclusion.SampleLevel(_LinearRepeatSampler, uv, 0.0);
 		}
@@ -139,9 +157,9 @@ float3 AmbientLight(float3 n, float3 albedo, float occlusion)
     float a = sin(t);
     float b = cos(t);
 
-	float A0 = sqrt(4.0 * PI / 1.0) * (sqrt(1.0 * PI) / 2.0) * a * a;
-	float A1 = sqrt(4.0 * PI / 3.0) * (sqrt(3.0 * PI) / 3.0) * (1.0 - b * b * b);
-	float A2 = sqrt(4.0 * PI / 5.0) * (sqrt(5.0 * PI) / 16.0) * a * a * (2.0 + 6.0 * b * b);
+	float A0 = sqrt(4.0 * Pi / 1.0) * (sqrt(1.0 * Pi) / 2.0) * a * a;
+	float A1 = sqrt(4.0 * Pi / 3.0) * (sqrt(3.0 * Pi) / 3.0) * (1.0 - b * b * b);
+	float A2 = sqrt(4.0 * Pi / 5.0) * (sqrt(5.0 * Pi) / 16.0) * a * a * (2.0 + 6.0 * b * b);
 
     float3 irradiance =
         _AmbientSh[0].xyz * A0  +
@@ -154,7 +172,7 @@ float3 AmbientLight(float3 n, float3 albedo, float occlusion)
         _AmbientSh[7].xyz * A2 * (n.z * n.x) +
         _AmbientSh[8].xyz * A2 * (n.x * n.x - n.y * n.y);
 
-    return max(irradiance, 0) * INV_PI;
+    return max(irradiance, 0) * RcpPi;
 }
 
 float3 CornetteShanksZonalHarmonics(float g)
@@ -288,7 +306,7 @@ float3 DirectionalLightColor(uint index, float3 positionWS, bool softShadows = f
 	float attenuation = 1.0;
     if (applyShadow)
     {
-		if (lightData.ShadowIndex != UINT_MAX)
+		if (lightData.ShadowIndex != UintMax)
 		{
 			attenuation *= DirectionalLightShadow(positionWS, lightData.ShadowIndex, jitter, softShadows);
 			if (attenuation == 0.0)
@@ -325,12 +343,130 @@ float3 DirectionalLightColor(uint index, float3 positionWS, bool softShadows = f
 	return color * ApplyExposure(lightData.Color);
 }
 
+// Ref: Moving Frostbite to PBR.
+
+// Non physically based hack to limit light influence to attenuationRadius.
+// Square the result to smoothen the function.
+float DistanceWindowing(float distSquare, float rangeAttenuationScale, float rangeAttenuationBias)
+{
+    // If (range attenuation is enabled)
+    //   rangeAttenuationScale = 1 / r^2
+    //   rangeAttenuationBias  = 1
+    // Else
+    //   rangeAttenuationScale = 2^12 / r^2
+    //   rangeAttenuationBias  = 2^24
+	return saturate(rangeAttenuationBias - Sq(distSquare * rangeAttenuationScale));
+}
+
+float SmoothDistanceWindowing(float distSquare, float rangeAttenuationScale, float rangeAttenuationBias)
+{
+	float factor = DistanceWindowing(distSquare, rangeAttenuationScale, rangeAttenuationBias);
+	return Sq(factor);
+}
+
+// Applies SmoothDistanceWindowing() after transforming the attenuation ellipsoid into a sphere.
+// If r = rsqrt(invSqRadius), then the ellipsoid is defined s.t. r1 = r / invAspectRatio, r2 = r3 = r.
+// The transformation is performed along the major axis of the ellipsoid (corresponding to 'r1').
+// Both the ellipsoid (e.i. 'axis') and 'unL' should be in the same coordinate system.
+// 'unL' should be computed from the center of the ellipsoid.
+float EllipsoidalDistanceAttenuation(float3 unL, float3 axis, float invAspectRatio,
+                                    float rangeAttenuationScale, float rangeAttenuationBias)
+{
+    // Project the unnormalized light vector onto the axis.
+	float projL = dot(unL, axis);
+
+    // Transform the light vector so that we can work with
+    // with the ellipsoid as if it was a sphere with the radius of light's range.
+	float diff = projL - projL * invAspectRatio;
+	unL -= diff * axis;
+
+	float sqDist = dot(unL, unL);
+	return SmoothDistanceWindowing(sqDist, rangeAttenuationScale, rangeAttenuationBias);
+}
+
+// Applies SmoothDistanceWindowing() using the axis-aligned ellipsoid of the given dimensions.
+// Both the ellipsoid and 'unL' should be in the same coordinate system.
+// 'unL' should be computed from the center of the ellipsoid.
+float EllipsoidalDistanceAttenuation(float3 unL, float3 invHalfDim,
+                                    float rangeAttenuationScale, float rangeAttenuationBias)
+{
+    // Transform the light vector so that we can work with
+    // with the ellipsoid as if it was a unit sphere.
+	unL *= invHalfDim;
+
+	float sqDist = dot(unL, unL);
+	return SmoothDistanceWindowing(sqDist, rangeAttenuationScale, rangeAttenuationBias);
+}
+
+// Computes the squared magnitude of the vector computed by MapCubeToSphere().
+float ComputeCubeToSphereMapSqMagnitude(float3 v)
+{
+	float3 v2 = v * v;
+    // Note: dot(v, v) is often computed before this function is called,
+    // so the compiler should optimize and use the precomputed result here.
+	return dot(v, v) - v2.x * v2.y - v2.y * v2.z - v2.z * v2.x + v2.x * v2.y * v2.z;
+}
+
+// Applies SmoothDistanceWindowing() after mapping the axis-aligned box to a sphere.
+// If the diagonal of the box is 'd', invHalfDim = rcp(0.5 * d).
+// Both the box and 'unL' should be in the same coordinate system.
+// 'unL' should be computed from the center of the box.
+float BoxDistanceAttenuation(float3 unL, float3 invHalfDim,
+                            float rangeAttenuationScale, float rangeAttenuationBias)
+{
+	float attenuation = 0.0;
+
+    // Transform the light vector so that we can work with
+    // with the box as if it was a [-1, 1]^2 cube.
+	unL *= invHalfDim;
+
+    // Our algorithm expects the input vector to be within the cube.
+	if ((Max3(abs(unL)) <= 1.0))
+	{
+		float sqDist = ComputeCubeToSphereMapSqMagnitude(unL);
+		attenuation = SmoothDistanceWindowing(sqDist, rangeAttenuationScale, rangeAttenuationBias);
+	}
+	return attenuation;
+}
+
+// Square the result to smoothen the function.
+float AngleAttenuation(float cosFwd, float lightAngleScale, float lightAngleOffset)
+{
+	return saturate(cosFwd * lightAngleScale + lightAngleOffset);
+}
+
+float SmoothAngleAttenuation(float cosFwd, float lightAngleScale, float lightAngleOffset)
+{
+	float attenuation = AngleAttenuation(cosFwd, lightAngleScale, lightAngleOffset);
+	return Sq(attenuation);
+}
+
+#define PUNCTUAL_LIGHT_THRESHOLD 0.01 // 1cm (in Unity 1 is 1m)
+
+// Combines SmoothWindowedDistanceAttenuation() and SmoothAngleAttenuation() in an efficient manner.
+// distances = {d, d^2, 1/d, d_proj}, where d_proj = dot(lightToSample, lightData.forward).
+float PunctualLightAttenuation(float4 distances, float rangeAttenuationScale, float rangeAttenuationBias,
+                              float lightAngleScale, float lightAngleOffset)
+{
+	float distSq = distances.y;
+	float distRcp = distances.z;
+	float distProj = distances.w;
+	float cosFwd = distProj * distRcp;
+
+	float attenuation = min(distRcp, 1.0 / PUNCTUAL_LIGHT_THRESHOLD);
+	attenuation *= DistanceWindowing(distSq, rangeAttenuationScale, rangeAttenuationBias);
+	attenuation *= AngleAttenuation(cosFwd, lightAngleScale, lightAngleOffset);
+
+    // Effectively results in SmoothWindowedDistanceAttenuation(...) * SmoothAngleAttenuation(...).
+	return Sq(attenuation);
+}
+
 LightCommon GetLightColor(LightData lightData, float3 positionWS, float dither, bool softShadows)
 {
     LightCommon light;
     light.color = ApplyExposure(lightData.color);
 
-    float rangeAttenuationScale = rcp(Square(lightData.range));
+    float rangeAttenuationScale = rcp(Sq(lightData.range));
     float3 lightVector = lightData.positionWS - positionWS;
     light.direction = normalize(lightVector);
 
@@ -356,7 +492,7 @@ LightCommon GetLightColor(LightData lightData, float3 positionWS, float dither, 
     // Rectangle/area light
     if (lightData.lightType == 6)
     {
-        if (dot(lightData.forward, lightVector) >= FLT_EPS)
+        if (dot(lightData.forward, lightVector) >= FloatEps)
             light.color = 0.0;
         
         light.color *= BoxDistanceAttenuation(positionLS, invHalfDim, 1, 1);
@@ -384,7 +520,7 @@ LightCommon GetLightColor(LightData lightData, float3 positionWS, float dither, 
     
     // Shadows (If enabled, disabled in reflection probes for now)
     #ifndef NO_SHADOWS
-    if (lightData.shadowIndex != UINT_MAX)
+    if (lightData.shadowIndex != UintMax)
     {
         // Point light
 		if (lightData.lightType == 1)
@@ -412,7 +548,7 @@ LightCommon GetLightColor(LightData lightData, float3 positionWS, float dither, 
 			float sum = 0.0;
 			for (uint j = 0; j < _PcfSamples; j++)
 			{
-				float2 offset = VogelDiskSample(j, _PcfSamples, dither * TWO_PI) * _ShadowPcfRadius;
+				float2 offset = VogelDiskSample(j, _PcfSamples, dither * TwoPi) * _ShadowPcfRadius;
 				float3 uv = float3(positionLS.xy + offset, positionLS.z) / positionLS.w;
 				sum += _AreaShadows.SampleCmpLevelZero(_LinearClampCompareSampler, float3(uv.xy, lightData.shadowIndex), uv.z);
 			}
@@ -456,7 +592,7 @@ void FindBlocker(out float avgBlockerDepth, out uint numBlockers, float2 uv, flo
 
     for (uint i = 0; i < _BlockerSamples; ++i)
     {
-        float2 offset = VogelDiskSample(i, _BlockerSamples, dither * TWO_PI) * searchWidth;
+        float2 offset = VogelDiskSample(i, _BlockerSamples, dither * TwoPi) * searchWidth;
         float shadowMapDepth = _OtherShadowAtlas.SampleLevel(_PointClampSampler, uv + offset, 0);
         if (shadowMapDepth < zReceiver)
         {
@@ -473,7 +609,7 @@ float PCF_Filter(float2 uv, float zReceiver, float filterRadiusUV, float dither,
     float sum = 0.0f;
     for (uint i = 0; i < _PcfSamples; ++i)
     {
-        float2 offset = VogelDiskSample(i, _PcfSamples, dither * TWO_PI) * filterRadiusUV;
+		float2 offset = VogelDiskSample(i, _PcfSamples, dither * TwoPi) * filterRadiusUV;
         sum += _OtherShadowAtlas.SampleCmpLevelZero(_LinearClampCompareSampler, uv + offset, 1.0 - zReceiver);
     }
     return sum / _PcfSamples;
@@ -514,7 +650,7 @@ void FindBlockerArray(out float avgBlockerDepth, out uint numBlockers, float3 po
 
     for (uint i = 0; i < _BlockerSamples; ++i)
     {
-        float2 offset = VogelDiskSample(i, _BlockerSamples, dither * TWO_PI) * searchWidth;
+		float2 offset = VogelDiskSample(i, _BlockerSamples, dither * TwoPi) * searchWidth;
         float3 uv = CombineShadowcoordComponents(position.xy, offset, position.z, biasUVZ);
         float shadowMapDepth = _DirectionalShadows.SampleLevel(_PointClampSampler, float3(uv.xy, index), 0);
         if (shadowMapDepth > uv.z)
@@ -532,7 +668,7 @@ float PCF_FilterArray(float3 position, float filterRadiusUV, float index, float 
     float sum = 0.0f;
     for (uint i = 0; i < _PcfSamples; ++i)
     {
-        float2 offset = VogelDiskSample(i, _PcfSamples, dither * TWO_PI) * filterRadiusUV;
+		float2 offset = VogelDiskSample(i, _PcfSamples, dither * TwoPi) * filterRadiusUV;
         float3 uv = CombineShadowcoordComponents(position.xy, offset, position.z, biasUVZ);
         sum += _DirectionalShadows.SampleCmpLevelZero(_LinearClampCompareSampler, float3(uv.xy + offset, index), uv.z);
     }

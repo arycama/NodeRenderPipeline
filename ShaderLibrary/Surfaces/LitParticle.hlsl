@@ -1,5 +1,6 @@
 ﻿#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Lighting.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Random.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Packing.hlsl"
 
 Texture2D<float4> _MainTex, _BumpMap, _EmissionMap;
 Texture2D<float> _UnityFBInput0;
@@ -48,7 +49,7 @@ float4 Fragment(FragmentInput input) : SV_Target
     float3 N = normalize(input.normal);
     float3 illuminance = AmbientLight(N, 1.0, 1.0);
 
-	// Treating the aprticle as a sphere, get an offset posiion for sampling lighting
+	// Treating the particle as a sphere, get an offset posiion for sampling lighting
 	float thickness = 1.0 - saturate(distance(input.uv.xy, 0.5) * 2.0);
 	float radius = input.uv.z * thickness;
 	float noise = InterleavedGradientNoise(input.positionCS.xy, _FrameIndex) - 0.5;
@@ -59,7 +60,7 @@ float4 Fragment(FragmentInput input) : SV_Target
         DirectionalLightData lightData = _DirectionalLightData[i];
 		float3 lightColor = DirectionalLightColor(i, offsetPosition, true, 0.5);
 		float NdotL = dot(lightData.Direction, N);
-		illuminance += lightColor * ComputeWrappedDiffuseLighting(NdotL, _Translucency) * INV_PI;
+		illuminance += lightColor * ComputeWrappedDiffuseLighting(NdotL, _Translucency) * RcpPi;
 	}
     
 	uint3 clusterIndex;
@@ -77,7 +78,7 @@ float4 Fragment(FragmentInput input) : SV_Target
 		LightData lightData = _LightData[index];
 		LightCommon light = GetLightColor(lightData, offsetPosition, 0, true);
 		float NdotL = dot(light.direction, N);
-		illuminance += light.color * ComputeWrappedDiffuseLighting(NdotL, _Translucency) * INV_PI;
+		illuminance += light.color * ComputeWrappedDiffuseLighting(NdotL, _Translucency) * RcpPi;
 	}
 
 	color.rgb *= illuminance;
@@ -96,14 +97,14 @@ float4 Fragment(FragmentInput input) : SV_Target
 			viewScale = _DistortionStrength * _ScreenParams.y * -CameraAspect * 0.25 / input.positionCS.w;
 
 		float distortionStrength = _MainTex.Sample(_TrilinearRepeatSampler, uv).r * viewScale;
-		float3 normalTS = UnpackNormal(_BumpMap.Sample(_TrilinearRepeatSampler, uv));
+		float3 normalTS = UnpackNormalAG(_BumpMap.Sample(_TrilinearRepeatSampler, uv));
 		float2 uv = input.positionCS.xy * _ScreenSize.zw;
 		color.rgb = _CameraOpaqueTexture.Sample(_LinearClampSampler, uv + normalTS.xy * distortionStrength);
 	}
 
     // Depth Fade
 	float deviceDepth = _UnityFBInput0[input.positionCS.xy];
-	float linearDepth = LinearEyeDepth(deviceDepth, _ZBufferParams);
+	float linearDepth = LinearEyeDepth(deviceDepth);
 	float depthDifference = saturate(abs(linearDepth - input.positionCS.w) * rcp(max(1e-6, _DepthFade)));
 	color *= depthDifference;
 

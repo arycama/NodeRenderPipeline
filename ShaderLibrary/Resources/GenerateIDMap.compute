@@ -1,7 +1,7 @@
 ﻿#pragma kernel GenerateIDMap
 
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Random.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Terrain.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Random.hlsl"
 
 RWTexture2D<uint> _Result;
 Texture2D<float4> _Input0, _Input1, _Input2, _Input3, _Input4, _Input5, _Input6, _Input7;

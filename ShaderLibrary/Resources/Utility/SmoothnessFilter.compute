@@ -2,9 +2,9 @@
 #pragma kernel ShortenNormal
 #pragma kernel MipNormalAndSmoothness
 
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Color.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Material.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Packing.hlsl"
 
 RWTexture2D<float4> _NormalResult, _SmoothnessResult;
 RWTexture2D<float> _LengthToRoughnessResult;
@@ -52,7 +52,7 @@ void GenerateLengthToSmoothness(uint2 id : SV_DispatchThreadID)
 void ShortenNormal(uint2 id : SV_DispatchThreadID)
 {
     float smoothness = _SmoothnessInput[id].a;
-    float3 normal = UnpackNormal(_NormalInput[id]);
+    float3 normal = UnpackNormalAG(_NormalInput[id]);
     float len = SmoothnessToNormalLength(smoothness);
     _NormalResult[id] = float4(normal * len, 1.0);
 }
@@ -65,7 +65,7 @@ void MipNormalAndSmoothness(uint2 id : SV_DispatchThreadID)
     float3 smoothnessInput = _SmoothnessInput.mips[_Mip][id].rgb;
 
     if (_IsSrgb)
-        smoothnessInput = LinearToSRGB(smoothnessInput);
+        smoothnessInput = LinearToSrgb(smoothnessInput);
 
     _SmoothnessResult[id] = float4(smoothnessInput, smoothness);
     _NormalResult[id] = PackNormalDxt(normalize(shortenedNormal));

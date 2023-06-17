@@ -1,5 +1,5 @@
 ﻿#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Brdf.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Packing.hlsl"
 
 struct VertexInput
 {
@@ -35,7 +35,7 @@ FragmentInput Vertex(VertexInput v)
 {
     FragmentInput o;
 	o.positionCS = ObjectToClip(v.positionOS, v.instanceID);
-    o.positionCS.z = UNITY_RAW_FAR_CLIP_VALUE;
+    o.positionCS.z = _FarClipValue;
 
 	o.normal = ObjectToWorldNormal(v.normalOS, v.instanceID, false);
 	o.tangent = float4(ObjectToWorldDir(v.tangentOS.xyz, v.instanceID, false), v.tangentOS.w);
@@ -46,7 +46,7 @@ FragmentInput Vertex(VertexInput v)
 // Retrodirective function
 float B(float p, float g)
 {
-    if (p < HALF_PI)
+    if (p < HalfPi)
 		return 2.0 - tan(p) / (2.0 * g) * (1.0 - exp(-g / tan(p))) * (3.0 - exp(-g / tan(p)));
     else
 		return 1.0;
@@ -55,17 +55,17 @@ float B(float p, float g)
 float S(float p)
 {
 	float t = 0.1;
-	return sin(abs(p)) + (PI - abs(p)) * cos(abs(p)) * INV_PI + t * pow(1.0 - 1.0 / 2.0 * cos(abs(p)), 2.0);
+	return sin(abs(p)) + (Pi - abs(p)) * cos(abs(p)) * RcpPi + t * pow(1.0 - 1.0 / 2.0 * cos(abs(p)), 2.0);
 }
 
 float3 Fragment(FragmentInput input) : SV_Target
 {
     // Sample Textures
     float3 albedo = _MainTex.Sample(_TrilinearClampSampler, input.uv).rgb * _Color.rgb;
-	float3 normalTS = UnpackNormal(_BumpMap.Sample(_TrilinearClampSampler, input.uv));
+	float3 normalTS = UnpackNormalAG(_BumpMap.Sample(_TrilinearClampSampler, input.uv));
 
     // 1. Considering the sun as a perfect disk, evaluate  it's solid angle (Could be precomputed)
-    float solidAngle = 2 * PI * (1 - cos(radians(0.5 * _AngularDiameter)));
+    float solidAngle = 2 * Pi * (1 - cos(radians(0.5 * _AngularDiameter)));
 
     // 2. Evaluate sun luiminance at ground level accoridng to solidAngle and luminance at zenith (noon)
 	float3 illuminance = ApplyExposure(_Luminance) / solidAngle * albedo;

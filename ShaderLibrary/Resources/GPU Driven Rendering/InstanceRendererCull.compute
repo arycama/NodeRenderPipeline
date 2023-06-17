@@ -2,9 +2,8 @@
 
 #pragma multi_compile _ HIZ_ON
 
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Terrain.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/IndirectRendering.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GeometricTools.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Terrain.hlsl"
 
 struct Bounds
 {
@@ -71,7 +70,7 @@ void Visibility(uint id : SV_DispatchThreadID)
 	}
 		
 	// Determine correct lod
-	uint lod = UINT_MAX;
+	uint lod = UintMax;
 	float radius = ProjectedSphereRadius(instanceTypeData.radius * scale, spherePositionWS);
 	for (i = 0; i < instanceTypeData.lodCount; i++)
 	{
@@ -90,7 +89,7 @@ void Visibility(uint id : SV_DispatchThreadID)
 	}
 	
 	// If smaller than the smallest lod size, this lod is culled, so do not render
-	if (lod == UINT_MAX)
+	if (lod == UintMax)
 		return;
 	
 	// Index/length into the buffer of renderers for this lod, so that we can check their visibility

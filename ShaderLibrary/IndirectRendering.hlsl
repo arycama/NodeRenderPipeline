@@ -2,11 +2,9 @@
 #define INDIRECT_RENDERING_INCLUDED
 
 #include "Core.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GeometricTools.hlsl"
-
-#ifdef __INTELLISENSE__
-	#define INDIRECT_RENDERING
-#endif
+#include "Geometry.hlsl"
+#include "SpaceTransforms.hlsl"
+#include "Utility.hlsl"
 
 struct InstanceData
 {
@@ -73,7 +71,7 @@ bool HiZCull(float3 screenMin, float3 screenMax, float2 resolution)
 bool HiZCull(float3 boundsMin, float3 boundsSize, float2 resolution, float4x4 screenMatrix)
 {
 	// Transform 8 corners into screen space and compute bounding box
-	float3 screenMin = FLT_MAX, screenMax = FLT_MIN;
+	float3 screenMin = FloatMax, screenMax = FloatMin;
 	
 	[unroll]
 	for (float z = 0; z < 2; z++)

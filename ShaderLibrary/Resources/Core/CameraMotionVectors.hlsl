@@ -1,4 +1,5 @@
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/MotionVectors.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/SpaceTransforms.hlsl"
 
 Texture2D<float> _UnityFBInput0;
 

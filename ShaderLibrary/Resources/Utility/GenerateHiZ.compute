@@ -7,7 +7,7 @@
 #pragma kernel DepthPyramid MIN_MAX_SEPERATE
 #pragma kernel DepthPyramid MIN_MAX_COMBINED
 
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Utility.hlsl"
 
 #define USE_MIN defined(MIN_ONLY) || defined(MIN_MAX_SEPERATE)
 #define USE_MAX defined(MAX_ONLY) || defined(MIN_MAX_SEPERATE)
@@ -120,8 +120,8 @@ void DepthPyramid(uint2 id : SV_DispatchThreadID)
 			maxDepth = min(maxDepth, cornerTexelValueMax);
 		}
 		
-		minDepth = Max3(minDepth, extraColumnTexelValues.x, extraColumnTexelValues.y);
-		maxDepth = Min3(maxDepth, extraColumnTexelValues.z, extraColumnTexelValues.w);
+		minDepth = Max3(float3(minDepth, extraColumnTexelValues.x, extraColumnTexelValues.y));
+		maxDepth = Min3(float3(maxDepth, extraColumnTexelValues.z, extraColumnTexelValues.w));
 	}
 	
 	if (shouldIncludeExtraRowFromPreviousLevel)
@@ -129,12 +129,12 @@ void DepthPyramid(uint2 id : SV_DispatchThreadID)
 		float2 extraRowTexelValuesMin;
 		extraRowTexelValuesMin.x = GetMinDepth(coord + uint2(0, 2));
 		extraRowTexelValuesMin.y = GetMinDepth(coord + uint2(1, 2));
-		minDepth = Max3(minDepth, extraRowTexelValuesMin.x, extraRowTexelValuesMin.y);
+		minDepth = Max3(float3(minDepth, extraRowTexelValuesMin.x, extraRowTexelValuesMin.y));
 		
 		float2 extraRowTexelValuesMax;
 		extraRowTexelValuesMax.x = GetMaxDepth(coord + uint2(0, 2));
 		extraRowTexelValuesMax.y = GetMaxDepth(coord + uint2(1, 2));
-		maxDepth = Min3(maxDepth, extraRowTexelValuesMax.x, extraRowTexelValuesMax.y);
+		maxDepth = Min3(float3(maxDepth, extraRowTexelValuesMax.x, extraRowTexelValuesMax.y));
 	}
 	
 	#ifdef MIN_MAX_COMBINED

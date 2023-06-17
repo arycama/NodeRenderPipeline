@@ -1,4 +1,5 @@
-﻿#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+﻿#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Color.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/MatrixUtils.hlsl"
 
 Texture2D<float4> _UITarget;
 Texture2D<float3> _MainTex;
@@ -25,11 +26,11 @@ float4 frag (v2f_img i, out float depth : SV_Depth) : SV_Target
 	//noise = sign(noise) * (1.0 - sqrt(1.0 - abs(noise))); //?
 
     // Convert scene to sRGB so we can blend "incorrectly"
-	scene = LinearToSRGB(scene);//	+noise / 255.0; // ;
+	scene = LinearToSrgb(scene);//	+noise / 255.0; // ;
 	float3 result = scene * (1.0 - ui.a) + ui.rgb;
 
     // Now convert blended result back to linear, output merger will convert back to sRGB
-	result = SRGBToLinear(result);
+	result = SrgbToLinear(result);
 
 	depth = _Depth[i.positionCS.xy];
 	

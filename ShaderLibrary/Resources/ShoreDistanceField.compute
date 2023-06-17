@@ -4,7 +4,6 @@
 #pragma kernel Resolve
 
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 
 RWTexture2D<float4> _Result;
 RWTexture2D<float2> _SeedResult;

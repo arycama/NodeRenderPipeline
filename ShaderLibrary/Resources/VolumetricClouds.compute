@@ -5,6 +5,9 @@
 #pragma multi_compile _ LIGHT_COUNT_ONE LIGHT_COUNT_TWO
 
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/CloudCommon.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Geometry.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Random.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Sampling.hlsl"
 
 RWTexture2D<float4> _Result;
 RWTexture2D<float3> ShadowResult, _ScreenResult;
@@ -23,10 +26,10 @@ groupshared float4 sharedTransmittance[GROUP_SIZE];
 [numthreads(GROUP_SIZE, 1, 1)]
 void CloudCoverage(uint id : SV_DispatchThreadId, uint groupIndex : SV_GroupIndex)
 {
-	float2 u = Hammersley2d(id.x, GROUP_SIZE);
+	float2 u = Hammersley2dSeq(id.x, GROUP_SIZE);
 	float3 V = SampleHemisphereCosine(u.x, u.y).xzy;
 
-	float depth = UNITY_RAW_FAR_CLIP_VALUE;
+	float depth = _FarClipValue;
 	bool isSky = true;
 	float sceneDepth = 0.0;
 	float cloudDepth;
@@ -95,7 +98,7 @@ void Cloud(uint2 id : SV_DispatchThreadID)
 	bool noise = true;
 	
 	float depth = _Depth.mips[1][id];
-	float sceneDepth = lengthV * LinearEyeDepth(depth, _ZBufferParams);
+	float sceneDepth = lengthV * LinearEyeDepth(depth);
 
 	float cloudDepth;
 	float4 cloudResult = RenderCloud(P, V, id, depth, sceneDepth, cloudDepth, noise);

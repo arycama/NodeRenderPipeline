@@ -7,7 +7,9 @@
 
 #pragma multi_compile _ LENS_FLARE
 
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Color.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Math.hlsl"
 
 // This shader performs downsampling on a texture,
 // as taken from Call Of Duty method, presented at ACM Siggraph 2014.

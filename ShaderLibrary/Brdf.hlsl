@@ -1,13 +1,13 @@
 ﻿#ifndef BRDF_INCLUDED
 #define BRDF_INCLUDED
 
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Lighting.hlsl"
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/LightingCommon.hlsl"
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/GgxExtensions.hlsl"
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/MaterialUtils.hlsl"
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/ReflectionProbe.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/AreaLighting.hlsl"
+#include "AreaLighting.hlsl"
+#include "GgxExtensions.hlsl"
+#include "Lighting.hlsl"
+#include "LightingCommon.hlsl"
+#include "Material.hlsl"
+#include "Random.hlsl"
+#include "ReflectionProbe.hlsl"
 
 struct PbrInput
 {
@@ -27,12 +27,99 @@ PbrInput SurfaceDataToPbrInput(SurfaceData surface)
 	PbrInput output;
 	output.f0 = lerp(0.04, surface.Albedo, surface.Metallic);
 	output.albedo = ComputeDiffuseColor(surface.Albedo, surface.Metallic);
-	output.roughness = Square(surface.PerceptualRoughness);
+	output.roughness = Sq(surface.PerceptualRoughness);
 	output.translucency = surface.Translucency * surface.Alpha;
 	output.occlusion = surface.Occlusion;
 	output.opacity = surface.Alpha;
 	output.bentNormal = surface.bentNormal;
 	return output;
+}
+
+// Ref: "Crafting a Next-Gen Material Pipeline for The Order: 1886".
+float ClampNdotV(float NdotV)
+{
+	return max(NdotV, 0.0001); // Approximately 0.0057 degree bias
+}
+
+// Helper function to return a set of common angle used when evaluating BSDF
+// NdotL and NdotV are unclamped
+void GetBSDFAngle(float3 V, float3 L, float NdotL, float NdotV,
+                  out float LdotV, out float NdotH, out float LdotH, out float invLenLV)
+{
+    // Optimized math. Ref: PBR Diffuse Lighting for GGX + Smith Microsurfaces (slide 114), assuming |L|=1 and |V|=1
+	LdotV = dot(L, V);
+	invLenLV = rsqrt(max(2.0 * LdotV + 2.0, FloatEps)); // invLenLV = rcp(length(L + V)), clamp to avoid rsqrt(0) = inf, inf * 0 = NaN
+	NdotH = saturate((NdotL + NdotV) * invLenLV);
+	LdotH = saturate(invLenLV * LdotV + invLenLV);
+}
+
+// Inputs:    normalized normal and view vectors.
+// Outputs:   front-facing normal, and the new non-negative value of the cosine of the view angle.
+// Important: call Orthonormalize() on the tangent and recompute the bitangent afterwards.
+float3 GetViewReflectedNormal(float3 N, float3 V, out float NdotV)
+{
+    // Fragments of front-facing geometry can have back-facing normals due to interpolation,
+    // normal mapping and decals. This can cause visible artifacts from both direct (negative or
+    // extremely high values) and indirect (incorrect lookup direction) lighting.
+    // There are several ways to avoid this problem. To list a few:
+    //
+    // 1. Setting { NdotV = max(<N,V>, SMALL_VALUE) }. This effectively removes normal mapping
+    // from the affected fragments, making the surface appear flat.
+    //
+    // 2. Setting { NdotV = abs(<N,V>) }. This effectively reverses the convexity of the surface.
+    // It also reduces light leaking from non-shadow-casting lights. Note that 'NdotV' can still
+    // be 0 in this case.
+    //
+    // It's important to understand that simply changing the value of the cosine is insufficient.
+    // For one, it does not solve the incorrect lookup direction problem, since the normal itself
+    // is not modified. There is a more insidious issue, however. 'NdotV' is a constituent element
+    // of the mathematical system describing the relationships between different vectors - and
+    // not just normal and view vectors, but also light vectors, half vectors, tangent vectors, etc.
+    // Changing only one angle (or its cosine) leaves the system in an inconsistent state, where
+    // certain relationships can take on different values depending on whether 'NdotV' is used
+    // in the calculation or not. Therefore, it is important to change the normal (or another
+    // vector) in order to leave the system in a consistent state.
+    //
+    // We choose to follow the conceptual approach (2) by reflecting the normal around the
+    // (<N,V> = 0) boundary if necessary, as it allows us to preserve some normal mapping details.
+
+	NdotV = dot(N, V);
+
+    // N = (NdotV >= 0.0) ? N : (N - 2.0 * NdotV * V);
+	N += (2.0 * saturate(-NdotV)) * V;
+	NdotV = abs(NdotV);
+
+	return N;
+}
+
+float GetSmithJointGGXAnisoPartLambdaV(float TdotV, float BdotV, float NdotV, float roughnessT, float roughnessB)
+{
+	return length(float3(roughnessT * TdotV, roughnessB * BdotV, NdotV));
+}
+
+// Inline D_GGXAniso() * V_SmithJointGGXAniso() together for better code generation.
+float DV_SmithJointGGXAniso(float TdotH, float BdotH, float NdotH, float NdotV, float TdotL, float BdotL, float NdotL, float roughnessT, float roughnessB, float partLambdaV)
+{
+	float a2 = roughnessT * roughnessB;
+	float3 v = float3(roughnessB * TdotH, roughnessT * BdotH, a2 * NdotH);
+	float s = dot(v, v);
+
+	float lambdaV = NdotL * partLambdaV;
+	float lambdaL = NdotV * length(float3(roughnessT * TdotL, roughnessB * BdotL, NdotL));
+
+	float2 D = float2(a2 * a2 * a2, s * s); // Fraction without the multiplier (1/Pi)
+	float2 G = float2(1, lambdaV + lambdaL); // Fraction without the multiplier (1/2)
+
+    // This function is only used for direct lighting.
+    // If roughness is 0, the probability of hitting a punctual or directional light is also 0.
+    // Therefore, we return 0. The most efficient way to do it is with a max().
+	return (RcpPi * 0.5) * (D.x * G.x) / max(D.y * G.y, HalfMin);
+}
+
+float DV_SmithJointGGXAniso(float TdotH, float BdotH, float NdotH, float TdotV, float BdotV, float NdotV, float TdotL, float BdotL, float NdotL, float roughnessT, float roughnessB)
+{
+	float partLambdaV = GetSmithJointGGXAnisoPartLambdaV(TdotV, BdotV, NdotV, roughnessT, roughnessB);
+	return DV_SmithJointGGXAniso(TdotH, BdotH, NdotH, NdotV, TdotL, BdotL, NdotL, roughnessT, roughnessB, partLambdaV);
 }
 
 float3 EvaluateLight(PbrInput input, float3 T, float3 B, float3 N, float3 L, float3 V, float3 bentNormal, out float3 illuminance)
@@ -68,7 +155,7 @@ float3 EvaluateLight(PbrInput input, float3 T, float3 B, float3 N, float3 L, flo
 	float subsurfaceThickness = (abs(NdotV) + 1.0) * 0.5;
 	float subsurfaceRough = Sq(0.7 - (1.0 - perceptualRoughness) * 0.5);
 	float subsurface = saturate(-LdotV);
-	subsurface = subsurfaceRough / (PI * Sq(subsurface * subsurface * (subsurfaceRough - 1.0) + 1.0)) * subsurfaceThickness;
+	subsurface = subsurfaceRough / (Pi * Sq(subsurface * subsurface * (subsurfaceRough - 1.0) + 1.0)) * subsurfaceThickness;
 	diffuse += subsurface * input.translucency;
 	
 	#ifdef REFLECTION_PROBE_RENDERING
@@ -114,7 +201,7 @@ float3 LtcLight(PbrInput input, float3 positionWS, LightData lightData, bool isL
 	// UVs for sampling the LUTs
 	float theta = FastACosPos(NdotV); // For Area light - UVs for sampling the LUTs
 	float perceptualRoughness = ConvertAnisotropicRoughnessToPerceptualRoughness(input.roughness);
-	float2 ltcUv = Remap01ToHalfTexelCoord(float2(perceptualRoughness, theta * INV_HALF_PI), 64);
+	float2 ltcUv = Remap01ToHalfTexelCoord(float2(perceptualRoughness, theta * RcpHalfPi), 64);
 
 	float2 ggxE = GGXDirectionalAlbedo(NdotV, perceptualRoughness);
 	float3 specularFGD = lerp(ggxE.x, ggxE.y, input.f0);
@@ -138,7 +225,7 @@ float3 LtcLight(PbrInput input, float3 positionWS, LightData lightData, bool isL
 		// Compute the binormal in the local coordinate system.
 		float3 B = normalize(cross(P1, P2));
 
-		float3 result = LTCEvaluate(P1, P2, B, k_identity3x3) * input.albedo * input.opacity;
+		float3 result = LTCEvaluate(P1, P2, B, Identity3x3) * input.albedo * input.opacity;
 		
 		#ifdef REFLECTION_PROBE_RENDERING
 			return result;
@@ -160,7 +247,7 @@ float3 LtcLight(PbrInput input, float3 positionWS, LightData lightData, bool isL
 
 		// Evaluate the diffuse part
 		// Polygon irradiance in the transformed configuration.
-		float4x3 LD = mul(lightVerts, k_identity3x3);
+		float4x3 LD = mul(lightVerts, Identity3x3);
 
 		float3 formFactorD = PolygonFormFactor(LD);
 		float3 result = PolygonIrradianceFromVectorFormFactor(formFactorD) * input.albedo * input.opacity;
@@ -185,6 +272,25 @@ float3 GetDiffuseDominantDir(float3 N, float3 V, float NdotV, float roughness)
 	float lerpFactor = saturate((NdotV * a + b) * roughness);
 	// The result is not normalized as we fetch in a cubemap
 	return lerp(N, V, lerpFactor);
+}
+
+// Ref: "Moving Frostbite to PBR", p. 69.
+float3 GetSpecularDominantDir(float3 N, float3 R, float perceptualRoughness, float NdotV)
+{
+    float p = perceptualRoughness;
+    float a = 1.0 - p * p;
+    float s = sqrt(a);
+
+#ifdef USE_FB_DSD
+    // This is the original formulation.
+    float lerpFactor = (s + p * p) * a;
+#else
+    // TODO: tweak this further to achieve a closer match to the reference.
+    float lerpFactor = (s + p * p) * saturate(a * a + lerp(0.0, a, NdotV * NdotV));
+#endif
+
+    // The result is not normalized as we fetch in a cubemap
+    return lerp(N, R, lerpFactor);
 }
 
 float3 GetLighting(float4 positionCS, float3 N, float3 T, PbrInput input, out float3 illuminance, out float3 transmittance)

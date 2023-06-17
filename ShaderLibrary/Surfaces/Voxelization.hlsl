@@ -1,4 +1,5 @@
 ﻿#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Lighting.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/SpaceTransforms.hlsl"
 
 struct VertexInput
 {
@@ -79,11 +80,6 @@ void Geometry(triangle GeometryInput input[3], inout TriangleStream<FragmentInpu
 	}
 }
 
-float3 mod(float3 x, float3 y)
-{
-	return x - y * floor(x / y);
-}
-
 void Fragment(FragmentInput input)
 {
 	float3 swizzledPosition = input.positionCS.xyz;
@@ -98,6 +94,6 @@ void Fragment(FragmentInput input)
 	
 	// As we use toroidal addressing, we need to offset the final coordinates as the volume moves.
 	// This also needs to be wrapped at the end, so that out of bounds pixels will write to the starting indices of the volume
-	float3 dest = mod(result + _VoxelOffset, _VoxelResolution);
+	float3 dest = Mod(result + _VoxelOffset, _VoxelResolution);
 	_VoxelGIWrite[dest] = 1;
 }

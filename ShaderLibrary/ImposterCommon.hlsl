@@ -1,8 +1,7 @@
 #ifndef IMPOSTER_COMMON_INCLUDED
 #define IMPOSTER_COMMON_INCLUDED
 
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
+#include "Packing.hlsl"
 
 float3 GridToVector(float2 coord, bool isOctahedron)
 {

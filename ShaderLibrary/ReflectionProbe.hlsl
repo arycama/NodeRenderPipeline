@@ -1,7 +1,9 @@
 ﻿#ifndef REFLECTION_PROBE_INCLUDED
 #define REFLECTION_PROBE_INCLUDED
 
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Core.hlsl"
+#include "MatrixUtils.hlsl"
+#include "Lighting.hlsl"
 
 struct ReflectionProbeData
 {
@@ -89,9 +91,9 @@ float4 SampleReflectionProbe(float3 positionWS, float3 R, float mip, float3 N, f
 	float3 a = sin(t);
 	float3 b = cos(t);
 
-	float3 A0 = sqrt(4.0 * PI / 1.0) * (sqrt(1.0 * PI) / 2.0) * a * a;
-	float3 A1 = sqrt(4.0 * PI / 3.0) * (sqrt(3.0 * PI) / 3.0) * (1.0 - b * b * b);
-	float3 A2 = sqrt(4.0 * PI / 5.0) * (sqrt(5.0 * PI) / 16.0) * a * a * (2.0 + 6.0 * b * b);
+	float3 A0 = sqrt(4.0 * Pi / 1.0) * (sqrt(1.0 * Pi) / 2.0) * a * a;
+	float3 A1 = sqrt(4.0 * Pi / 3.0) * (sqrt(3.0 * Pi) / 3.0) * (1.0 - b * b * b);
+	float3 A2 = sqrt(4.0 * Pi / 5.0) * (sqrt(5.0 * Pi) / 16.0) * a * a * (2.0 + 6.0 * b * b);
 
 	float3 irradiance =
         float3(data0.x, data1.x, data2.x) * A0 +
@@ -99,7 +101,7 @@ float4 SampleReflectionProbe(float3 positionWS, float3 R, float mip, float3 N, f
         float3(data0.z, data1.z, data2.z) * A1 * N.z +
         float3(data0.w, data1.w, data2.w) * A1 * N.x;
 
-	ambient = max(irradiance, 0) * INV_PI;
+	ambient = max(irradiance, 0) * RcpPi;
 	
 	return result;
 }
@@ -109,6 +111,5 @@ float4 SampleReflectionProbe(float3 positionWS, float3 R, float mip)
 	float3 ambient;
 	return SampleReflectionProbe(positionWS, R, mip, 0, 0, 0, ambient);
 }
-
 
 #endif

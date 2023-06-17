@@ -1,8 +1,7 @@
 ﻿#ifndef MOTION_VECTORS_INCLUDED
 #define MOTION_VECTORS_INCLUDED
 
-#include "SpaceTransforms.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
+#include "Utility.hlsl"
 
 float2 MotionVectorFragment(float4 nonJitteredPositionCS, float4 previousPositionCS)
 {

@@ -3,10 +3,6 @@
 
 #pragma warning (disable : 3571)
 
-#ifdef __INTELLISENSE__
-	#define INSTANCING_ON
-#endif
-
 cbuffer UnityPerCamera
 {
 	float4 _Time; // (t/20, t, t*2, t*3)
@@ -108,6 +104,11 @@ float _ExposureValue, _ExposureValueRcp;
 // Instancing
 uint unity_BaseInstanceID;
 
+const static float _NearClipPlane = _ProjectionParams.y;
+const static float _FarClipPlane = _ProjectionParams.z;
+const static float _NearClipValue = 1.0;
+const static float _FarClipValue = 0.0;
+
 cbuffer UnityInstancing_PerDraw0
 {
 	struct
@@ -179,8 +180,6 @@ SurfaceData DefaultSurface()
 	surface.bentNormal = float3(0, 0, 1);
 	return surface;
 }
-
-#include "Utility.hlsl"
 
 // InstancedIndirect
 StructuredBuffer<uint> _RendererInstanceIndexOffsets;
@@ -334,7 +333,5 @@ float3x4 GetPreviousObjectToWorld(uint instanceID)
 	previousObjectToWorld = ApplyCameraTranslationToMatrix(previousObjectToWorld);
 	return previousObjectToWorld;
 }
-
-#include "SpaceTransforms.hlsl"
 
 #endif

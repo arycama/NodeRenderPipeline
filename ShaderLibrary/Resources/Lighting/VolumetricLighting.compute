@@ -1,6 +1,7 @@
 #pragma kernel Scatter
 #pragma kernel Integrate
 
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/AreaLighting.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Lighting.hlsl"
 
 RWTexture3D<float3> _Result;
@@ -21,7 +22,7 @@ void Scatter(uint3 id : SV_DispatchThreadID)
 	
 	float normalizedDepth = (id.z + offset) / _VolumeSlices;
 	float linearDepth = lerp(_ProjectionParams.y, _VolumeDepth, normalizedDepth);
-	float deviceDepth = EyeToDeviceDepth(linearDepth, _ZBufferParams);
+	float deviceDepth = EyeToDeviceDepth(linearDepth);
 	
 	if(maxDepth > deviceDepth)
 	{
@@ -43,7 +44,7 @@ void Scatter(uint3 id : SV_DispatchThreadID)
 		if (j == 0)
 			attenuation *= CloudTransmittanceLevelZero(positionWS);
 
-		if (lightData.ShadowIndex != UINT_MAX)
+		if (lightData.ShadowIndex != UintMax)
 			attenuation *= DirectionalLightShadow(positionWS, lightData.ShadowIndex);
 		
 		//luminance += AtmosphereLightFull(positionWS + _PlanetOffset, rayDirection, lightData.Direction, _LinearClampSampler, attenuation) * ApplyExposure(lightData.Color);
@@ -85,7 +86,7 @@ void Scatter(uint3 id : SV_DispatchThreadID)
 		            // Compute the binormal in the local coordinate system.
 				float3 B = normalize(cross(P1, P2));
 
-				light.color *= LTCEvaluate(P1, P2, B, k_identity3x3);
+				light.color *= LTCEvaluate(P1, P2, B, Identity3x3);
 			}
 			else
 			{
@@ -101,7 +102,7 @@ void Scatter(uint3 id : SV_DispatchThreadID)
                     
 		            // Evaluate the diffuse part
 		            // Polygon irradiance in the transformed configuration.
-				float4x3 LD = mul(lightVerts, k_identity3x3);
+				float4x3 LD = mul(lightVerts, Identity3x3);
 
 				float3 formFactorD = PolygonFormFactor(LD);
 				light.color *= PolygonIrradianceFromVectorFormFactor(formFactorD);
@@ -145,7 +146,7 @@ void Integrate(uint3 id : SV_DispatchThreadID)
 	
 	float normalizedDepth = (id.z + offset) / _VolumeSlices;
 	float linearDepth = lerp(_ProjectionParams.y, _VolumeDepth, normalizedDepth);
-	float deviceDepth = EyeToDeviceDepth(linearDepth, _ZBufferParams);
+	float deviceDepth = EyeToDeviceDepth(linearDepth);
 	
 	float2 positionNdc = float2(id.xy + 0.5) * _VolumeTileSize;
 	float3 positionWS = PixelToWorld(float3(positionNdc, deviceDepth));
@@ -160,7 +161,7 @@ void Integrate(uint3 id : SV_DispatchThreadID)
 	
 	// Early exit if this froxel is behind the max depth sample
 	uint mip = log2(_VolumeTileSize);
-	float maxDepth = LinearEyeDepth(_MaxZ.mips[mip][id.xy], _ZBufferParams);
+	float maxDepth = LinearEyeDepth(_MaxZ.mips[mip][id.xy]);
 
 	float3 luminance = 0.0, transmittance = 1.0;
 	for (float i = offset; i < _VolumeSlices; i++)

@@ -118,7 +118,7 @@ float4 RenderCloud(float3 P, float3 rayDir, uint2 id, float depth, float sceneDe
 	bool hasInnerIntersection = IntersectRaySphere(P + _PlanetOffset, rayDir, _PlanetRadius + _Height, innerIntersections) && innerIntersections.x >= 0;
 	bool hasOuterIntersection = IntersectRaySphere(P + _PlanetOffset, rayDir, _PlanetRadius + _Height + _Thickness, outerIntersections) && outerIntersections.x >= 0;
 
-	bool isMaxDepth = depth == UNITY_RAW_FAR_CLIP_VALUE;
+	bool isMaxDepth = depth == _FarClipValue;
 
 	cloudDepth = _MaxDistance * 2;
 	float startDistance = 0, endDistance = 0;

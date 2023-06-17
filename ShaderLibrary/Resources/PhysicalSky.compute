@@ -8,6 +8,7 @@
 //#pragma multi_compile _ VOXEL_GI_ON
 
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/CloudCommon.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Color.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/MotionVectors.hlsl"
 
 RWTexture2D<float4> _VolumetricClouds;
@@ -43,7 +44,7 @@ void KERNEL_NAME(uint2 id : SV_DispatchThreadID)
 	V /= lengthV;
 
 	#ifdef REFLECTION_PROBE
-		float depth = UNITY_RAW_FAR_CLIP_VALUE;
+		float depth = _FarClipValue;
 		bool isSky = true;
 		float sceneDepth = 0.0;
 		float cloudDepth;
@@ -52,8 +53,8 @@ void KERNEL_NAME(uint2 id : SV_DispatchThreadID)
 		float rayDistance = lerp(cloudDepth, maxDistance, clouds.a);
 	#else	
 		float depth = _Depth.mips[1][id];
-		bool isSky = depth == UNITY_RAW_FAR_CLIP_VALUE;
-		float sceneDepth = LinearEyeDepth(depth, _ZBufferParams) * lengthV;
+		bool isSky = depth == _FarClipValue;
+		float sceneDepth = LinearEyeDepth(depth) * lengthV;
 		float cloudDepth = _CloudDepth[id] * lengthV * _MaxDistance;
 		float rayDistance = isSky ? cloudDepth : min(sceneDepth, cloudDepth);
 	#endif
@@ -124,13 +125,13 @@ void KERNEL_NAME(uint2 id : SV_DispatchThreadID)
 		#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
 			float3 color = ApplyExposure(_LightColor0) * TransmittanceToAtmosphere(P, _LightDirection0, _LinearClampSampler);
 			float NdotL = dot(N, _LightDirection0);
-			luminance += color * transmittance * saturate(NdotL) * _GroundColor * INV_PI;
+			luminance += color * transmittance * saturate(NdotL) * _GroundColor * RcpPi;
 		#endif
 		
 		#ifdef LIGHT_COUNT_TWO
 			float3 color1 = ApplyExposure(_LightColor1) * TransmittanceToAtmosphere(P, _LightDirection1, _LinearClampSampler);
 			float NdotL1 = dot(N, _LightDirection1);
-			luminance += color1 * transmittance * saturate(NdotL1) * _GroundColor * INV_PI;
+			luminance += color1 * transmittance * saturate(NdotL1) * _GroundColor * RcpPi;
 		#endif
 	}
 	
@@ -171,7 +172,7 @@ void SpatialDenoise(int2 id : SV_DispatchThreadID)
 	}
 	else
 	{
-		centerDepth = LinearEyeDepth(centerDepth, _ZBufferParams);
+		centerDepth = LinearEyeDepth(centerDepth);
 	}
 			
 	float3 scatter = 0.0, transmittance = 0.0;
@@ -191,7 +192,7 @@ void SpatialDenoise(int2 id : SV_DispatchThreadID)
 			}
 			else
 			{
-				depth = LinearEyeDepth(depth, _ZBufferParams);
+				depth = LinearEyeDepth(depth);
 			}
 			
 			float weight = saturate(1.0 - abs(id.x - coord.x));
@@ -275,7 +276,7 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 			if (depth == 0.0)
 			{
 				float cloudDepth = _CloudDepth[clamp(id + float2(x, y), 0, floor(_ScreenSize.xy * 0.5) - 1)] * _MaxDistance;
-				depth = EyeToDeviceDepth(cloudDepth, _ZBufferParams);
+				depth = EyeToDeviceDepth(cloudDepth);
 			}
 			
 			if (depth > closestDepth)
@@ -421,7 +422,7 @@ void Upsample(int2 id : SV_DispatchThreadID)
 	float2 intersections;
 	bool hasPlanetHit = IntersectRaySphere(_PlanetOffset, V, _PlanetRadius, intersections) && intersections.x >= 0.0;
 	
-	bool isSky = depth == UNITY_RAW_FAR_CLIP_VALUE;
+	bool isSky = depth == _FarClipValue;
 	if (isSky && !hasPlanetHit)
 	{
 		float3 Vx = -MultiplyVector(_PixelCoordToViewDirWS, float3(id.xy + 0.5 + float2(1.0, 0.0), 1.0), false);

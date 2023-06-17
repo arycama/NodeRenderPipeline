@@ -1,5 +1,6 @@
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Brdf.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Deferred.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Utility.hlsl"
 
 float4x4 _PixelCoordToViewDirWS;
 Texture2D<float> _UnityFBInput0;
@@ -15,10 +16,7 @@ float3 Fragment(float4 positionCS : SV_Position) : SV_Target
 
 	// Pixel to world
 	SurfaceData surface = SurfaceDataFromGBuffer(positionCS.xy);
-	float linearEyeDepth = LinearEyeDepth(depth, _ZBufferParams);
-	
-	//return pow(surface.Emission, 1);
-	//return surface.Occlusion ;
+	float linearEyeDepth = LinearEyeDepth(depth);
 	
 	PbrInput input = SurfaceDataToPbrInput(surface);
 	float3x3 frame = GetLocalFrame(surface.Normal);

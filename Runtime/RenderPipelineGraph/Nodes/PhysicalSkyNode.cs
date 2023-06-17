@@ -5,10 +5,11 @@ using UnityEngine.Rendering;
 [NodeMenuItem("Lighting/Physical Sky")]
 public partial class PhysicalSkyNode : RenderPipelineNode
 {
-    private static readonly IndexedString noiseIds = new("STBN/Scalar/stbn_scalar_2Dx1Dx1D_128x128x64x1_");
+    private static readonly IndexedString noiseIds = new("STBN/Vec2/stbn_vec2_2Dx1D_128x128x64_");
 
     [SerializeField] private AtmosphereProfile atmosphereProfile;
     [Input, SerializeField, Range(1, 64)] private int sampleCount = 16;
+    [Input, SerializeField] private bool debugNoise;
 
     [Header("Sky")]
     [Input] private RenderTargetIdentifier exposure;
@@ -44,7 +45,7 @@ public partial class PhysicalSkyNode : RenderPipelineNode
         var viewToWorld = Matrix4x4.Rotate(camera.transform.rotation);
         var mat = Matrix4x4Extensions.ComputePixelCoordToWorldSpaceViewDirectionMatrix(camera.Resolution(), new Vector2(jitterX, jitterY), camera.fieldOfView, camera.aspect, viewToWorld, false);
 
-        var blueNoise1D = Resources.Load<Texture2D>(noiseIds.GetString(FrameCount % 64 * 1));
+        var blueNoise2D = Resources.Load<Texture2D>(noiseIds.GetString(debugNoise ? 0 : FrameCount % 64));
         var planetCenterRws = new Vector3(0f, (float)((double)atmosphereProfile.PlanetRadius + camera.transform.position.y), 0f);
 
         using var scope = context.ScopedCommandBuffer("Physical Sky");
@@ -54,7 +55,7 @@ public partial class PhysicalSkyNode : RenderPipelineNode
         scope.Command.SetComputeTextureParam(computeShader, 0, "_Exposure", exposure);
         scope.Command.SetComputeTextureParam(computeShader, 0, "_AtmosphereTransmittance", transmittance);
         scope.Command.SetComputeTextureParam(computeShader, 0, "_MultipleScatter", multiScatter);
-        scope.Command.SetComputeTextureParam(computeShader, 0, "_BlueNoise1D", blueNoise1D);
+        scope.Command.SetComputeTextureParam(computeShader, 0, "_BlueNoise2D", blueNoise2D);
         scope.Command.SetComputeTextureParam(computeShader, 0, "_Depth", depth);
         scope.Command.SetComputeTextureParam(computeShader, 0, "_DirectionalShadows", directionalShadows);
         scope.Command.SetComputeTextureParam(computeShader, 0, "_Result", result);

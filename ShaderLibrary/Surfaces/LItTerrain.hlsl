@@ -1,11 +1,13 @@
 #define NO_EMISSION
 
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Deferred.hlsl"
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Terrain.hlsl"
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/VirtualTexturing.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/IndirectRendering.hlsl"
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Tessellation.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Lighting.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Material.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/SpaceTransforms.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Terrain.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Tessellation.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/VirtualTexturing.hlsl"
 
 struct VertexInput
 {

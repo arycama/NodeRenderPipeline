@@ -1,4 +1,4 @@
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Utility.hlsl"
 
 #pragma kernel ExponentialShadowMapDownsample
 #pragma kernel ExponentialShadowMapDownsample DOWNSAMPLE_2X

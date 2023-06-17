@@ -1,7 +1,5 @@
 ﻿#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Brdf.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Lighting.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GeometricTools.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Tessellation.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Deferred.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/MotionVectors.hlsl"
@@ -92,10 +90,10 @@ struct FragmentOutput
 
 bool CheckTerrainMask(float3 p0, float3 p1, float3 p2, float3 p3)
 {
-	float2 bl = TRANSFORM_TEX(p0.xz, _OceanTerrainMask);
-	float2 br = TRANSFORM_TEX(p3.xz, _OceanTerrainMask);
-	float2 tl = TRANSFORM_TEX(p1.xz, _OceanTerrainMask);
-	float2 tr = TRANSFORM_TEX(p2.xz, _OceanTerrainMask);
+	float2 bl = ApplyScaleOffset(p0.xz, _OceanTerrainMask_ST);
+	float2 br = ApplyScaleOffset(p3.xz, _OceanTerrainMask_ST);
+	float2 tl = ApplyScaleOffset(p1.xz, _OceanTerrainMask_ST);
+	float2 tr = ApplyScaleOffset(p2.xz, _OceanTerrainMask_ST);
 	
 	// Return true if outside of terrain bounds
 	if(any(saturate(bl) != bl || saturate(br) != br || saturate(tl) != tl || saturate(tr) != tr))
@@ -133,7 +131,7 @@ void GerstnerWaves(float3 positionWS, out float3 displacement, out float3 normal
 	
 	// Largest wave arising from a wind speed
 	float waveLength = _ShoreWaveLength;
-	float frequency = TWO_PI / waveLength;
+	float frequency = TwoPi / waveLength;
 	float phase = sqrt(_OceanGravity * frequency) * time;
 	
 	// Shore waves linearly fade in on the edges of SDF
@@ -152,7 +150,7 @@ void GerstnerWaves(float3 positionWS, out float3 displacement, out float3 normal
 	// slowly crawling worldspace aligned checkerboard pattern that damps gerstner waves further
 	float worldSpacePosMultiplier = 0.75 + 0.25 * sin(time * 0.3 + 0.5 * positionWS.x / waveLength) * sin(time * 0.4 + 0.5 * positionWS.z / waveLength);
 	
-	float2 windDirection = float2(cos(_ShoreWindAngle * TWO_PI), sin(_ShoreWindAngle * TWO_PI));
+	float2 windDirection = float2(cos(_ShoreWindAngle * TwoPi), sin(_ShoreWindAngle * TwoPi));
 	float gerstnerMultiplier = shoreFactor * groupSpeedMultiplier * worldSpacePosMultiplier * pow(saturate(dot(windDirection, direction)), 0.5);
 	float amplitude = gerstnerMultiplier * _ShoreWaveHeight;
 	float steepness = amplitude * frequency > 0.0 ? _ShoreWaveSteepness / (amplitude * frequency) : 0.0;
@@ -182,8 +180,8 @@ void GerstnerWaves(float3 positionWS, out float3 displacement, out float3 normal
 	
 	// adding wave forward skew due to its bottom slowing down, so the forward wave front gradually becomes vertical
 	displacement.xz -= direction * sinFactor * amplitude * breakerMultiplier * 2.0;
-	float breakerPhase = shorePhase + phase - PI * 0.25;
-	float fp = frac(breakerPhase / TWO_PI);
+	float breakerPhase = shorePhase + phase - Pi * 0.25;
+	float fp = frac(breakerPhase / TwoPi);
 	float sawtooth = saturate(fp * 10.0) - saturate(fp * 10.0 - 1.0);
 
 	// moving breaking area of the wave further forward
@@ -423,7 +421,7 @@ FragmentOutput Fragment(FragmentInput input)
 		foamFactor *= _FoamTex.Sample(_TrilinearRepeatAniso4Sampler, foamUv).r;
 		
 		// Sample/unpack normal, reconstruct partial derivatives, scale these by foam factor and normal scale and add.
-		float3 foamNormal = UnpackNormal(_FoamBump.Sample(_TrilinearRepeatAniso4Sampler, foamUv));
+		float3 foamNormal = UnpackNormalAG(_FoamBump.Sample(_TrilinearRepeatAniso4Sampler, foamUv));
 		float2 foamDerivs = foamNormal.xy / foamNormal.z;
 		oceanN.xy += foamDerivs * _FoamNormalScale * foamFactor;
 		smoothness = lerp(smoothness, _FoamSmoothness, foamFactor);

@@ -1,6 +1,6 @@
 ﻿#pragma kernel GaussianDownsample
 
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Color.hlsl"
 
 RWTexture2D<float3> _Source;
 RWTexture2D<float3> _Destination;

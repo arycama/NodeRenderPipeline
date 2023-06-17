@@ -2,61 +2,29 @@
 #define UTILITY_INCLUDED
 
 #include "Core.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Filtering.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
+#include "Math.hlsl"
 
 Texture2D<float2> _UnitBlueNoise2D, _BlueNoise2D;
 Texture2D<float> _BlueNoise1D;
 
-TEMPLATE_1_FLT(RandomPerFrameSeed, u, return u)
-//TEMPLATE_1_FLT(RandomPerFrameSeed, u, return frac((u + (_FrameIndex / 64) * GOLDEN_RATIO)))
-
-TEMPLATE_1_FLT(Sum, x, return dot(x, 1.0))
-
 float BlueNoise1D(uint2 pixelCoord)
 {
-	return RandomPerFrameSeed(_BlueNoise1D[pixelCoord % 128]);
+	return _BlueNoise1D[pixelCoord % 128];
 }
 
 float2 BlueNoise2D(uint2 pixelCoord)
 {
-	return RandomPerFrameSeed(_BlueNoise2D[pixelCoord % 128]);
+	return _BlueNoise2D[pixelCoord % 128];
 }
 
 float2 UnitBlueNoise2D(uint2 pixelCoord)
 {
-	return normalize(2.0 * RandomPerFrameSeed(_UnitBlueNoise2D[pixelCoord % 128]) - 1.0);
-}
-
-uint4 PcgHash(uint4 state)
-{
-	uint4 word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-	return (word >> 22u) ^ word;
-}
-
-uint3 PcgHash(uint3 state)
-{
-	uint3 word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-	return (word >> 22u) ^ word;
-}
-
-uint2 PcgHash(uint2 state)
-{
-	uint2 word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-	return (word >> 22u) ^ word;
-}
-
-uint PcgHash(uint state)
-{
-	uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-	return (word >> 22u) ^ word;
+	return normalize(2.0 * _UnitBlueNoise2D[pixelCoord % 128] - 1.0);
 }
 
 float4 ComputeScreenPos(float4 positionCS)
 {
-	positionCS.xy = (positionCS.xy * float2(1, _ProjectionParams.x) + positionCS.w) * 0.5;
-	return positionCS;
+	return float4((positionCS.xy * float2(1, _ProjectionParams.x) + positionCS.w) * 0.5, positionCS.zw);
 }
 
 float3 ApplyExposure(float3 color)
@@ -68,35 +36,37 @@ float3 ApplyExposure(float3 color)
 	#endif
 }
 
-float Remap(float v, float pMin, float pMax, float nMin, float nMax) { return nMin + (v - pMin) / (pMax - pMin) * (nMax - nMin); }
+float1 Remap(float1 v, float1 pMin, float1 pMax, float1 nMin, float1 nMax) { return nMin + (v - pMin) / (pMax - pMin) * (nMax - nMin); }
 float2 Remap(float2 v, float2 pMin, float2 pMax, float2 nMin, float2 nMax) { return nMin + (v - pMin) / (pMax - pMin) * (nMax - nMin); }
 float3 Remap(float3 v, float3 pMin, float3 pMax, float3 nMin, float3 nMax) { return nMin + (v - pMin) / (pMax - pMin) * (nMax - nMin); }
 float4 Remap(float4 v, float4 pMin, float4 pMax, float4 nMin, float4 nMax) { return nMin + (v - pMin) / (pMax - pMin) * (nMax - nMin); }
 
-// Z buffer to linear 0..1 depth (0 at near plane, 1 at far plane).
-// zBufferParam = { (f-n)/n, 1, (f-n)/n*f, 1/f }
-float Linear01DepthFromNearPlane(float depth, float4 zBufferParam)
+float Remap01(float x, float rcpLength, float startTimesRcpLength) { return saturate(x * rcpLength - startTimesRcpLength); }
+
+float1 RangeRemap(float1 min, float1 max, float1 t) { return saturate((t - min) / (max - min)); }
+float2 RangeRemap(float2 min, float2 max, float2 t) { return saturate((t - min) / (max - min)); }
+float3 RangeRemap(float3 min, float3 max, float3 t) { return saturate((t - min) / (max - min)); }
+float4 RangeRemap(float4 min, float4 max, float4 t) { return saturate((t - min) / (max - min)); }
+
+float1 Mod(float1 x, float1 y) { return x - y * floor(x / y); }
+float2 Mod(float2 x, float2 y) { return x - y * floor(x / y); }
+float3 Mod(float3 x, float3 y) { return x - y * floor(x / y); }
+float4 Mod(float4 x, float4 y) { return x - y * floor(x / y); }
+
+void Swap(float1 a, float1 b) { float1 t = a; a = b; b = t; }
+void Swap(float2 a, float2 b) { float2 t = a; a = b; b = t; }
+void Swap(float3 a, float3 b) { float3 t = a; a = b; b = t; }
+void Swap(float4 a, float4 b) { float4 t = a; a = b; b = t; }
+
+float1 SqrLength(float1 x) { return dot(x, x); }
+float2 SqrLength(float2 x) { return dot(x, x); }
+float3 SqrLength(float3 x) { return dot(x, x); }
+float4 SqrLength(float4 x) { return dot(x, x); }
+
+float3 NLerp(float3 A, float3 B, float t)
 {
-	float near = _ProjectionParams.y;
-	float far = _ProjectionParams.z;
-
-	float eye = LinearEyeDepth(depth, zBufferParam);
-	return (eye - near) / (far - near);
-
-	zBufferParam.x = -1 + far / near;
-	zBufferParam.y = 1;
-	zBufferParam.z = (-1 + far / near) / far;
-	zBufferParam.w = 1 / far;
-
-	// from camera
-	return 1.0 / (zBufferParam.x * depth + zBufferParam.y);
-
-	//return 1.0 / (zBufferParam.x + zBufferParam.y / depth);
+	return normalize(lerp(A, B, t));
 }
-
-// Common Utilities, should probably be a seperate file
-TEMPLATE_1_FLT(Square, x, return (x) * (x))
-TEMPLATE_1_FLT(SqrLength, x, return dot(x, x))
 
 // Projects a vector onto another vector (Assumes vectors are normalized)
 float3 Project(float3 V, float3 N)
@@ -125,8 +95,8 @@ float SignedAngle(float3 from, float3 to, float3 axis)
 
 float GaussianWeight(float x, float radius)
 {
-	float twoSqrRadius = 2.0 * Square(radius);
-	return exp(-Square(x) * rcp(twoSqrRadius)) * rcp(sqrt(PI * twoSqrRadius));
+	float twoSqrRadius = 2.0 * Sq(radius);
+	return exp(-Sq(x) * rcp(twoSqrRadius)) * rcp(sqrt(Pi * twoSqrRadius));
 }
 
 float2 VogelDiskSample(int sampleIndex, int samplesCount, float phi, float power = 1.0)
@@ -162,42 +132,18 @@ float3 MatrixScaleRowMajor(float3x4 mat)
 	return MatrixScaleColumnMajor(transpose(mat));
 }
 
-float Max4(float4 x)
-{
-	float2 temp = max(x.xy, x.zw);
-	return max(temp.x, temp.y);
-}
+float Max2(float2 x) { return max(x.x, x.y); }
+float Max3(float3 x) { return max(x.x, max(x.y, x.z)); }
+float Max4(float4 x) { return Max2(max(x.xy, x.zw)); }
 
-float Min4(float4 x)
-{
-	float2 temp = min(x.xy, x.zw);
-	return min(temp.x, temp.y);
-}
-
-float Max3(float3 x)
-{
-	return Max3(x.x, x.y, x.z);
-}
-
-float Min3(float3 x)
-{
-	return Min3(x.x, x.y, x.z);
-}
-
-float Max2(float2 x)
-{
-	return max(x.x, x.y);
-}
-
-float Min2(float2 x)
-{
-	return min(x.x, x.y);
-}
+float Min2(float2 x) { return min(x.x, x.y); }
+float Min3(float3 x) { return min(x.x, min(x.y, x.z)); }
+float Min4(float4 x) { return Min2(min(x.xy, x.zw)); }
 
 // Normalize if bool is set to true
 float3 ConditionalNormalize(float3 input, bool doNormalize)
 {
-	return doNormalize ? SafeNormalize(input) : input;
+	return doNormalize ? normalize(input) : input;
 }
 
 // Divides a 4-component vector by it's w component
@@ -206,37 +152,26 @@ float4 PerspectiveDivide(float4 input)
 	return float4(input.xyz * rcp(input.w), input.w);
 }
 
+float4 GetFullScreenTriangleVertexPosition(uint vertexID, float z = _NearClipValue)
+{
+    // note: the triangle vertex position coordinates are x2 so the returned UV coordinates are in range -1, 1 on the screen.
+	float2 uv = float2((vertexID << 1) & 2, vertexID & 2);
+	return float4(uv * 2.0 - 1.0, z, 1.0);
+}
+
+// Generates a triangle in homogeneous clip space, s.t.
+// v0 = (-1, -1, 1), v1 = (3, -1, 1), v2 = (-1, 3, 1).
+float2 GetFullScreenTriangleTexCoord(uint vertexID)
+{
+    return float2((vertexID << 1) & 2, 1.0 - (vertexID & 2));
+}
+
 FragmentInputImage VertexImage(uint vertexID : SV_VertexID)
 {
 	FragmentInputImage output;
-	output.positionCS = GetFullScreenTriangleVertexPosition(vertexID, UNITY_RAW_FAR_CLIP_VALUE);
+	output.positionCS = GetFullScreenTriangleVertexPosition(vertexID, _FarClipValue);
 	output.uv = GetFullScreenTriangleTexCoord(vertexID);
 	return output;
-}
-
-float3 SampleTexture2DBicubic(Texture2D<float3> tex, SamplerState smp, float2 coord, float4 texSize)
-{
-	float2 xy = coord * texSize.xy + 0.5;
-	float2 ic = floor(xy);
-	float2 fc = frac(xy);
-
-	float2 weights[2], offsets[2];
-	BicubicFilter(fc, weights, offsets);
-
-	return weights[0].y * (weights[0].x * tex.SampleLevel(smp, (ic + float2(offsets[0].x, offsets[0].y) - 0.5) * texSize.zw, 0.0) +
-                           weights[1].x * tex.SampleLevel(smp, (ic + float2(offsets[1].x, offsets[0].y) - 0.5) * texSize.zw, 0.0)) +
-           weights[1].y * (weights[0].x * tex.SampleLevel(smp, (ic + float2(offsets[0].x, offsets[1].y) - 0.5) * texSize.zw, 0.0) +
-                           weights[1].x * tex.SampleLevel(smp, (ic + float2(offsets[1].x, offsets[1].y) - 0.5) * texSize.zw, 0.0));
-}
-
-float3 Reinhard(float3 color)
-{
-	return color * rcp(1.0 + Luminance(color));
-}
-
-float3 InverseReinhard(float3 color)
-{
-	return color * rcp(1.0 - Luminance(color));
 }
 
 float3 ClipToAABB(float3 history, float3 center, float3 extents, out bool wasClipped)
@@ -416,109 +351,13 @@ float atanh(float x)
 	return 0.5 * log((1.0 + x) / (1.0 - x));
 }
 
-uint PermuteState(uint state)
-{
-	return state * 747796405u + 2891336453u;
-}
-
-float2 ConstructFloat(uint2 m)
-{
-	return asfloat((m & 0x007FFFFF) | 0x3F800000) - 1;
-}
-
-float3 ConstructFloat(uint3 m)
-{
-	return asfloat((m & 0x007FFFFF) | 0x3F800000) - 1;
-}
-
-float4 ConstructFloat(uint4 m)
-{
-	return asfloat((m & 0x007FFFFF) | 0x3F800000) - 1;
-}
-
-uint RandomUint(uint value, uint seed = 0)
-{
-	uint state = PermuteState(value);
-	return PcgHash(state + seed);
-}
-
-float RandomFloat(uint value, uint seed = 0)
-{
-	uint start = PermuteState(value) + seed;
-	uint state = PermuteState(start);
-	return ConstructFloat(PcgHash(state));
-}
-
-float2 RandomFloat2(uint value, uint seed = 0)
-{
-	uint start = PermuteState(value) + seed;
-
-	uint2 state;
-	state.x = PermuteState(start);
-	state.y = PermuteState(state.x);
-	return ConstructFloat(PcgHash(state));
-}
-
-float3 RandomFloat3(uint value, uint seed = 0)
-{
-	uint start = PermuteState(value) + seed;
-
-	uint3 state;
-	state.x = PermuteState(start);
-	state.y = PermuteState(state.x);
-	state.z = PermuteState(state.y);
-	return ConstructFloat(PcgHash(state));
-}
-
-float4 RandomFloat4(uint value, uint seed, out uint outState)
-{
-	uint start = PermuteState(value) + seed;
-
-	uint4 state;
-	state.x = PermuteState(start);
-	state.y = PermuteState(state.x);
-	state.z = PermuteState(state.y);
-	state.w = PermuteState(state.z);
-	outState = state.w;
-	return ConstructFloat(PcgHash(state));
-}
-
-float4 RandomFloat4(uint value, uint seed = 0)
-{
-	uint state;
-	return RandomFloat4(value, seed, state);
-}
-
 // Variant with float3 for f90
-float3 F_Schlick(float3 f0, float3 f90, float u)
+float3 F_Schlick(float3 f0, float u)
 {
 	float x = 1.0 - u;
 	float x2 = x * x;
 	float x5 = x * x2 * x2;
-	return f0 * (1.0 - x5) + (f90 * x5); // sub mul mul mul sub mul mad*3
-}
-
-float GaussianFloat(uint seed)
-{
-	float2 u = RandomFloat2(seed);
-	return sqrt(-2.0 * log(u.x)) * cos(TWO_PI * u.y);
-}
-
-float2 GaussianFloat2(uint seed)
-{
-	float2 u = RandomFloat2(seed);
-	float r = sqrt(-2.0 * log(u.x));
-	float theta = 2.0 * PI * u.y;
-	return float2(r * sin(theta), r * cos(theta));
-}
-
-float4 GaussianFloat4(uint seed)
-{
-	float4 u = RandomFloat4(seed);
-	
-	float2 r = sqrt(-2.0 * log(u.xz));
-	float2 theta = 2.0 * PI * u.yw;
-	return float4(r.x * sin(theta.x), r.x * cos(theta.x), r.y * sin(theta.y), r.y * cos(theta.y));
+	return f0 * (1.0 - x5) + (1.0 * x5); // sub mul mul mul sub mul mad*3
 }
 
 // Projects edge bounding-sphere into clip space
@@ -592,42 +431,11 @@ uint TextureCoordToOffset(uint3 position, uint resolution)
 
 Texture2D<float> _LengthToRoughness;
 
-float LengthToRoughness(float len)
+float2 Remap01ToHalfTexelCoord(float2 coord, float2 size)
 {
-	len = 3.0 * len - 2.0; // Remap from 2/3:1 to 0:1
-	float2 uv = Remap01ToHalfTexelCoord(float2(len, 0.5), float2(256.0, 1));
-	return _LengthToRoughness.SampleLevel(_LinearClampSampler, uv, 0.0);
-}
-
-float LengthToPerceptualRoughness(float len)
-{
-	return RoughnessToPerceptualRoughness(LengthToRoughness(len));
-}
-
-float LengthToSmoothness(float len)
-{
-	return RoughnessToPerceptualSmoothness(LengthToRoughness(len));
-}
-
-float RoughnessToNormalLength(float roughness)
-{
-	if(roughness < 1e-3)
-		return 1.0;
-	if (roughness >= 1.0)
-		return 2.0 / 3.0;
-
-	float a = sqrt(saturate(1.0 - pow(roughness, 2.0)));
-	return (a - (1.0 - a * a) * atanh(a)) / (a * a * a);
-}
-
-float PerceptualRoughnessToNormalLength(float perceptualRoughness)
-{
-	return RoughnessToNormalLength(PerceptualRoughnessToRoughness(perceptualRoughness));
-}
-
-float SmoothnessToNormalLength(float smoothness)
-{
-	return RoughnessToNormalLength(PerceptualSmoothnessToRoughness(smoothness));
+	const float2 start = 0.5 * rcp(size);
+	const float2 len = 1.0 - rcp(size);
+	return coord * len + start;
 }
 
 float3 UnpackNormalSNorm(float2 data)
@@ -638,14 +446,14 @@ float3 UnpackNormalSNorm(float2 data)
 	return normal;
 }
 
-float EyeToDeviceDepth(float eyeDepth, float4 zBufferParam)
+float EyeToDeviceDepth(float eyeDepth)
 {
-	return (1.0 - eyeDepth * zBufferParam.w) * rcp(eyeDepth * zBufferParam.z);
+	return (1.0 - eyeDepth * _ZBufferParams.w) * rcp(eyeDepth * _ZBufferParams.z);
 }
 
-float Linear01ToDeviceDepth(float eyeDepth, float4 zBufferParam)
+float Linear01ToDeviceDepth(float eyeDepth)
 {
-	return (1.0 - eyeDepth * zBufferParam.y) * rcp(eyeDepth * zBufferParam.x);
+	return (1.0 - eyeDepth * _ZBufferParams.y) * rcp(eyeDepth * _ZBufferParams.x);
 }
 
 // From Filmic SMAA presentation[Jimenez 2016]
@@ -675,6 +483,64 @@ float3 Bicubic5Tap(Texture2D<float3> input, float2 texcoord, float sharpening, f
 					float4(input.SampleLevel(_LinearClampSampler, float2(tc3.x, tc0.y), 0.0), 1.0) * (w3.x * w12.y) +
 					float4(input.SampleLevel(_LinearClampSampler, float2(tc12.x, tc3.y), 0.0), 1.0) * (w12.x * w3.y);
 	return color.rgb * rcp(color.a);
+}
+
+// Return view direction in tangent space, make sure tangentWS.w is already multiplied by GetOddNegativeScale()
+float3 GetViewDirectionTangentSpace(float4 tangentWS, float3 normalWS, float3 viewDirWS)
+{
+    // must use interpolated tangent, bitangent and normal before they are normalized in the pixel shader.
+    float3 unnormalizedNormalWS = normalWS;
+    const float renormFactor = 1.0 / length(unnormalizedNormalWS);
+
+    // use bitangent on the fly like in hdrp
+    // IMPORTANT! If we ever support Flip on double sided materials ensure bitangent and tangent are NOT flipped.
+    float crossSign = (tangentWS.w > 0.0 ? 1.0 : -1.0); // we do not need to multiple GetOddNegativeScale() here, as it is done in vertex shader
+    float3 bitang = crossSign * cross(normalWS.xyz, tangentWS.xyz);
+
+    float3 WorldSpaceNormal = renormFactor * normalWS.xyz;       // we want a unit length Normal Vector node in shader graph
+
+    // to preserve mikktspace compliance we use same scale renormFactor as was used on the normal.
+    // This is explained in section 2.2 in "surface gradient based bump mapping framework"
+    float3 WorldSpaceTangent = renormFactor * tangentWS.xyz;
+    float3 WorldSpaceBiTangent = renormFactor * bitang;
+
+    float3x3 tangentSpaceTransform = float3x3(WorldSpaceTangent, WorldSpaceBiTangent, WorldSpaceNormal);
+    float3 viewDirTS = mul(tangentSpaceTransform, viewDirWS);
+
+    return viewDirTS;
+}
+
+float2 ApplyScaleOffset(float2 x, float4 scaleOffset)
+{
+	return x * scaleOffset.xy + scaleOffset.zw;
+}
+
+float2 ParallaxOffset1Step(float height, float amplitude, float3 viewDirTS)
+{
+	height = height * amplitude - amplitude / 2.0;
+	float3 v = normalize(viewDirTS);
+	v.z += 0.42;
+	return height * (v.xy / v.z);
+}
+
+// ref http://blog.selfshadow.com/publications/blending-in-detail/
+// ref https://gist.github.com/selfshadow/8048308
+// Reoriented Normal Mapping
+// Blending when n1 and n2 are already 'unpacked' and normalised
+// assume compositing in tangent space
+float3 BlendNormalRNM(float3 n1, float3 n2)
+{
+	float3 t = n1.xyz + float3(0.0, 0.0, 1.0);
+	float3 u = n2.xyz * float3(-1.0, -1.0, 1.0);
+	float3 r = (t / t.z) * dot(t, u) - u;
+	return r;
+} 
+
+// Division which returns 1 for (inf/inf) and (0/0).
+// If any of the input parameters are NaNs, the result is a NaN.
+float SafeDiv(float numer, float denom)
+{
+	return (numer != denom) ? numer / denom : 1;
 }
 
 #endif

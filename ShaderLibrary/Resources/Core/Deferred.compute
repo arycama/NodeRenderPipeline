@@ -25,7 +25,7 @@ float4x4 _PixelCoordToViewDirWS;
 void Deferred (uint2 id : SV_DispatchThreadID)
 {	
 	float depth = Depth[id];
-	if(depth == UNITY_RAW_FAR_CLIP_VALUE)
+	if(depth == _FarClipValue)
 	{
 		#ifdef REFLECTION_PROBE_RENDERING
 			float3 V = -MultiplyVector(_PixelCoordToViewDirWS, float3(id + 0.5, 1.0), false);

@@ -1,7 +1,8 @@
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Terrain.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Geometry.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/IndirectRendering.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Packing.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Terrain.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Tessellation.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
 
 #pragma kernel InstanceCull
 #pragma kernel IndirectArgs
