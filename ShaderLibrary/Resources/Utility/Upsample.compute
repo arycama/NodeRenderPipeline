@@ -11,10 +11,5 @@ float4 ScaleOffset, TexelSize;
 void Upsample(uint2 id : SV_DispatchThreadID)
 {
 	float2 uv = id * ScaleOffset.xy + ScaleOffset.zw;
-	
-    #ifdef BICUBIC
-		Result[id] = SampleTexture2DBicubic(Input, _LinearClampSampler, uv, TexelSize, 1.0, 0.0);
-	#else
-		Result[id] = Input.SampleLevel(_LinearClampSampler, uv, 0.0);
-	#endif
+	Result[id] = Input.SampleLevel(_LinearClampSampler, uv, 0.0);
 }

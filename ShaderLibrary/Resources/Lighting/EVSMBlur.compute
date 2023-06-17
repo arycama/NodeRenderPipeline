@@ -1,4 +1,5 @@
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Utility.hlsl"
 
 #pragma kernel ConvertAndBlur
 
@@ -55,5 +56,5 @@ void ConvertAndBlur(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 groupThr
 	}
 	
 	result /= weightSum;
-	_Result[dispatchThreadId] = clamp(result, HALF_MIN, HALF_MAX);
+	_Result[dispatchThreadId] = clamp(result, HalfMin, HalfMax);
 }

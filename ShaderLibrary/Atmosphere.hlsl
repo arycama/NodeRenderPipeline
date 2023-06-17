@@ -135,7 +135,7 @@ float3 TransmittanceToAtmosphere(float3 P, float3 V, SamplerState samplerState)
 float3 AtmosphereMultiScatter(float viewHeight, float viewZenithCosAngle, SamplerState samplerState)
 {
 	float2 uv = TransmittanceUv(viewHeight, viewZenithCosAngle);
-	return _MultipleScatter.SampleLevel(samplerState, uv, 0.0) * IsotropicPhaseFunction();
+	return _MultipleScatter.SampleLevel(samplerState, uv, 0.0);
 }
 
 struct AtmosphereResult

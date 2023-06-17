@@ -2,7 +2,7 @@
 #pragma kernel JumpFlood
 #pragma kernel Resolve
 
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Color.hlsl"
 
 Texture2DArray<float4> _Texture0, _Texture1, _Texture2, _Texture3, _Texture4, _Texture5, _Texture6;
 RWTexture2DArray<float4> _Texture0Write, _Texture1Write, _Texture2Write, _Texture3Write, _Texture4Write, _Texture5Write, _Texture6Write, _Texture7Write;
@@ -149,26 +149,26 @@ void Resolve(uint3 id : SV_DispatchThreadID)
 		seed = id.xy;
 	}
 	
-	_Texture0Write[id] = float4(_Texture0sRGB ? LinearToSRGB(_Texture0[int3(seed, id.z)].rgb) : _Texture0[int3(seed, id.z)].rgb, _Texture0[id].a);
+	_Texture0Write[id] = float4(_Texture0sRGB ? LinearToSrgb(_Texture0[int3(seed, id.z)].rgb) : _Texture0[int3(seed, id.z)].rgb, _Texture0[id].a);
 	
 	_CombinedAlpha[id.xy] += _Texture0[id].a;
 	
 	// Write textures
 	if(_TextureCount > 1)
-		_Texture1Write[id] = _Texture1sRGB ? LinearToSRGB(_Texture1[int3(seed, id.z)]) : _Texture1[int3(seed, id.z)];
+		_Texture1Write[id] = _Texture1sRGB ? LinearToSrgb(_Texture1[int3(seed, id.z)]) : _Texture1[int3(seed, id.z)];
 	
 	if(_TextureCount > 2)
-		_Texture2Write[id] = _Texture2sRGB ? LinearToSRGB(_Texture2[int3(seed, id.z)]) : _Texture2[int3(seed, id.z)];
+		_Texture2Write[id] = _Texture2sRGB ? LinearToSrgb(_Texture2[int3(seed, id.z)]) : _Texture2[int3(seed, id.z)];
 	
 	if (_TextureCount > 3)
-		_Texture3Write[id] = _Texture3sRGB ? LinearToSRGB(_Texture3[int3(seed, id.z)]) : _Texture3[int3(seed, id.z)];
+		_Texture3Write[id] = _Texture3sRGB ? LinearToSrgb(_Texture3[int3(seed, id.z)]) : _Texture3[int3(seed, id.z)];
 	
 	if (_TextureCount > 4)
-		_Texture4Write[id] = _Texture4sRGB ? LinearToSRGB(_Texture4[int3(seed, id.z)]) : _Texture4[int3(seed, id.z)];
+		_Texture4Write[id] = _Texture4sRGB ? LinearToSrgb(_Texture4[int3(seed, id.z)]) : _Texture4[int3(seed, id.z)];
 	
 	if (_TextureCount > 5)
-		_Texture5Write[id] = _Texture5sRGB ? LinearToSRGB(_Texture5[int3(seed, id.z)]) : _Texture5[int3(seed, id.z)];
+		_Texture5Write[id] = _Texture5sRGB ? LinearToSrgb(_Texture5[int3(seed, id.z)]) : _Texture5[int3(seed, id.z)];
 	
 	if (_TextureCount > 6)
-		_Texture6Write[id] = _Texture6sRGB ? LinearToSRGB(_Texture6[int3(seed, id.z)]) : _Texture6[int3(seed, id.z)];
+		_Texture6Write[id] = _Texture6sRGB ? LinearToSrgb(_Texture6[int3(seed, id.z)]) : _Texture6[int3(seed, id.z)];
 }

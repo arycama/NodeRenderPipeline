@@ -1,7 +1,14 @@
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Lighting.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Random.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Sampling.hlsl"
 
 #pragma kernel Transmittance KERNEL=Transmittance TRANSMITTANCE
 #pragma kernel MultiScatter KERNEL=MultiScatter MULTI_SCATTER
+
+#ifdef __INTELLISENSE__
+	#define MULTI_SCATTER
+	//#define TRANSMITTANCE
+#endif
 
 RWTexture2D<float3> Result;
 float2 _ScaleOffset;
@@ -51,7 +58,7 @@ void KERNEL(uint2 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, uint gro
 		float d = i * dx;
 		float centerDist = sqrt(d * d + 2.0 * viewHeight * V.y * d + viewHeight * viewHeight);
 			
-		float4 extinctionCombined = saturate(exp2(centerDist * _AtmosphereExtinctionScale + _AtmosphereExtinctionOffset));
+		float4 extinctionCombined = exp2(centerDist * _AtmosphereExtinctionScale + _AtmosphereExtinctionOffset);
 		float3 extinction = extinctionCombined.xyz + extinctionCombined.w + max(0.0, _OzoneAbsorption - abs(centerDist * _AtmosphereOzoneScale + _AtmosphereOzoneOffset));
 		
 		float LdotV = dot(V, L);
@@ -61,11 +68,11 @@ void KERNEL(uint2 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, uint gro
 			float2 uv = TransmittanceUv(centerDist, sunAngle);
 			float3 transmittanceToAtmosphere = _AtmosphereTransmittance.SampleLevel(_LinearClampSampler, uv, 0.0);
 			
-			float4 scatter = saturate(exp2(centerDist * _AtmosphereExtinctionScale + _AtmosphereScatterOffset));
+			float4 scatter = exp2(centerDist * _AtmosphereExtinctionScale + _AtmosphereScatterOffset);
 			float3 lighting = RayleighPhaseFunction(LdotV) * transmittanceToAtmosphere * scatter.xyz;
 			lighting += CornetteShanksPhasePartVarying(_MiePhase, LdotV) * _MiePhaseConstant * transmittanceToAtmosphere * scatter.w;
-			luminance += transmittance * lighting * (1.0 - exp(-extinction * dx)) / extinction;
 			
+			luminance += transmittance * lighting * (1.0 - exp(-extinction * dx)) / extinction;
 			multiScatter += transmittance * (scatter.xyz + scatter.w) * (1.0 - exp(-extinction * dx)) / extinction;
 		}
 		
@@ -81,7 +88,7 @@ void KERNEL(uint2 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, uint gro
 		float LdotV = dot(V, L);
 		float NdotL = (viewHeight * L.y + d * LdotV) / centerDist;
 		float3 sunTransmittance = TransmittanceToAtmosphere(_PlanetRadius, NdotL, _LinearClampSampler);
-		luminance += sunTransmittance * transmittance * saturate(NdotL) * _GroundColor / PI;
+		//luminance += sunTransmittance * transmittance * saturate(NdotL) * _GroundColor / Pi;
 	}
 	
 	#ifdef TRANSMITTANCE
@@ -104,6 +111,6 @@ void KERNEL(uint2 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, uint gro
 		}
 	
 		if (groupIndex == 0)
-			Result[groupId] = ScatterShared[0] / (1.0 - MultiScatterShared[0] / (4.0 * PI));
+			Result[groupId] = ScatterShared[0] / (1.0 - MultiScatterShared[0] / (4.0 * Pi));
 	#endif
 }

@@ -12,6 +12,11 @@ float3 LinearToSrgb(float3 color)
 	return color <= 0.0031308 ? srgbLo : srgbHi;
 }
 
+float4 LinearToSrgb(float4 color)
+{
+	return float4(LinearToSrgb(color.rgb), color.a);
+}
+
 float3 SrgbToLinear(float3 c)
 {
 	float3 linearRGBLo = c / 12.92;

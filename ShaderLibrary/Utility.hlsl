@@ -543,4 +543,38 @@ float SafeDiv(float numer, float denom)
 	return (numer != denom) ? numer / denom : 1;
 }
 
+// Inserts the bits indicated by 'mask' from 'src' into 'dst'.
+uint BitFieldInsert(uint mask, uint src, uint dst)
+{
+	return (src & mask) | (dst & ~mask);
+}
+
+// Composes a floating point value with the magnitude of 'x' and the sign of 's'.
+// See the comment about FastSign() below.
+float CopySign(float x, float s, bool ignoreNegZero = true)
+{
+	if (ignoreNegZero)
+	{
+		return (s >= 0) ? abs(x) : -abs(x);
+	}
+	else
+	{
+		uint negZero = 0x80000000u;
+		uint signBit = negZero & asuint(s);
+		return asfloat(BitFieldInsert(negZero, signBit, asuint(x)));
+	}
+}
+
+// Returns -1 for negative numbers and 1 for positive numbers.
+// 0 can be handled in 2 different ways.
+// The IEEE floating point standard defines 0 as signed: +0 and -0.
+// However, mathematics typically treats 0 as unsigned.
+// Therefore, we treat -0 as +0 by default: FastSign(+0) = FastSign(-0) = 1.
+// If (ignoreNegZero = false), FastSign(-0, false) = -1.
+// Note that the sign() function in HLSL implements signum, which returns 0 for 0.
+float FastSign(float s, bool ignoreNegZero = true)
+{
+	return CopySign(1.0, s, ignoreNegZero);
+}
+
 #endif

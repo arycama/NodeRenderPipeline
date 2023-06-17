@@ -4,9 +4,24 @@
 #include "Math.hlsl"
 #include "Utility.hlsl"
 
-float3 SphericalToCartesian(float2 sinCosTheta, float2 sinCosPhi)
+//float3 SphericalToCartesian(float2 sinCosTheta, float2 sinCosPhi)
+//{
+//    return float3(sinCosTheta.xy * sinCosPhi.x, sinCosPhi.y);
+//}
+
+float3 SphericalToCartesian(float cosPhi, float sinPhi, float cosTheta)
 {
-    return float3(sinCosTheta.xy * sinCosPhi.x, sinCosPhi.y);
+	float sinTheta = SinFromCos(cosTheta);
+
+	return float3(float2(cosPhi, sinPhi) * sinTheta, cosTheta);
+}
+
+float3 SphericalToCartesian(float phi, float cosTheta)
+{
+	float sinPhi, cosPhi;
+	sincos(phi, sinPhi, cosPhi);
+
+	return SphericalToCartesian(cosPhi, sinPhi, cosTheta);
 }
 
 // "Efficiently building a matrix to rotate one vector to another"
@@ -112,7 +127,7 @@ float3x3 GetLocalFrame(float3 localZ)
 	float x = localZ.x;
 	float y = localZ.y;
 	float z = localZ.z;
-	float sz = sign(z);
+	float sz = FastSign(z);
 	float a = 1 / (sz + z);
 	float ya = y * a;
 	float b = x * ya;

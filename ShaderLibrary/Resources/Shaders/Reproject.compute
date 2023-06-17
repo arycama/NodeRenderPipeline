@@ -17,9 +17,5 @@ void Reproject(uint2 id : SV_DispatchThreadID)
 	float isInBounds = all(previousUv > 0 && previousUv < 1);
 	float4 result = _PreviousFrame.SampleLevel(_LinearClampSampler, previousUv, 0);
 	result.a *= isInBounds;
-	
-	if (AnyIsNaN(result))
-		result = 0;
-	
 	_ReprojectResult[id] = result;
 }

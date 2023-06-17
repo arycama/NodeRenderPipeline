@@ -67,7 +67,7 @@ float V_SmithJointGGX(float NdotL, float NdotV, float roughness, float partLambd
 	float lambdaL = NdotV * sqrt((-NdotL * a2 + NdotL) * NdotL + a2);
 
     // Simplify visibility term: (2.0 * NdotL * NdotV) /  ((4.0 * NdotL * NdotV) * (lambda_v + lambda_l))
-	return 0.5 / max(lambdaV + lambdaL, HalfMin);
+	return 0.5 / max(lambdaV + lambdaL, FloatMin);
 }
 
 // Precompute part of lambdaV

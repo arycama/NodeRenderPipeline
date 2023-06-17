@@ -1,4 +1,5 @@
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Brdf.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/GGX.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/GgxExtensions.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Material.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/MatrixUtils.hlsl"

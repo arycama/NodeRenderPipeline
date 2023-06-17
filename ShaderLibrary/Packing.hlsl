@@ -5,6 +5,8 @@
 
 float3 UnpackNormalAG(float4 packedNormal, float scale = 1.0)
 {
+    packedNormal.a *= packedNormal.r;
+	
 	float3 normal;
 	normal.xy = 2.0 * packedNormal.ag - 1.0;
 	normal.z = sqrt(saturate(1.0 - SqrLength(normal.xy)));

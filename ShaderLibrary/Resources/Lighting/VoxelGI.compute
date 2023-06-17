@@ -1,4 +1,6 @@
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Lighting.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Random.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Sampling.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/SpaceTransforms.hlsl"
 
 #pragma kernel Clear
@@ -70,7 +72,7 @@ void VoxelAO(uint3 id : SV_DispatchThreadID, uint groupId : SV_GroupIndex)
 	dirResult = dirResult < 1e-2 ? 0.0 : (dirResult > 1.0 - 1e2 ? 1.0 : dirResult);
 	
 	// Weigh result by direction, so that firing rays in one direction won't affect unrelated directions
-	dirResult.xyz = lerp(previous.xyz, dirResult.xyz, Square(direction));
+	dirResult.xyz = lerp(previous.xyz, dirResult.xyz, Sq(direction));
 	
 	dirResult = lerp(previous, dirResult, _Smoothing);
 	
@@ -90,11 +92,11 @@ Texture2D<float> _Depth;
 [numthreads(8, 8, 1)]
 void Debug(uint2 id : SV_DispatchThreadID)
 {
-	float3 positionWS = PixelToWorld(id + 0.5, UNITY_NEAR_CLIP_VALUE);
+	float3 positionWS = PixelToWorld(id + 0.5, _NearClipValue);
 	float3 rayStart = positionWS;
 	float3 dir = normalize(rayStart);
 	
-	float depth = LinearEyeDepth(_Depth[id], _ZBufferParams);
+	float depth = LinearEyeDepth(_Depth[id]);
 	
 	float3 rayEnd = rayStart + dir * min(depth, _Range);
 	float3 rayStep = (rayEnd - rayStart) / _Steps;

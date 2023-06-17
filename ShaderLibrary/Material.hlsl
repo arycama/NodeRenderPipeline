@@ -101,6 +101,22 @@ float3 ComputeDiffuseColor(float3 albedo, float metallic)
 	return lerp(albedo, 0.0, metallic);
 }
 
+// The *approximated* version of the non-linear remapping. It works by
+// approximating the cone of the specular lobe, and then computing the MIP map level
+// which (approximately) covers the footprint of the lobe with a single texel.
+// Improves the perceptual roughness distribution.
+float PerceptualRoughnessToMipmapLevel(float perceptualRoughness, uint maxMipLevel)
+{
+	perceptualRoughness = perceptualRoughness * (1.7 - 0.7 * perceptualRoughness);
+
+	return perceptualRoughness * maxMipLevel;
+}
+
+float PerceptualRoughnessToMipmapLevel(float perceptualRoughness)
+{
+	return PerceptualRoughnessToMipmapLevel(perceptualRoughness, UNITY_SPECCUBE_LOD_STEPS);
+}
+
 // The *accurate* version of the non-linear remapping. It works by
 // approximating the cone of the specular lobe, and then computing the MIP map level
 // which (approximately) covers the footprint of the lobe with a single texel.

@@ -5,71 +5,101 @@
 
 float IsotropicPhaseFunction()
 {
-	return FourPi;
+	return RcpFourPi;
 }
 
-float RayleighPhaseFunction(float cosAngle)
+float RayleighPhaseFunction(float cosTheta)
 {
-	return 3.0 / 4.0 * (1 + Sq(cosAngle)) * RcpFourPi;
+	float k = 3 / (16 * Pi);
+	return k * (1 + cosTheta * cosTheta);
 }
 
-float HenyeyGreensteinPhasePartConstant(float g)
+float HenyeyGreensteinPhasePartConstant(float anisotropy)
 {
-	return (1 - g * g) * RcpFourPi;
+	float g = anisotropy;
+
+	return RcpFourPi * (1 - g * g);
 }
 
-float HenyeyGreensteinPhasePartVarying(float g, float cosAngle)
+float HenyeyGreensteinPhasePartVarying(float anisotropy, float cosTheta)
 {
-	float x = 1 + g * g - 2 * g * cosAngle;
+	float g = anisotropy;
+	float x = 1 + g * g - 2 * g * cosTheta;
 	float f = rsqrt(max(x, HalfEps)); // x^(-1/2)
 
 	return f * f * f; // x^(-3/2)
 }
 
-float HenyeyGreensteinPhaseFunction(float g, float cosAngle)
+float HenyeyGreensteinPhaseFunction(float anisotropy, float cosTheta)
 {
-	return HenyeyGreensteinPhasePartConstant(g) *
-           HenyeyGreensteinPhasePartVarying(g, cosAngle);
+	return HenyeyGreensteinPhasePartConstant(anisotropy) *
+           HenyeyGreensteinPhasePartVarying(anisotropy, cosTheta);
 }
 
-float CornetteShanksPhasePartConstant(float g)
+float CornetteShanksPhasePartConstant(float anisotropy)
 {
-	return (3.0 / (8.0 * Pi)) * (1.0 - g * g) / (2.0 + g * g);
+	float g = anisotropy;
+
+	return (3 / (8 * Pi)) * (1 - g * g) / (2 + g * g);
 }
 
 // Similar to the RayleighPhaseFunction.
-float CornetteShanksPhasePartSymmetrical(float cosAngle)
+float CornetteShanksPhasePartSymmetrical(float cosTheta)
 {
-	return 1.0 + Sq(cosAngle);
+	float h = 1 + cosTheta * cosTheta;
+	return h;
 }
 
-float CornetteShanksPhasePartAsymmetrical(float g, float cosAngle)
+float CornetteShanksPhasePartAsymmetrical(float anisotropy, float cosTheta)
 {
-	float x = 1 + g * g - 2 * g * cosAngle;
+	float g = anisotropy;
+	float x = 1 + g * g - 2 * g * cosTheta;
 	float f = rsqrt(max(x, HalfEps)); // x^(-1/2)
 	return f * f * f; // x^(-3/2)
 }
 
-float CornetteShanksPhasePartVarying(float g, float cosAngle)
+float CornetteShanksPhasePartVarying(float anisotropy, float cosTheta)
 {
-	return CornetteShanksPhasePartSymmetrical(cosAngle) * CornetteShanksPhasePartAsymmetrical(g, cosAngle); // h * x^(-3/2)
+	return CornetteShanksPhasePartSymmetrical(cosTheta) *
+           CornetteShanksPhasePartAsymmetrical(anisotropy, cosTheta); // h * x^(-3/2)
 }
 
 // A better approximation of the Mie phase function.
 // Ref: Henyey-Greenstein and Mie phase functions in Monte Carlo radiative transfer computations
-float CornetteShanksPhaseFunction(float g, float cosAngle)
+float CornetteShanksPhaseFunction(float anisotropy, float cosTheta)
 {
-	return CornetteShanksPhasePartConstant(g) * CornetteShanksPhasePartVarying(g, cosAngle);
+	return CornetteShanksPhasePartConstant(anisotropy) *
+           CornetteShanksPhasePartVarying(anisotropy, cosTheta);
+}
+
+float TransmittanceFromOpticalDepth(float opticalDepth)
+{
+	return exp(-opticalDepth);
+}
+
+float3 TransmittanceFromOpticalDepth(float3 opticalDepth)
+{
+	return exp(-opticalDepth);
+}
+
+float OpacityFromOpticalDepth(float opticalDepth)
+{
+	return 1 - TransmittanceFromOpticalDepth(opticalDepth);
+}
+
+float3 OpacityFromOpticalDepth(float3 opticalDepth)
+{
+	return 1 - TransmittanceFromOpticalDepth(opticalDepth);
+}
+
+float OpticalDepthFromOpacity(float opacity)
+{
+	return -log(1 - opacity);
 }
 
 float3 OpticalDepthFromOpacity(float3 opacity)
 {
 	return -log(1 - opacity);
-}
-
-float3 OpacityFromOpticalDepth(float3 opticalDepth)
-{
-	return 1.0 - exp(-opticalDepth);
 }
 
 #endif

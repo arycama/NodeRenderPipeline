@@ -24,12 +24,12 @@ const static float RcpFourPi = rcp(FourPi);
 const static float RcpHalfPi = rcp(HalfPi);
 const static float SqrtPi = sqrt(Pi);
 
-float Sq(float1 x) { return x * x ; }
-float Sq(float2 x) { return x * x ; }
-float Sq(float3 x) { return x * x ; }
-float Sq(float4 x) { return x * x ; }
+float1 Sq(float1 x) { return x * x; }
+float2 Sq(float2 x) { return x * x; }
+float3 Sq(float3 x) { return x * x; }
+float4 Sq(float4 x) { return x * x; }
 
-float SinFromCos(float cos) { return sqrt(saturate(1.0 - Sq(cos))); }
+float SinFromCos(float cosX) { return sqrt(saturate(1.0 - Sq(cosX))); }
 
 // Input [0, 1] and output [0, PI/2], 9 VALU
 float FastACosPos(float inX)

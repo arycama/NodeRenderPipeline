@@ -113,7 +113,7 @@ float DV_SmithJointGGXAniso(float TdotH, float BdotH, float NdotH, float NdotV, 
     // This function is only used for direct lighting.
     // If roughness is 0, the probability of hitting a punctual or directional light is also 0.
     // Therefore, we return 0. The most efficient way to do it is with a max().
-	return (RcpPi * 0.5) * (D.x * G.x) / max(D.y * G.y, HalfMin);
+	return (RcpPi * 0.5) * (D.x * G.x) / max(D.y * G.y, FloatMin);
 }
 
 float DV_SmithJointGGXAniso(float TdotH, float BdotH, float NdotH, float TdotV, float BdotV, float NdotV, float TdotL, float BdotL, float NdotL, float roughnessT, float roughnessB)
@@ -329,7 +329,7 @@ float3 GetLighting(float4 positionCS, float3 N, float3 T, PbrInput input, out fl
 	float3 irradiance, backIrradiance;
 	
 	float3 iblR = GetSpecularDominantDir(N, R, perceptualRoughness, NdotV);
-	float iblMipLevel = PerceptualRoughnessToMipmapLevel(perceptualRoughness, NdotV);
+	float iblMipLevel = PerceptualRoughnessToMipmapLevel(perceptualRoughness);
 	float4 probe = SampleReflectionProbe(positionWS, iblR, iblMipLevel, input.bentNormal, input.albedo * input.opacity, input.occlusion, irradiance);
 	float3 radiance = probe.rgb;
 	if (probe.a < 1.0)

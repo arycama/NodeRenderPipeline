@@ -39,7 +39,7 @@ void Deferred (uint2 id : SV_DispatchThreadID)
 
 	// Pixel to world
 	SurfaceData surface = SurfaceDataFromGBuffer(id);
-	float linearEyeDepth = LinearEyeDepth(depth, _ZBufferParams);
+	float linearEyeDepth = LinearEyeDepth(depth);
 	
 	PbrInput input = SurfaceDataToPbrInput(surface);
 	float3x3 frame = GetLocalFrame(surface.Normal);

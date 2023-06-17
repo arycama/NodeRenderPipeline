@@ -79,22 +79,22 @@ void GenerateIDMap(uint2 id : SV_DispatchThreadID)
 	// Center of texel in control map space
 	float2 controlCenter = (floor(uv * (_Resolution - 1.0)) + 0.5) / _Resolution;
 	
-	uint rand00 = JenkinsHash(controlCenter * _TerrainLayerData[index0].Scale * 2.0 * sqrt(3.0));
+	uint rand00 = PcgHash(controlCenter * _TerrainLayerData[index0].Scale * 2.0 * sqrt(3.0));
 	float rotation0 = ConstructFloat(rand00) * _TerrainLayerData[index0].Rotation;
 	
-	uint rand01 = JenkinsHash(rand00);
+	uint rand01 = PcgHash(rand00);
 	float offsetX0 = ConstructFloat(rand01) * _TerrainLayerData[index0].Stochastic;
 	
-	uint rand02 = JenkinsHash(rand01);
+	uint rand02 = PcgHash(rand01);
 	float offsetY0 = ConstructFloat(rand02) * _TerrainLayerData[index0].Stochastic;
 	
-	uint rand10 = JenkinsHash(controlCenter * _TerrainLayerData[index1].Scale * 2.0 * sqrt(3.0));
+	uint rand10 = PcgHash(controlCenter * _TerrainLayerData[index1].Scale * 2.0 * sqrt(3.0));
 	float rotation1 = ConstructFloat(rand10) * _TerrainLayerData[index1].Rotation;
 	
-	uint rand11 = JenkinsHash(rand10);
+	uint rand11 = PcgHash(rand10);
 	float offsetX1 = ConstructFloat(rand11) * _TerrainLayerData[index1].Stochastic;
 	
-	uint rand12 = JenkinsHash(rand11);
+	uint rand12 = PcgHash(rand11);
 	float offsetY1 = ConstructFloat(rand12) * _TerrainLayerData[index1].Stochastic;
 	
 	float triplanar = 0.0;
