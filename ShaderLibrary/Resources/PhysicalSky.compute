@@ -437,7 +437,7 @@ void Upsample(int2 id : SV_DispatchThreadID)
 	
 	// Sample volumetric buffer, and blend with background
 	float linearDepth = LinearEyeDepth(depth, _ZBufferParams);
-	float normalizedDepth = RangeRemap(_ProjectionParams.y, _VolumeDepth, linearDepth);
+	float normalizedDepth = Remap(linearDepth, _ProjectionParams.y, _VolumeDepth);
 	float3 volumeUv = float3((id.xy + 0.5) * _ScreenSize.zw, normalizedDepth);
     float3 volumetricLighting = _VolumetricLighting.SampleLevel(_LinearClampSampler, volumeUv, 0.0);
 	

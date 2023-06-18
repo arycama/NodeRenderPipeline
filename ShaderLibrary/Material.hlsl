@@ -28,7 +28,7 @@ float PerceptualRoughnessToRoughness(float perceptualRoughness)
 
 float LengthToRoughness(float len)
 {
-	len = 3.0 * len - 2.0; // Remap from 2/3:1 to 0:1
+	len = Remap(len, 2.0 / 3.0, 1.0);
 	float2 uv = Remap01ToHalfTexelCoord(float2(len, 0.5), float2(256.0, 1));
 	return _LengthToRoughness.SampleLevel(_LinearClampSampler, uv, 0.0);
 }
@@ -50,7 +50,7 @@ float RoughnessToNormalLength(float roughness)
 	if (roughness >= 1.0)
 		return 2.0 / 3.0;
 
-	float a = sqrt(saturate(1.0 - pow(roughness, 2.0)));
+	float a = sqrt(saturate(1.0 - Sq(roughness)));
 	return (a - (1.0 - a * a) * atanh(a)) / (a * a * a);
 }
 

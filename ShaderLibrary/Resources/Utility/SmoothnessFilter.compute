@@ -22,7 +22,7 @@ float4 PackNormalDxt(float3 normal)
 void GenerateLengthToSmoothness(uint2 id : SV_DispatchThreadID)
 {
     float uv = id.x / (_Resolution - 1.0);
-    float t = uv / 3.0 + 2.0 / 3.0; // Remap target
+	float t = Remap(uv, 2.0 / 3.0); // Remap target
 
     // Bisection
     float a = 0.0;

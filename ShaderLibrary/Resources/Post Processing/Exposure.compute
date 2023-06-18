@@ -204,7 +204,7 @@ void AverageLuminance(uint threadID : SV_GroupIndex)
 		float maxExposure = ParamExposureLimitMax;
 		//if (ParamEvaluateMode == 2)
 		{
-			float2 uv = RangeRemap(minExposure, maxExposure, avgEV);
+			float2 uv = Remap(avgEV, minExposure, maxExposure);
 			uv = uv * _ExposureCompensationRemap.xy + _ExposureCompensationRemap.zw;
 			avgEV -= _ExposureCompensation.SampleLevel(_LinearClampSampler, float2(uv.x, 0.5), 0.0);
 		}

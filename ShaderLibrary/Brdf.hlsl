@@ -53,58 +53,14 @@ void GetBSDFAngle(float3 V, float3 L, float NdotL, float NdotV,
 	LdotH = saturate(invLenLV * LdotV + invLenLV);
 }
 
-// Inputs:    normalized normal and view vectors.
-// Outputs:   front-facing normal, and the new non-negative value of the cosine of the view angle.
-// Important: call Orthonormalize() on the tangent and recompute the bitangent afterwards.
-float3 GetViewReflectedNormal(float3 N, float3 V, out float NdotV)
+float DV_SmithJointGGXAniso(float TdotH, float BdotH, float NdotH, float TdotV, float BdotV, float NdotV, float TdotL, float BdotL, float NdotL, float roughnessT, float roughnessB)
 {
-    // Fragments of front-facing geometry can have back-facing normals due to interpolation,
-    // normal mapping and decals. This can cause visible artifacts from both direct (negative or
-    // extremely high values) and indirect (incorrect lookup direction) lighting.
-    // There are several ways to avoid this problem. To list a few:
-    //
-    // 1. Setting { NdotV = max(<N,V>, SMALL_VALUE) }. This effectively removes normal mapping
-    // from the affected fragments, making the surface appear flat.
-    //
-    // 2. Setting { NdotV = abs(<N,V>) }. This effectively reverses the convexity of the surface.
-    // It also reduces light leaking from non-shadow-casting lights. Note that 'NdotV' can still
-    // be 0 in this case.
-    //
-    // It's important to understand that simply changing the value of the cosine is insufficient.
-    // For one, it does not solve the incorrect lookup direction problem, since the normal itself
-    // is not modified. There is a more insidious issue, however. 'NdotV' is a constituent element
-    // of the mathematical system describing the relationships between different vectors - and
-    // not just normal and view vectors, but also light vectors, half vectors, tangent vectors, etc.
-    // Changing only one angle (or its cosine) leaves the system in an inconsistent state, where
-    // certain relationships can take on different values depending on whether 'NdotV' is used
-    // in the calculation or not. Therefore, it is important to change the normal (or another
-    // vector) in order to leave the system in a consistent state.
-    //
-    // We choose to follow the conceptual approach (2) by reflecting the normal around the
-    // (<N,V> = 0) boundary if necessary, as it allows us to preserve some normal mapping details.
-
-	NdotV = dot(N, V);
-
-    // N = (NdotV >= 0.0) ? N : (N - 2.0 * NdotV * V);
-	N += (2.0 * saturate(-NdotV)) * V;
-	NdotV = abs(NdotV);
-
-	return N;
-}
-
-float GetSmithJointGGXAnisoPartLambdaV(float TdotV, float BdotV, float NdotV, float roughnessT, float roughnessB)
-{
-	return length(float3(roughnessT * TdotV, roughnessB * BdotV, NdotV));
-}
-
-// Inline D_GGXAniso() * V_SmithJointGGXAniso() together for better code generation.
-float DV_SmithJointGGXAniso(float TdotH, float BdotH, float NdotH, float NdotV, float TdotL, float BdotL, float NdotL, float roughnessT, float roughnessB, float partLambdaV)
-{
+	// Inline D_GGXAniso() * V_SmithJointGGXAniso() together for better code generation.
 	float a2 = roughnessT * roughnessB;
 	float3 v = float3(roughnessB * TdotH, roughnessT * BdotH, a2 * NdotH);
 	float s = dot(v, v);
 
-	float lambdaV = NdotL * partLambdaV;
+	float lambdaV = NdotL * length(float3(roughnessT * TdotV, roughnessB * BdotV, NdotV));
 	float lambdaL = NdotV * length(float3(roughnessT * TdotL, roughnessB * BdotL, NdotL));
 
 	float2 D = float2(a2 * a2 * a2, s * s); // Fraction without the multiplier (1/Pi)
@@ -114,12 +70,6 @@ float DV_SmithJointGGXAniso(float TdotH, float BdotH, float NdotH, float NdotV, 
     // If roughness is 0, the probability of hitting a punctual or directional light is also 0.
     // Therefore, we return 0. The most efficient way to do it is with a max().
 	return (RcpPi * 0.5) * (D.x * G.x) / max(D.y * G.y, FloatMin);
-}
-
-float DV_SmithJointGGXAniso(float TdotH, float BdotH, float NdotH, float TdotV, float BdotV, float NdotV, float TdotL, float BdotL, float NdotL, float roughnessT, float roughnessB)
-{
-	float partLambdaV = GetSmithJointGGXAnisoPartLambdaV(TdotV, BdotV, NdotV, roughnessT, roughnessB);
-	return DV_SmithJointGGXAniso(TdotH, BdotH, NdotH, NdotV, TdotL, BdotL, NdotL, roughnessT, roughnessB, partLambdaV);
 }
 
 float3 EvaluateLight(PbrInput input, float3 T, float3 B, float3 N, float3 L, float3 V, float3 bentNormal, out float3 illuminance)
@@ -299,8 +249,7 @@ float3 GetLighting(float4 positionCS, float3 N, float3 T, PbrInput input, out fl
 	float3 V = normalize(-positionWS);
 
 	// Geometry
-	float NdotV = ClampNdotV(dot(N, V));
-	N = GetViewReflectedNormal(N, V, NdotV);
+	float NdotV = dot(N, V);
 	float3 B = normalize(cross(N, T));
 	float perceptualRoughness = ConvertAnisotropicRoughnessToPerceptualRoughness(input.roughness);
 	float3 R = reflect(-V, N);

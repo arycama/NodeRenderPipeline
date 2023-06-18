@@ -124,7 +124,7 @@ void Scatter(uint3 id : SV_DispatchThreadID)
 	// Calculate previous volume position
 	float3 previousClip = PerspectiveDivide(WorldToClipPrevious(positionWS)).xyw;
 	previousClip.xy = previousClip.xy * 0.5 + 0.5;
-	previousClip.z = RangeRemap(_ProjectionParams.y, _VolumeDepth, previousClip.z);
+	previousClip.z = Remap(previousClip.z, _ProjectionParams.y, _VolumeDepth);
 	
 	if (all(previousClip >= 0.0 && previousClip <= 1.0))
 	{

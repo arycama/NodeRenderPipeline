@@ -367,7 +367,7 @@ void CreateMesh(uint3 id : SV_DispatchThreadID)
 	float jyx = dy.z;
 	
 	float jacobian = jxx * jyy - jxy * jyx;
-	_NormalFoamSmoothness[uint3(id.xy, id.z + _OceanTextureSliceOffset)] = float4(0.0, 0.0, jacobian, RangeRemap(7.0 / 8.0, 1.0, SmoothnessToNormalLength(Smoothness)));
+	_NormalFoamSmoothness[uint3(id.xy, id.z + _OceanTextureSliceOffset)] = float4(0.0, 0.0, jacobian, Remap(SmoothnessToNormalLength(Smoothness), 7.0 / 8.0));
 }
 
 // Thread group size of 32 is required to process  the entire 128x128 texture in shared memory
@@ -408,15 +408,15 @@ void GenerateMaps(uint2 groupThreadID : SV_GroupThreadID, uint2 groupID : SV_Gro
 			averageNormal *= smoothnessLength;
 
 			uint3 dst = uint3(dispatchThreadID * 2 + uint2(x, y), depth);
-			result[1][dst] = float4(result[1][dst].rgb, RangeRemap(7.0 / 8.0, 1.0, length(averageNormal)));
-
+			float normalLength = length(averageNormal);
+			result[1][dst] = float4(result[1][dst].rgb, Remap(normalLength, 7.0 / 8.0));
 			normalSum += averageNormal;
 		}
 	}
 
 	normalSum /= 4.0;
 	float normalLength = length(normalSum);
-	float smoothness = RangeRemap(2.0 / 3.0, 1.0, normalLength);
+	float smoothness = Remap(normalLength, 7.0 / 8.0);
 
 	uint3 dst = uint3(dispatchThreadID, depth);
 	result[2][dst] = float4(result[2][dst].rgb, smoothness);
@@ -438,7 +438,7 @@ void GenerateMaps(uint2 groupThreadID : SV_GroupThreadID, uint2 groupID : SV_Gro
 			averageNormal /= 4;
 
 			float normalLength = length(averageNormal);
-			float smoothness = RangeRemap(7.0 / 8.0, 1.0, normalLength);
+			float smoothness = Remap(normalLength, 7.0 / 8.0);
 
 			uint3 dst = uint3(groupThreadID, depth);
 			result[i][dst] = float4(result[i][dst].rgb, smoothness);

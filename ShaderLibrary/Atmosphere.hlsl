@@ -38,7 +38,7 @@ float2 TransmittanceUv(float viewHeight, float viewZenithCosAngle)
 		float H = sqrt(max(0.0, Sq(_TopRadius) - Sq(_PlanetRadius)));
 		float rho = sqrt(max(0.0, Sq(viewHeight) - Sq(_PlanetRadius)));
 
-		float discriminant = viewHeight * viewHeight * (viewZenithCosAngle * viewZenithCosAngle - 1.0) + _TopRadius * _TopRadius;
+		float discriminant = Sq(viewHeight) * (Sq(viewZenithCosAngle) - 1.0) + Sq(_TopRadius);
 		float d = -viewHeight * viewZenithCosAngle + sqrt(discriminant); // Distance to atmosphere boundary
 
 		float d_min = _TopRadius - viewHeight;
@@ -362,9 +362,7 @@ float ConvertCdfToOpticalDepth(float cdf, float viewOpacity)
 // 'optDepth' is the value to solve for.
 // 'maxOptDepth' is the maximum value along the ray, s.t. (maxOptDepth >= optDepth).
 // 'maxDist' is the maximum distance along the ray.
-float SampleSpherExpMedium(float optDepth, float r, float rRcp, float cosTheta, float R,
-                           float2 seaLvlAtt, float2 H, float2 n, // Air & aerosols
-                           float maxOptDepth, float maxDist)
+float SampleSpherExpMedium(float optDepth, float r, float rRcp, float cosTheta, float R, float2 seaLvlAtt, float2 H, float2 n, float maxOptDepth, float maxDist)
 {
 	const float optDepthRcp = rcp(optDepth);
 	const float2 Z = R * n;
@@ -391,10 +389,11 @@ float SampleSpherExpMedium(float optDepth, float r, float rRcp, float cosTheta, 
         // f' [t] = AttCoefAtDist[t],
         // f''[t] = AttCoefAtDist'[t] = -AttCoefAtDist[t] * CosAtDist[t] / H.
 		float optDepthAtDist = 0, attAtDist = 0, attAtDistDeriv = 0;
-		optDepthAtDist += OptDepthSpherExpMedium(r, rRcp, cosTheta, t, R,
-                                                 seaLvlAtt.x, H.x, n.x);
-		optDepthAtDist += OptDepthSpherExpMedium(r, rRcp, cosTheta, t, R,
-                                                 seaLvlAtt.y, H.y, n.y);
+		optDepthAtDist += OptDepthSpherExpMedium(r, rRcp, cosTheta, t, R, seaLvlAtt.x, H.x, n.x); 
+		optDepthAtDist += OptDepthSpherExpMedium(r, rRcp, cosTheta, t, R, seaLvlAtt.y, H.y, n.y);
+		
+		optDepthAtDist = OpticalDepthFromTransmittance(TransmittanceToPoint(r, cosTheta, radAtDist, cosAtDist, _LinearClampSampler)).r;
+		
 		attAtDist += seaLvlAtt.x * exp(Z.x - radAtDist * n.x);
 		attAtDist += seaLvlAtt.y * exp(Z.y - radAtDist * n.y);
 		attAtDistDeriv -= seaLvlAtt.x * exp(Z.x - radAtDist * n.x) * n.x;

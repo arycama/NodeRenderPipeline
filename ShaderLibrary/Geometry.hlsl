@@ -127,7 +127,7 @@ float3x3 GetLocalFrame(float3 localZ)
 	float x = localZ.x;
 	float y = localZ.y;
 	float z = localZ.z;
-	float sz = FastSign(z);
+	float sz = sign(z);
 	float a = 1 / (sz + z);
 	float ya = y * a;
 	float b = x * ya;

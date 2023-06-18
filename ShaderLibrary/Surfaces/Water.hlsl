@@ -403,7 +403,7 @@ FragmentOutput Fragment(FragmentInput input)
 
 		normalData += _OceanNormalMap.Sample(_TrilinearRepeatAniso4Sampler, uv);
 		foam += cascadeData.b * _RcpCascadeScales[i];
-		smoothness *= lerp(cascadeData.a * (1.0 - 7.0 / 8.0) + 7.0 / 8.0, 1.0, shoreFactor * 0.75);
+		smoothness *= Remap(cascadeData.a, 0.0, 1.0, 7.0 / 8.0);
 	}
 	
 	smoothness = LengthToSmoothness(smoothness);
@@ -424,7 +424,7 @@ FragmentOutput Fragment(FragmentInput input)
 		float3 foamNormal = UnpackNormalAG(_FoamBump.Sample(_TrilinearRepeatAniso4Sampler, foamUv));
 		float2 foamDerivs = foamNormal.xy / foamNormal.z;
 		oceanN.xy += foamDerivs * _FoamNormalScale * foamFactor;
-		smoothness = lerp(smoothness, _FoamSmoothness, foamFactor);
+		//smoothness = lerp(smoothness, _FoamSmoothness, foamFactor);
 	}
 
 	N = normalize(mul(oceanN, tangentToWorld));

@@ -111,7 +111,7 @@ void GenerateIDMap(uint2 id : SV_DispatchThreadID)
 	
 	// If indices are equal, keep weight at 0, else we can assume it starts from the lowest value, eg 1.0 / 9.0
 	//if(weight1 > 0.0 && index0 != index1)
-	//	blend = RangeRemap(1.0 / 15.0, 7.0 / 15.0, blend);
+	//	blend = Remap(blend, 1.0 / 15.0, 7.0 / 15.0);
 	//else
 	//	index1 = index0;
 	

@@ -31,10 +31,10 @@ float SampleCloudDensity(float3 positionWS)
 	float3 weatherData = _WeatherTexture.SampleLevel(_LinearRepeatSampler, positionWS.xz * _WeatherScale + _WindSpeed * _Time.y, 0);
     
 	float cloudCoverage = gradient * weatherData.r;
-	float baseCloud = RangeRemap(1.0 - cloudCoverage, 1.0, baseNoise) * cloudCoverage;
+	float baseCloud = saturate(Remap(baseNoise, 1.0 - cloudCoverage, 1.0)) * cloudCoverage;
 	
 	float detailNoise = _CloudDetail.SampleLevel(_LinearRepeatSampler, positionWS * _DetailScale, 0);
-	return RangeRemap(detailNoise * _DetailStrength, 1.0, baseCloud) * _Density;
+	return saturate(Remap(baseCloud, detailNoise * _DetailStrength, 1.0)) * _Density;
 }
 
 float4 SampleCloud(float3 P, float3 V, float startDistance, float stepLength, float sampleCount, out float averageDepth)

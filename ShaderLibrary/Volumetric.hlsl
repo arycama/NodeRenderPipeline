@@ -72,34 +72,13 @@ float CornetteShanksPhaseFunction(float anisotropy, float cosTheta)
            CornetteShanksPhasePartVarying(anisotropy, cosTheta);
 }
 
-float TransmittanceFromOpticalDepth(float opticalDepth)
-{
-	return exp(-opticalDepth);
-}
+float3 TransmittanceFromOpacity(float3 opacity) { return 1.0 - opacity; }
+float3 TransmittanceFromOpticalDepth(float3 opticalDepth) {	return exp(-opticalDepth); }
 
-float3 TransmittanceFromOpticalDepth(float3 opticalDepth)
-{
-	return exp(-opticalDepth);
-}
+float3 OpacityFromOpticalDepth(float3 opticalDepth) { return 1.0 - TransmittanceFromOpticalDepth(opticalDepth); }
+float3 OpacityFromTransmittance(float3 transmittance) { return 1.0 - transmittance; }
 
-float OpacityFromOpticalDepth(float opticalDepth)
-{
-	return 1 - TransmittanceFromOpticalDepth(opticalDepth);
-}
-
-float3 OpacityFromOpticalDepth(float3 opticalDepth)
-{
-	return 1 - TransmittanceFromOpticalDepth(opticalDepth);
-}
-
-float OpticalDepthFromOpacity(float opacity)
-{
-	return -log(1 - opacity);
-}
-
-float3 OpticalDepthFromOpacity(float3 opacity)
-{
-	return -log(1 - opacity);
-}
+float3 OpticalDepthFromTransmittance(float3 transmittance) { return -log(transmittance); }
+float3 OpticalDepthFromOpacity(float3 opacity) { return OpticalDepthFromTransmittance(TransmittanceFromOpacity(opacity)); }
 
 #endif

@@ -131,7 +131,7 @@ SurfaceData SurfaceDataFromGBuffer(uint2 positionCS)
 		bool storeSin = tangentFlags != 0;
 		float sinFrame = storeSin ? sinOrCos : cosOrSin;
 		float cosFrame = storeSin ? cosOrSin : sinOrCos;
-
+	
 		GetAlbedoTranslucency(positionCS, surface.Albedo, surface.Translucency);
 		surface.Normal = GBufferNormal(gbuffer1);
 		surface.PerceptualRoughness = GBufferPerceptualRoughness(gbuffer2);
@@ -181,6 +181,7 @@ float4 PackGBufferMetallicRoughnesTangent(float metallic, float2 perceptualRough
     // To avoid storing redundant angles, we must convert from a node-centered representation
     // to a cell-centered one, e.i. remap: [0.5/256, 255.5/256] -> [0, 1].
 	float remappedSinOrCos = Remap01(sinOrCos, sqrt(2) * 256.0 / 255.0, 0.5 / 255.0);
+	
 	float metallicSin = PackFloatInt8bit(metallic, storeSin ? 1 : 0, 8);
 	return float4(metallicSin, perceptualRoughness, remappedSinOrCos);
 }

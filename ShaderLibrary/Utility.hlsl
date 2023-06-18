@@ -36,17 +36,13 @@ float3 ApplyExposure(float3 color)
 	#endif
 }
 
-float1 Remap(float1 v, float1 pMin, float1 pMax, float1 nMin, float1 nMax) { return nMin + (v - pMin) / (pMax - pMin) * (nMax - nMin); }
-float2 Remap(float2 v, float2 pMin, float2 pMax, float2 nMin, float2 nMax) { return nMin + (v - pMin) / (pMax - pMin) * (nMax - nMin); }
-float3 Remap(float3 v, float3 pMin, float3 pMax, float3 nMin, float3 nMax) { return nMin + (v - pMin) / (pMax - pMin) * (nMax - nMin); }
-float4 Remap(float4 v, float4 pMin, float4 pMax, float4 nMin, float4 nMax) { return nMin + (v - pMin) / (pMax - pMin) * (nMax - nMin); }
+// Remaps a value from one range to another
+float1 Remap(float1 v, float1 pMin, float1 pMax = 1.0, float1 nMin = 0.0, float1 nMax = 1.0) { return nMin + (v - pMin) * rcp(pMax - pMin) * (nMax - nMin); }
+float2 Remap(float2 v, float2 pMin, float2 pMax = 1.0, float2 nMin = 0.0, float2 nMax = 1.0) { return nMin + (v - pMin) * rcp(pMax - pMin) * (nMax - nMin); }
+float3 Remap(float3 v, float3 pMin, float3 pMax = 1.0, float3 nMin = 0.0, float3 nMax = 1.0) { return nMin + (v - pMin) * rcp(pMax - pMin) * (nMax - nMin); }
+float4 Remap(float4 v, float4 pMin, float4 pMax = 1.0, float4 nMin = 0.0, float4 nMax = 1.0) { return nMin + (v - pMin) * rcp(pMax - pMin) * (nMax - nMin); }
 
 float Remap01(float x, float rcpLength, float startTimesRcpLength) { return saturate(x * rcpLength - startTimesRcpLength); }
-
-float1 RangeRemap(float1 min, float1 max, float1 t) { return saturate((t - min) / (max - min)); }
-float2 RangeRemap(float2 min, float2 max, float2 t) { return saturate((t - min) / (max - min)); }
-float3 RangeRemap(float3 min, float3 max, float3 t) { return saturate((t - min) / (max - min)); }
-float4 RangeRemap(float4 min, float4 max, float4 t) { return saturate((t - min) / (max - min)); }
 
 float1 Mod(float1 x, float1 y) { return x - y * floor(x / y); }
 float2 Mod(float2 x, float2 y) { return x - y * floor(x / y); }

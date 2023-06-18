@@ -34,7 +34,7 @@ void CloudCoverage(uint id : SV_DispatchThreadId, uint groupIndex : SV_GroupInde
 	float sceneDepth = 0.0;
 	float cloudDepth;
 	float4 result = RenderCloud(0.0, V, id.xx, depth, sceneDepth, cloudDepth, false);
-	result.a = RangeRemap(_TransmittanceThreshold, 1.0, result.a);
+	result.a = Remap(result.a, _TransmittanceThreshold, 1.0);
 	
 	sharedTransmittance[groupIndex] = result;
 
@@ -84,7 +84,7 @@ void CloudShadow(uint2 id : SV_DispatchThreadID)
 	float cloudDepth;
 	float4 cloudResult = SampleCloud(P, V, start, stepLength, _ShadowSamples, cloudDepth);
 	
-	float maxExtinction = RangeRemap(_TransmittanceThreshold, 1.0, cloudResult.a);
+	float maxExtinction = Remap(cloudResult.a, _TransmittanceThreshold);
 	ShadowResult[id] = float3(cloudDepth * _CloudDepthScale, -log(cloudResult.a) / _ShadowSamples, maxExtinction);
 }
 
@@ -106,7 +106,7 @@ void Cloud(uint2 id : SV_DispatchThreadID)
 	// Adjust max cloud depth based on alpha
 	float maxDistance = IntersectRaySphereSimple(P + _PlanetOffset, V, _TopRadius);
 	cloudDepth = lerp(cloudDepth, maxDistance, cloudResult.a);
-	cloudResult.a = RangeRemap(_TransmittanceThreshold, 1.0, cloudResult.a);
+	cloudResult.a = Remap(cloudResult.a, _TransmittanceThreshold);
 	
 	_Result[id] = cloudResult;
 	_DepthResult[id] = cloudDepth / _MaxDistance / lengthV;
