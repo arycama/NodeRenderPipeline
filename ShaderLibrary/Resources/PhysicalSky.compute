@@ -110,7 +110,7 @@ void KERNEL_NAME(uint2 id : SV_DispatchThreadID)
 			lighting += AtmosphereLightFull(P, V, _LightDirection1, _LinearClampSampler, 1.0) * ApplyExposure(_LightColor1);
 		#endif
         
-		float3 extinction = AtmosphereOpticalDepth(length(P));
+		float3 extinction = AtmosphereExtinction(length(P));
         
 		luminance += transmittance * (lighting) * (1.0 - exp(-extinction * ds)) / extinction;
 		transmittance *= exp(-extinction * ds);

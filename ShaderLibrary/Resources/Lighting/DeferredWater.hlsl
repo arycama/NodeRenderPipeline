@@ -81,8 +81,8 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 	#endif
 		
 		float t = -log(1.0 - xi * (1.0 - exp(-dot(_Extinction, channelMask) * underwaterDistance))) / dot(_Extinction, channelMask);
-		float3 tr = exp(_Extinction * t) / _Extinction - rcp(_Extinction * exp(_Extinction * (underwaterDistance - t)));
-		float pdf = dot(rcp(tr), 1.0 / 3.0);
+		float3 tr = _Extinction / (exp(_Extinction * t) - _Extinction * rcp(_Extinction * exp(_Extinction * (underwaterDistance - t))));
+		float pdf = dot(tr, 1.0 / 3.0);
 		float3 P = positionWS + V * t;
 		
 		#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)

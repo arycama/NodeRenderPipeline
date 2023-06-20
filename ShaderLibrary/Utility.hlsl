@@ -49,10 +49,10 @@ float2 Mod(float2 x, float2 y) { return x - y * floor(x / y); }
 float3 Mod(float3 x, float3 y) { return x - y * floor(x / y); }
 float4 Mod(float4 x, float4 y) { return x - y * floor(x / y); }
 
-void Swap(float1 a, float1 b) { float1 t = a; a = b; b = t; }
-void Swap(float2 a, float2 b) { float2 t = a; a = b; b = t; }
-void Swap(float3 a, float3 b) { float3 t = a; a = b; b = t; }
-void Swap(float4 a, float4 b) { float4 t = a; a = b; b = t; }
+void Swap(inout float1 a, inout float1 b) { float1 t = a; a = b; b = t; }
+void Swap(inout float2 a, inout float2 b) { float2 t = a; a = b; b = t; }
+void Swap(inout float3 a, inout float3 b) { float3 t = a; a = b; b = t; }
+void Swap(inout float4 a, inout float4 b) { float4 t = a; a = b; b = t; }
 
 float1 SqrLength(float1 x) { return dot(x, x); }
 float2 SqrLength(float2 x) { return dot(x, x); }

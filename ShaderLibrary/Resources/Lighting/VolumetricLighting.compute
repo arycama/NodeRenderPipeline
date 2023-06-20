@@ -170,7 +170,7 @@ void Integrate(uint3 id : SV_DispatchThreadID)
 		//	break;
 		
 		float3 P = rayOrigin + i * rayStep;
-		float3 extinction = AtmosphereOpticalDepth(length(P));
+		float3 extinction = AtmosphereExtinction(length(P));
 		
 		float3 stepLuminance = _Input[uint3(id.xy, i)];
 		
