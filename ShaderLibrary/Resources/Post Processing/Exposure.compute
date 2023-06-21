@@ -217,8 +217,8 @@ void AverageLuminance(uint threadID : SV_GroupIndex)
 			//float exposure = ComputeLuminanceAdaptation(previousEV, avgEV - ParamExposureCompensation, _AdaptationSpeed, _AdaptationSpeed, 0.05);
 			//float exposure = ComputeLuminanceAdaptation(previousEV, avgEV - ParamExposureCompensation, _AdaptationSpeed, _AdaptationSpeed, 0.05);
 		#endif
-		float exposure = avgEV;
-		exposure = clamp(exposure, minExposure, maxExposure);
+		float exposure = 13.0; //avgEV;
+		//exposure = clamp(exposure, minExposure, maxExposure);
 
 		_Result[uint2(0, 0)] = ConvertEV100ToExposure(exposure);
 	}

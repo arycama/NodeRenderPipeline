@@ -12,9 +12,9 @@ Shader "Hidden/Camera Motion Vectors"
 
             Stencil
             {
-                Ref 1
+                Ref 0
                 Comp Equal
-                ReadMask 3
+                ReadMask 6
             }
 
             HLSLPROGRAM

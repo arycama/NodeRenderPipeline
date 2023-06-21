@@ -256,6 +256,8 @@ float GetNoHSquared(float radiusTan, float NoL, float NoV, float VoL)
 float DirectionalLightShadow(float3 positionWS, float shadowIndex, float jitter = 0.5, bool softShadows = false)
 {
 	float viewZ = WorldToClip(positionWS).w;
+    if(viewZ < 1.0)
+		return 1.0;
     
     // Calculate the cascade from near plane distance. Max(0) required because shadow near plane for cascades may be further than camera
     // near plane, causing nearby pixels to be below 0

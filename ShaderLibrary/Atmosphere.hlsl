@@ -134,21 +134,31 @@ float3 OptDepthSpherExpMedium(float r, float cosTheta)
 
 float3 OptDepthSpherExpMedium(float height0, float cosTheta0, float height1, float cosTheta1)
 {
-    // Potentially swap X and Y.
-    // Convention: at the point Y, the ray points up.
-	cosTheta0 = (cosTheta1 >= 0) ? cosTheta0 : -cosTheta0;
-
-	float2 zX = height0 / float2(_RayleighHeight, _MieHeight);
-	float2 zY = height1 / float2(_RayleighHeight, _MieHeight);
-	float2 Z = _PlanetRadius / float2(_RayleighHeight, _MieHeight);
-
-	float2 chX = RescaledChapman(height0, cosTheta0);
+	float2 ch;
+	if (cosTheta1 >= 0.0)
+	{
+		float2 chX = RescaledChapman(height0, cosTheta0);
 	
-	float2 c = sqrt(zY);
-	float2 chY = c / (c * abs(cosTheta1) + 1.0) * exp(Z - zY); // Rescaling adds 'exp'
+		float2 Z = _PlanetRadius / float2(_RayleighHeight, _MieHeight);
+		float2 zY = height1 / float2(_RayleighHeight, _MieHeight);
+		float2 c = sqrt(zY);
+		float2 chY = c / (c * cosTheta1 + 1.0) * exp(Z - zY); // Rescaling adds 'exp'
 
-    // We may have swapped X and Y.
-	float2 ch = abs(chX - chY);
+		// We may have swapped X and Y.
+		ch = (chX - chY);
+	}
+	else
+	{
+		float2 chX = RescaledChapman(height0, -cosTheta0);
+	
+		float2 Z = _PlanetRadius / float2(_RayleighHeight, _MieHeight);
+		float2 zY = height1 / float2(_RayleighHeight, _MieHeight);
+		float2 c = sqrt(zY);
+		float2 chY = c / (1.0 - c * cosTheta1) * exp(Z - zY); // Rescaling adds 'exp'
+
+		// We may have swapped X and Y.
+		ch = -(chX - chY);
+	}
 
 	return ch.x * _RayleighHeight * _RayleighScatter + ch.y * _MieHeight * (_MieScatter + _MieAbsorption);
 }
@@ -166,7 +176,7 @@ float3 OptDepthSpherExpMedium(float r, float cosTheta, float dist)
 
 float3 TransmittanceToAtmosphere(float viewHeight, float cosAngle, SamplerState samplerState)
 {
-	return exp(-OptDepthSpherExpMedium(viewHeight, cosAngle));
+	//return exp(-OptDepthSpherExpMedium(viewHeight, cosAngle));
 	
 	float2 uv = TransmittanceUv(viewHeight, cosAngle);
 	return _AtmosphereTransmittance.SampleLevel(samplerState, uv, 0.0);
@@ -214,7 +224,7 @@ void AtmosphereAlbedo(float centerDistance, out float3 rayleighAlbedo, out float
 
 float3 TransmittanceToPoint(float height1, float cosAngle1, float height0, float cosAngle0, float dist, SamplerState samplerState)
 {
-	return exp(-OptDepthSpherExpMedium(height1, cosAngle1, height0, cosAngle0));
+	//return exp(-OptDepthSpherExpMedium(height1, cosAngle1, height0, cosAngle0));
 	
 	if (height0 < height1)
 	{
