@@ -281,7 +281,8 @@ float4 BilinearWeights(float2 uv)
 // Gives weights for four texels from a 0-1 input position to match a gather result
 float4 BilinearWeights(float2 uv, float2 textureSize)
 {
-	float2 localUv = frac(uv * textureSize - 0.5);
+	const float2 offset = 1.0 / 512.0;
+	float2 localUv = frac(uv * textureSize + (-0.5 + offset));
 	return BilinearWeights(localUv);
 }
 

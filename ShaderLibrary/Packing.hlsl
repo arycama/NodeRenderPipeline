@@ -128,4 +128,21 @@ float3 UnpackNormalHemiOctEncode(float2 f)
 	return normalize(n);
 }
 
+// The standard 32-bit HDR color format
+uint PackToR11G11B10f(float3 rgb)
+{
+	uint r = (f32tof16(rgb.x) << 17) & 0xFFE00000;
+	uint g = (f32tof16(rgb.y) << 6) & 0x001FFC00;
+	uint b = (f32tof16(rgb.z) >> 5) & 0x000003FF;
+	return r | g | b;
+}
+
+float3 UnpackFromR11G11B10f(uint rgb)
+{
+	float r = f16tof32((rgb >> 17) & 0x7FF0);
+	float g = f16tof32((rgb >> 6) & 0x7FF0);
+	float b = f16tof32((rgb << 5) & 0x7FE0);
+	return float3(r, g, b);
+}
+
 #endif

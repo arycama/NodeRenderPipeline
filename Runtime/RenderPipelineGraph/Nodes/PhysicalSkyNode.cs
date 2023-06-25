@@ -10,12 +10,17 @@ public partial class PhysicalSkyNode : RenderPipelineNode
     [SerializeField] private AtmosphereProfile atmosphereProfile;
     [Input, SerializeField, Range(1, 64)] private int sampleCount = 16;
     [Input, SerializeField] private bool debugNoise;
+    [SerializeField] private CloudProfile cloudProfile;
 
     [Input] private RenderTargetIdentifier velocity;
     [Input] private RenderTargetIdentifier exposure;
     [Input] private RenderTargetIdentifier transmittance;
     [Input] private RenderTargetIdentifier multiScatter;
     [Input] private RenderTargetIdentifier depth;
+    [Input] private RenderTargetIdentifier previousDepth;
+    [Input] private RenderTargetIdentifier volumetricClouds;
+    [Input] private RenderTargetIdentifier cloudDepth;
+    [Input] private RenderTargetIdentifier cloudCoverage;
 
     [Input] private ComputeBuffer ambient;
     [Input] private CullingResults cullingResults;
@@ -24,32 +29,22 @@ public partial class PhysicalSkyNode : RenderPipelineNode
     [Input, Output] private NodeConnection connection;
 
     private CameraTextureCache previousFrameCache;
+    private CameraTextureCache frameCountCache;
 
     public override void Initialize()
     {
         previousFrameCache = new("Physical Sky");
+        frameCountCache = new("Ambient Occlusion FrameCount");
     }
 
     public override void Cleanup()
     {
         previousFrameCache.Dispose();
+        frameCountCache.Dispose();
     }
 
     public override void Execute(ScriptableRenderContext context, Camera camera)
     {
-        var lightDirection = Vector3.up;
-        var lightColor = Color.black;
-        for (var i = 0; i < cullingResults.visibleLights.Length; i++)
-        {
-            var light = cullingResults.visibleLights[i];
-            if (light.lightType != LightType.Directional)
-                continue;
-
-            lightDirection = -light.localToWorldMatrix.Forward();
-            lightColor = light.finalColor;
-            break;
-        }
-
         var computeShader = Resources.Load<ComputeShader>("PhysicalSkyNew");
 
         var projMatrix = camera.projectionMatrix;
@@ -61,48 +56,91 @@ public partial class PhysicalSkyNode : RenderPipelineNode
         var blueNoise2D = Resources.Load<Texture2D>(noiseIds.GetString(debugNoise ? 0 : FrameCount % 64));
         var planetCenterRws = new Vector3(0f, (float)((double)atmosphereProfile.PlanetRadius + camera.transform.position.y), 0f);
 
-        var desc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, RenderTextureFormat.RGB111110Float) { enableRandomWrite = true };
+        var desc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, RenderTextureFormat.RInt) { enableRandomWrite = true };
         previousFrameCache.GetTexture(camera, desc, out var current, out var previous, FrameCount);
 
         using var scope = context.ScopedCommandBuffer("Physical Sky");
 
+        // Find first 2 directional lights
+        var dirLightCount = 0;
+        for (var i = 0; i < cullingResults.visibleLights.Length; i++)
+        {
+            var light = cullingResults.visibleLights[i];
+            if (light.lightType != LightType.Directional)
+                continue;
+
+            dirLightCount++;
+            if (dirLightCount == 1)
+            {
+                scope.Command.SetComputeVectorParam(computeShader, "_LightDirection0", -light.localToWorldMatrix.Forward());
+                scope.Command.SetComputeVectorParam(computeShader, "_LightColor0", light.finalColor);
+            }
+            else if (dirLightCount == 2)
+            {
+                // Only 2 lights supported
+                scope.Command.SetComputeVectorParam(computeShader, "_LightDirection1", -light.localToWorldMatrix.Forward());
+                scope.Command.SetComputeVectorParam(computeShader, "_LightColor1", light.finalColor);
+                break;
+            }
+        }
+
+        var kernelIndex = dirLightCount;
+
+        cloudProfile.SetMaterialProperties(computeShader, kernelIndex, scope.Command, atmosphereProfile.PlanetRadius);
+        cloudProfile.SetMaterialProperties(computeShader, 3, scope.Command, atmosphereProfile.PlanetRadius);
+
         var luminanceTemp = Shader.PropertyToID("_LuminanceTemp");
         var transmittanceTemp = Shader.PropertyToID("_TransmittanceTemp");
-        scope.Command.GetTemporaryRT(luminanceTemp, desc);
-        scope.Command.GetTemporaryRT(transmittanceTemp, desc);
+        var tempDesc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, RenderTextureFormat.RGB111110Float) { enableRandomWrite = true };
+        scope.Command.GetTemporaryRT(luminanceTemp, tempDesc);
+        scope.Command.GetTemporaryRT(transmittanceTemp, tempDesc);
 
-        scope.Command.SetComputeBufferParam(computeShader, 0, "_AmbientSh", ambient);
+        scope.Command.SetComputeBufferParam(computeShader, kernelIndex, "_AmbientSh", ambient);
 
-        scope.Command.SetComputeTextureParam(computeShader, 0, "_Exposure", exposure);
-        scope.Command.SetComputeTextureParam(computeShader, 0, "_AtmosphereTransmittance", transmittance);
-        scope.Command.SetComputeTextureParam(computeShader, 0, "_MultipleScatter", multiScatter);
-        scope.Command.SetComputeTextureParam(computeShader, 0, "_BlueNoise2D", blueNoise2D);
-        scope.Command.SetComputeTextureParam(computeShader, 0, "_Depth", depth);
-        scope.Command.SetComputeTextureParam(computeShader, 0, "_DirectionalShadows", directionalShadows);
+        scope.Command.SetComputeTextureParam(computeShader, kernelIndex, "_Exposure", exposure);
+        scope.Command.SetComputeTextureParam(computeShader, kernelIndex, "_AtmosphereTransmittance", transmittance);
+        scope.Command.SetComputeTextureParam(computeShader, kernelIndex, "_MultipleScatter", multiScatter);
+        scope.Command.SetComputeTextureParam(computeShader, kernelIndex, "_BlueNoise2D", blueNoise2D);
+        scope.Command.SetComputeTextureParam(computeShader, kernelIndex, "_Depth", depth);
+        scope.Command.SetComputeTextureParam(computeShader, kernelIndex, "_DirectionalShadows", directionalShadows);
 
-        scope.Command.SetComputeTextureParam(computeShader, 0, "_LuminanceResult", luminanceTemp);
-        scope.Command.SetComputeTextureParam(computeShader, 0, "_TransmittanceResult", transmittanceTemp);
+        scope.Command.SetComputeTextureParam(computeShader, kernelIndex, "_VolumetricClouds", volumetricClouds);
+        scope.Command.SetComputeTextureParam(computeShader, kernelIndex, "_CloudDepth", cloudDepth);
+        scope.Command.SetComputeTextureParam(computeShader, kernelIndex, "_CloudCoverage", cloudCoverage);
+
+        scope.Command.SetComputeTextureParam(computeShader, kernelIndex, "_LuminanceResult", luminanceTemp);
+        scope.Command.SetComputeTextureParam(computeShader, kernelIndex, "_TransmittanceResult", transmittanceTemp);
         
         scope.Command.SetComputeMatrixParam(computeShader, "_PixelCoordToViewDirWS", mat);
 
         scope.Command.SetComputeVectorParam(computeShader, "_PlanetOffset", planetCenterRws);
-        scope.Command.SetComputeVectorParam(computeShader, "_LightDirection0", lightDirection);
-        scope.Command.SetComputeVectorParam(computeShader, "_LightColor0", lightColor);
         scope.Command.SetComputeVectorParam(computeShader, "_GroundColor", atmosphereProfile.GroundColor.linear);
 
         scope.Command.SetComputeFloatParam(computeShader, "_SampleCount", sampleCount);
         scope.Command.SetComputeFloatParam(computeShader, "_ViewHeight", (float)((double)atmosphereProfile.PlanetRadius + camera.transform.position.y));
-       
-        scope.Command.DispatchNormalized(computeShader, 0, camera.pixelWidth, camera.pixelHeight, 1);
 
-        scope.Command.SetComputeTextureParam(computeShader, 1, "_Luminance", luminanceTemp);
-        scope.Command.SetComputeTextureParam(computeShader, 1, "_Transmittance", transmittanceTemp);
-        scope.Command.SetComputeTextureParam(computeShader, 1, "_Current", current);
-        scope.Command.SetComputeTextureParam(computeShader, 1, "_Previous", previous);
-        scope.Command.SetComputeTextureParam(computeShader, 1, "_Velocity", velocity);
-        scope.Command.SetComputeTextureParam(computeShader, 1, "_Result", result);
+        scope.Command.DispatchNormalized(computeShader, kernelIndex, camera.pixelWidth, camera.pixelHeight, 1);
 
-        scope.Command.DispatchNormalized(computeShader, 1, camera.pixelWidth, camera.pixelHeight, 1);
+        var frameCountDesc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, RenderTextureFormat.R8, 0) { enableRandomWrite = true };
+        frameCountCache.GetTexture(camera, frameCountDesc, out var currentFrameCount, out var previousFrameCount, FrameCount);
+
+        scope.Command.SetComputeVectorParam(computeShader, "_ScaleOffset", GraphicsUtilities.ThreadIdScaleOffset(camera.pixelWidth, camera.pixelHeight));
+
+        scope.Command.SetComputeTextureParam(computeShader, 3, "_PreviousDepth", previousDepth);
+        scope.Command.SetComputeTextureParam(computeShader, 3, "_FrameCount", currentFrameCount);
+        scope.Command.SetComputeTextureParam(computeShader, 3, "_FrameCountPrevious", previousFrameCount);
+        scope.Command.SetComputeTextureParam(computeShader, 3, "_Luminance", luminanceTemp);
+        scope.Command.SetComputeTextureParam(computeShader, 3, "_Transmittance", transmittanceTemp);
+        scope.Command.SetComputeTextureParam(computeShader, 3, "_Current", current);
+        scope.Command.SetComputeTextureParam(computeShader, 3, "_Previous", previous);
+        scope.Command.SetComputeTextureParam(computeShader, 3, "_Velocity", velocity);
+        scope.Command.SetComputeTextureParam(computeShader, 3, "_Result", result);
+
+        scope.Command.SetComputeTextureParam(computeShader, 3, "_VolumetricClouds", volumetricClouds);
+        scope.Command.SetComputeTextureParam(computeShader, 3, "_CloudDepth", cloudDepth);
+        scope.Command.SetComputeTextureParam(computeShader, 3, "_CloudCoverage", cloudCoverage);
+
+        scope.Command.DispatchNormalized(computeShader, 3, camera.pixelWidth, camera.pixelHeight, 1);
 
         scope.Command.ReleaseTemporaryRT(luminanceTemp);
         scope.Command.ReleaseTemporaryRT(transmittanceTemp);

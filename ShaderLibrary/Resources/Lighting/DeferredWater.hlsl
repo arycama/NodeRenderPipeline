@@ -71,6 +71,10 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 	
 	#define NO_PDF 1
 	
+	float3 refractDir = V;//refract(V, N, rcp(1.34));
+	//if(positionCS.x > _ScreenSize.x / 2)
+	//	refractDir = V;
+	
 	#ifdef SINGLE_SAMPLE
 	{
 		float xi = noise.x;
@@ -82,8 +86,8 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 		
 		float t = -log(1.0 - xi * (1.0 - exp(-dot(_Extinction, channelMask) * underwaterDistance))) / dot(_Extinction, channelMask);
 		float3 tr = _Extinction / (exp(_Extinction * t) - _Extinction * rcp(_Extinction * exp(_Extinction * (underwaterDistance - t))));
-		float pdf = dot(tr, 1.0 / 3.0);
-		float3 P = positionWS + V * t;
+		float3 pdf = dot(tr, 1.0 / 3.0);
+		float3 P = positionWS + refractDir * t;
 		
 		#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
 			float attenuation = DirectionalLightShadow(P, 0, 0.5, false);

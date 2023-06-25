@@ -35,9 +35,11 @@ Texture2D<float3> _MultipleScatter;
 
 float2 TransmittanceUv(float viewHeight, float cosAngle)
 {
+	viewHeight = max(viewHeight, _PlanetRadius);
+	
 	#if 1
 		float H = sqrt(Sq(_TopRadius) - Sq(_PlanetRadius));
-		float rho = sqrt(max(0.0, Sq(viewHeight) - Sq(_PlanetRadius)));
+		float rho = sqrt(Sq(viewHeight) - Sq(_PlanetRadius));
 
 		float discriminant = Sq(viewHeight) * (Sq(cosAngle) - 1.0) + Sq(_TopRadius);
 		float d = -viewHeight * cosAngle + sqrt(discriminant); // Distance to atmosphere boundary
@@ -163,6 +165,38 @@ float3 OptDepthSpherExpMedium(float height0, float cosTheta0, float height1, flo
 	return ch.x * _RayleighHeight * _RayleighScatter + ch.y * _MieHeight * (_MieScatter + _MieAbsorption);
 }
 
+// Calculates the height above the atmosphere based on the current view height, angle and distance
+float HeightAtDistance(float viewHeight, float cosAngle, float distance)
+{
+	return sqrt(Sq(distance) + Sq(viewHeight) + 2.0 * viewHeight * cosAngle * distance);
+}
+
+float CosAngleAtDistance(float viewHeight, float cosAngle, float distance, float heightAtDistance)
+{
+	return (viewHeight * cosAngle + distance) / heightAtDistance;
+}
+
+float CosAngleAtDistance(float viewHeight, float cosAngle, float distance)
+{
+	float heightAtDistance = HeightAtDistance(viewHeight, cosAngle, distance);
+	return CosAngleAtDistance(viewHeight, cosAngle, distance, heightAtDistance);
+}
+
+// 'height' is the altitude.
+// 'cosTheta' is the Z component of the ray direction.
+// 'dist' is the distance.
+// seaLvlExt = (sigma_t * b) is the sea-level (height = 0) extinction coefficient.
+// n = (1 / H) is the falloff exponent, where 'H' is the scale height.
+float3 OptDepthRectExpMedium(float height, float cosTheta, float dist, float3 seaLvlExt, float n)
+{
+	float p = -cosTheta * n;
+	float3 optDepth = seaLvlExt * dist;
+	if (abs(p) > FloatEps)
+		optDepth = seaLvlExt * rcp(p) * exp(height * n) * (exp(p * dist) - 1);
+
+	return optDepth;
+}
+
 // This variant of the function evaluates optical depth along a bounded path.
 float3 OptDepthSpherExpMedium(float r, float cosTheta, float dist)
 {
@@ -174,20 +208,26 @@ float3 OptDepthSpherExpMedium(float r, float cosTheta, float dist)
 	return OptDepthSpherExpMedium(r, cosTheta, rY, cosThetaY);
 }
 
-float3 TransmittanceToAtmosphere(float viewHeight, float cosAngle, SamplerState samplerState)
+float DistanceToAtmosphereOrPlanet(float viewHeight, float cosAngle, out bool hasGroundHit)
 {
-	//return exp(-OptDepthSpherExpMedium(viewHeight, cosAngle));
+	float discriminant;
+	hasGroundHit = RayIntersectsGround(viewHeight, cosAngle);
+	if (hasGroundHit)
+	{
+		discriminant = -sqrt(Sq(viewHeight) * (Sq(cosAngle) - 1.0) + Sq(_PlanetRadius));
+	}
+	else
+	{
+		discriminant = sqrt(Sq(viewHeight) * (Sq(cosAngle) - 1.0) + Sq(_TopRadius));
+	}
 	
-	float2 uv = TransmittanceUv(viewHeight, cosAngle);
-	return _AtmosphereTransmittance.SampleLevel(samplerState, uv, 0.0);
+	return discriminant - viewHeight * cosAngle;
 }
 
-// P must be relative to planet center
-float3 TransmittanceToAtmosphere(float3 P, float3 V, SamplerState samplerState)
+float DistanceToAtmosphereOrPlanet(float viewHeight, float cosAngle)
 {
-	float viewHeight = length(P);
-	float3 N = P / viewHeight;
-	return TransmittanceToAtmosphere(viewHeight, dot(N, V), samplerState);
+	bool hasGroundHit;
+	return DistanceToAtmosphereOrPlanet(viewHeight, cosAngle, hasGroundHit);
 }
 
 float3 AtmosphereExtinctionNoOzone(float centerDistance)
@@ -222,7 +262,37 @@ void AtmosphereAlbedo(float centerDistance, out float3 rayleighAlbedo, out float
 	AtmosphereAlbedo(centerDistance, AtmosphereExtinction(centerDistance), rayleighAlbedo, mieAlbedo);
 }
 
-float3 TransmittanceToPoint(float height1, float cosAngle1, float height0, float cosAngle0, float dist, SamplerState samplerState)
+float3 TransmittanceToAtmosphere(float viewHeight, float cosAngle, SamplerState samplerState)
+{
+	#if 0
+		float3 transmittance = 1.0;
+		float maxDist = DistanceToAtmosphereOrPlanet(viewHeight, cosAngle);
+		float steps = 16.0;
+		float dt = maxDist / steps;
+		for (float i = 0.5; i < steps; i++)
+		{
+			float t = i * dt;
+			float heightT = HeightAtDistance(viewHeight, cosAngle, t);
+			float3 extinction = AtmosphereExtinction(heightT);
+			transmittance *= exp(-extinction * dt);
+		}
+	
+		return transmittance;
+	#else
+		float2 uv = TransmittanceUv(viewHeight, cosAngle);
+		return _AtmosphereTransmittance.SampleLevel(samplerState, uv, 0.0);
+	#endif
+}
+
+// P must be relative to planet center
+float3 TransmittanceToAtmosphere(float3 P, float3 V, SamplerState samplerState)
+{
+	float viewHeight = length(P);
+	float3 N = P / viewHeight;
+	return TransmittanceToAtmosphere(viewHeight, dot(N, V), samplerState);
+}
+
+float3 TransmittanceToPoint(float height1, float cosAngle1, float height0, float cosAngle0, SamplerState samplerState)
 {
 	//return exp(-OptDepthSpherExpMedium(height1, cosAngle1, height0, cosAngle0));
 	
@@ -240,6 +310,11 @@ float3 TransmittanceToPoint(float height1, float cosAngle1, float height0, float
 	
 	float3 transmittance1 = TransmittanceToAtmosphere(height1, cosAngle1, samplerState);
 	return transmittance1 / transmittance0;
+}
+
+float3 OpticalDepthToPoint(float height1, float cosAngle1, float height0, float cosAngle0, SamplerState samplerState)
+{
+	return OpticalDepthFromTransmittance(TransmittanceToPoint(height1, cosAngle1, height0, cosAngle0, samplerState));
 }
 
 float3 AtmosphereMultiScatter(float viewHeight, float cosAngle, SamplerState samplerState)
