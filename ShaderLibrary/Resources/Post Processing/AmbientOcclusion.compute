@@ -146,12 +146,6 @@ void Compute(uint2 id : SV_DispatchThreadID)
 void Temporal(uint2 id : SV_DispatchThreadID)
 {
 	float2 uv = (id + 0.5) / _ScreenSize.xy;
-	
-	// float to fixed
-	int i = 16, f = 16;
-	int2 fxp = round(uv * exp2(f));
-	uv = (fxp & (1 << f) - 1) * exp2(-f) + (fxp >> f);
-	
 	uint4 input = _Input.Gather(_PointClampSampler, uv).xywz;
 	
 	float4 result = 0.0, minValue = 0.0, maxValue = 0.0;
@@ -269,7 +263,7 @@ void Spatial(uint2 id : SV_DispatchThreadID)
 [numthreads(8, 8, 1)]
 void Combine(uint2 id : SV_DispatchThreadID)
 {
-	float2 uv = (double2(id) + 0.5) / _ScreenSize.xy + _Jitter;
+	float2 uv = (id + 0.5) / _ScreenSize.xy + _Jitter;
 	uint4 inputs = _Input.Gather(_PointClampSampler, uv);
 	float4 weights = BilinearWeights(uv, _ScreenSize.xy);
 	

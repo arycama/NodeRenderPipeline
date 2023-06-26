@@ -12,6 +12,10 @@ public partial class PhysicalSkyNode : RenderPipelineNode
     [Input, SerializeField] private bool debugNoise;
     [SerializeField] private CloudProfile cloudProfile;
 
+    [SerializeField, Pow2(256)] private int cdfWidth = 64;
+    [SerializeField, Pow2(256)] private int cdfHeight = 64;
+    [SerializeField, Pow2(256)] private int cdfDepth = 64;
+
     [Input] private RenderTargetIdentifier velocity;
     [Input] private RenderTargetIdentifier exposure;
     [Input] private RenderTargetIdentifier transmittance;
@@ -45,6 +49,24 @@ public partial class PhysicalSkyNode : RenderPipelineNode
 
     public override void Execute(ScriptableRenderContext context, Camera camera)
     {
+        using var scope = context.ScopedCommandBuffer("Physical Sky");
+
+        var cdfTemp = Shader.PropertyToID("_SkyCDFTemp");
+        var cdfDesc = new RenderTextureDescriptor(cdfWidth * 3, cdfHeight, RenderTextureFormat.ARGBFloat)
+        {
+            dimension = TextureDimension.Tex3D,
+            enableRandomWrite = true,
+            volumeDepth = cdfDepth, // Multiplied by 3 as we use 3 seperate wavelengths
+        };
+
+        var cdfComputeShader = Resources.Load<ComputeShader>("ComputeSkyCDF");
+        scope.Command.GetTemporaryRT(cdfTemp, cdfDesc);
+        scope.Command.SetComputeTextureParam(cdfComputeShader, 0, "_AtmosphereTransmittance", transmittance);
+        scope.Command.SetComputeTextureParam(cdfComputeShader, 0, "_Result", cdfTemp);
+        scope.Command.SetComputeIntParam(cdfComputeShader, "_Width", cdfWidth);
+        scope.Command.SetComputeVectorParam(cdfComputeShader, "_ScaleOffset", GraphicsUtilities.ThreadIdScaleOffset01(cdfWidth, cdfHeight, cdfDepth));
+        scope.Command.DispatchNormalized(cdfComputeShader, 0, cdfWidth * 3, cdfHeight, cdfDepth);
+
         var computeShader = Resources.Load<ComputeShader>("PhysicalSkyNew");
 
         var projMatrix = camera.projectionMatrix;
@@ -59,7 +81,6 @@ public partial class PhysicalSkyNode : RenderPipelineNode
         var desc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, RenderTextureFormat.RInt) { enableRandomWrite = true };
         previousFrameCache.GetTexture(camera, desc, out var current, out var previous, FrameCount);
 
-        using var scope = context.ScopedCommandBuffer("Physical Sky");
 
         // Find first 2 directional lights
         var dirLightCount = 0;
@@ -108,6 +129,8 @@ public partial class PhysicalSkyNode : RenderPipelineNode
         scope.Command.SetComputeTextureParam(computeShader, kernelIndex, "_CloudDepth", cloudDepth);
         scope.Command.SetComputeTextureParam(computeShader, kernelIndex, "_CloudCoverage", cloudCoverage);
 
+        scope.Command.SetComputeTextureParam(computeShader, kernelIndex, "_AtmosphereCdf", cdfTemp);
+
         scope.Command.SetComputeTextureParam(computeShader, kernelIndex, "_LuminanceResult", luminanceTemp);
         scope.Command.SetComputeTextureParam(computeShader, kernelIndex, "_TransmittanceResult", transmittanceTemp);
         
@@ -120,6 +143,7 @@ public partial class PhysicalSkyNode : RenderPipelineNode
         scope.Command.SetComputeFloatParam(computeShader, "_ViewHeight", (float)((double)atmosphereProfile.PlanetRadius + camera.transform.position.y));
 
         scope.Command.DispatchNormalized(computeShader, kernelIndex, camera.pixelWidth, camera.pixelHeight, 1);
+        scope.Command.ReleaseTemporaryRT(cdfTemp);
 
         var frameCountDesc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, RenderTextureFormat.R8, 0) { enableRandomWrite = true };
         frameCountCache.GetTexture(camera, frameCountDesc, out var currentFrameCount, out var previousFrameCount, FrameCount);
@@ -145,5 +169,4 @@ public partial class PhysicalSkyNode : RenderPipelineNode
         scope.Command.ReleaseTemporaryRT(luminanceTemp);
         scope.Command.ReleaseTemporaryRT(transmittanceTemp);
     }
-
 }

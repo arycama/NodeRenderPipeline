@@ -6,28 +6,24 @@
 #include "Utility.hlsl"
 #include "Volumetric.hlsl"
 
-cbuffer AtmosphereProperties
-{
-	float4 _AtmosphereExtinctionScale, _AtmosphereExtinctionOffset, _AtmosphereScatterOffset;
-	float3 _AtmosphereOzoneScale;
-	float _PlanetRadius;
-	float3 _AtmosphereOzoneOffset;
-	float _AtmosphereHeight;
-	float3 _OzoneAbsorption;
-	float _TopRadius;
+float4 _AtmosphereExtinctionScale, _AtmosphereExtinctionOffset, _AtmosphereScatterOffset;
+float3 _AtmosphereOzoneScale;
+float _PlanetRadius;
+float3 _AtmosphereOzoneOffset;
+float _AtmosphereHeight;
+float3 _OzoneAbsorption;
+float _TopRadius;
 
-	float _MiePhase;
-	float _MiePhaseConstant;
-	float _OzoneWidth;
-	float _OzoneHeight;
+float _MiePhase;
+float _MiePhaseConstant;
+float _OzoneWidth;
+float _OzoneHeight;
 	
-	float3 _PlanetOffset;
-	float _AtmospherePropertiesPad;
+float3 _PlanetOffset;
+float _AtmospherePropertiesPad;
 	
-	float3 _RayleighScatter;
-	float _RayleighHeight, _MieHeight, _MieScatter, _MieAbsorption;
-};
-
+float3 _RayleighScatter;
+float _RayleighHeight, _MieHeight, _MieScatter, _MieAbsorption;
 float4 _AtmosphereTransmittanceRemap, _AtmosphereMultiScatterRemap;
 
 Texture2D<float3> _AtmosphereTransmittance;
@@ -61,16 +57,13 @@ float2 TransmittanceUv(float viewHeight, float cosAngle)
 float2 UvToSkyParams(float2 uv)
 {
 	#if 1
-		float x_mu = uv.x;
-		float x_r = uv.y;
+		float H = sqrt(max(0.0, Sq(_TopRadius) - Sq(_PlanetRadius)));
+		float rho = H * uv.y;
+		float viewHeight = sqrt(Sq(rho) + Sq(_PlanetRadius));
 
-		float H = sqrt(_TopRadius * _TopRadius - _PlanetRadius * _PlanetRadius);
-		float rho = H * x_r;
-		float viewHeight = sqrt(rho * rho + _PlanetRadius * _PlanetRadius);
-
-		float d_min = _TopRadius - viewHeight;
+		float d_min = max(0.0, _TopRadius - viewHeight);
 		float d_max = rho + H;
-		float d = d_min + x_mu * (d_max - d_min);
+		float d = d_min + uv.x * (d_max - d_min);
 		float cosAngle = d == 0.0 ? 1.0f : (H * H - rho * rho - d * d) / (2.0 * viewHeight * d);
 	
 		return float2(cosAngle, viewHeight);
@@ -310,6 +303,13 @@ float3 TransmittanceToPoint(float height1, float cosAngle1, float height0, float
 	
 	float3 transmittance1 = TransmittanceToAtmosphere(height1, cosAngle1, samplerState);
 	return transmittance1 / transmittance0;
+}
+
+float3 TransmittanceToPoint(float height, float cosAngle, float distance, SamplerState samplerState)
+{
+	float height1 = HeightAtDistance(height, cosAngle, distance);
+	float cosAngle1 = CosAngleAtDistance(height, cosAngle, distance, height1);
+	return TransmittanceToPoint(height, cosAngle, height1, cosAngle1, samplerState);
 }
 
 float3 OpticalDepthToPoint(float height1, float cosAngle1, float height0, float cosAngle0, SamplerState samplerState)

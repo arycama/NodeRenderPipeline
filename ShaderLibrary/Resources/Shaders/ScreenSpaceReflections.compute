@@ -165,7 +165,7 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 	
 	float4 history = 0.0;
 	float weightSum = 0.0, accumSpeed = 0.0;
-	float currentDepth = Linear01ToDeviceDepth(Linear01Depth(_Depth.mips[1][id]));
+	float currentDepth = Linear01ToDeviceDepth(Linear01Depth(_Depth.mips[1][id])); // TODO: THis is redundant
 	
 	float3 Xprev = MultiplyPointProj(_PrevInvViewProjMatrix, float3((previousUv / _Resolution) * 2 - 1, currentDepth)).xyz;
 	float invDistToPoint = rcp(LinearEyeDepth(_Depth.mips[1][id]));

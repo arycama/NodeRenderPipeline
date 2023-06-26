@@ -105,7 +105,6 @@ void Cloud(uint2 id : SV_DispatchThreadID)
 	
 	// Adjust max cloud depth based on alpha
 	float maxDistance = IntersectRaySphereSimple(P + _PlanetOffset, V, _TopRadius);
-	cloudDepth = lerp(cloudDepth, maxDistance, cloudResult.a);
 	cloudResult.a = Remap(cloudResult.a, _TransmittanceThreshold);
 	
 	_Result[id] = cloudResult;

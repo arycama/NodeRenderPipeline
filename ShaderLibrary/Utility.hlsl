@@ -54,10 +54,10 @@ void Swap(inout float2 a, inout float2 b) { float2 t = a; a = b; b = t; }
 void Swap(inout float3 a, inout float3 b) { float3 t = a; a = b; b = t; }
 void Swap(inout float4 a, inout float4 b) { float4 t = a; a = b; b = t; }
 
-float1 SqrLength(float1 x) { return dot(x, x); }
-float2 SqrLength(float2 x) { return dot(x, x); }
-float3 SqrLength(float3 x) { return dot(x, x); }
-float4 SqrLength(float4 x) { return dot(x, x); }
+float SqrLength(float1 x) { return dot(x, x); }
+float SqrLength(float2 x) { return dot(x, x); }
+float SqrLength(float3 x) { return dot(x, x); }
+float SqrLength(float4 x) { return dot(x, x); }
 
 float3 NLerp(float3 A, float3 B, float t)
 {
@@ -432,6 +432,13 @@ float2 Remap01ToHalfTexelCoord(float2 coord, float2 size)
 {
 	const float2 start = 0.5 * rcp(size);
 	const float2 len = 1.0 - rcp(size);
+	return coord * len + start;
+}
+
+float3 Remap01ToHalfTexelCoord(float3 coord, float3 size)
+{
+	const float3 start = 0.5 * rcp(size);
+	const float3 len = 1.0 - rcp(size);
 	return coord * len + start;
 }
 

@@ -2,7 +2,7 @@
 #ifndef VIRTUAL_TEXTURING_INCLUDED
 #define VIRTUAL_TEXTURING_INCLUDED
 
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Utility.hlsl"
 
 // Use register 5 for deferred compatibility. (It uses 0-4 for it's GBuffer outputs)
 RWStructuredBuffer<uint> _VirtualFeedbackTexture : register(u6);
