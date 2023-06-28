@@ -428,6 +428,13 @@ uint TextureCoordToOffset(uint3 position, uint resolution)
 
 Texture2D<float> _LengthToRoughness;
 
+float1 Remap01ToHalfTexelCoord(float1 coord, float1 size)
+{
+	const float1 start = 0.5 * rcp(size);
+	const float1 len = 1.0 - rcp(size);
+	return coord * len + start;
+}
+
 float2 Remap01ToHalfTexelCoord(float2 coord, float2 size)
 {
 	const float2 start = 0.5 * rcp(size);

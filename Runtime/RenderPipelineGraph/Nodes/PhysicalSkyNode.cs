@@ -52,11 +52,11 @@ public partial class PhysicalSkyNode : RenderPipelineNode
         using var scope = context.ScopedCommandBuffer("Physical Sky");
 
         var cdfTemp = Shader.PropertyToID("_SkyCDFTemp");
-        var cdfDesc = new RenderTextureDescriptor(cdfWidth * 3, cdfHeight, RenderTextureFormat.ARGBFloat)
+        var cdfDesc = new RenderTextureDescriptor(cdfWidth * 3, cdfHeight, RenderTextureFormat.RFloat)
         {
             dimension = TextureDimension.Tex3D,
             enableRandomWrite = true,
-            volumeDepth = cdfDepth, // Multiplied by 3 as we use 3 seperate wavelengths
+            volumeDepth = cdfDepth,
         };
 
         var cdfComputeShader = Resources.Load<ComputeShader>("ComputeSkyCDF");
@@ -64,6 +64,8 @@ public partial class PhysicalSkyNode : RenderPipelineNode
         scope.Command.SetComputeTextureParam(cdfComputeShader, 0, "_AtmosphereTransmittance", transmittance);
         scope.Command.SetComputeTextureParam(cdfComputeShader, 0, "_Result", cdfTemp);
         scope.Command.SetComputeIntParam(cdfComputeShader, "_Width", cdfWidth);
+        scope.Command.SetComputeIntParam(cdfComputeShader, "_Height", cdfHeight);
+        scope.Command.SetComputeIntParam(cdfComputeShader, "_Depth", cdfDepth);
         scope.Command.SetComputeVectorParam(cdfComputeShader, "_ScaleOffset", GraphicsUtilities.ThreadIdScaleOffset01(cdfWidth, cdfHeight, cdfDepth));
         scope.Command.DispatchNormalized(cdfComputeShader, 0, cdfWidth * 3, cdfHeight, cdfDepth);
 
