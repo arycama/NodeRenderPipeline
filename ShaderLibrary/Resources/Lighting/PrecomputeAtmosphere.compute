@@ -26,47 +26,56 @@ void KERNEL(uint2 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, uint gro
 		float2 skyParams = UvToSkyParams(uv);
 		float3 V = float3(SinFromCos(skyParams.x), skyParams.x, 0.0);
 		float3 L = 0.0;
+		bool rayIntersectsGround = false;
 	#else
 		float2 uv = groupId * _ScaleOffset;
 		float2 skyParams = float2(2.0 * uv.x - 1.0, uv.y * _AtmosphereHeight + _PlanetRadius);
 		float3 L = float3(SinFromCos(skyParams.x), skyParams.x, 0.0);
 		float2 u = Hammersley2dSeq(groupIndex, _ThreadCount);
 		float3 V = SampleSphereUniform(u.x, u.y);
+		bool rayIntersectsGround = RayIntersectsGround(skyParams.y, V.y);
 	#endif
 	
 	float viewHeight = skyParams.y;
-	float3 luminance = 0.0, multiScatter = 0.0, transmittance = 1.0;
+	float3 luminance = 0.0, multiScatter = 0.0, opticalDepth = 0.0;
 	
 	// Compute the distance to the top atmosphere boundary along the view ray,
     // assuming the viewer is in space (or NaN if the view ray does not intersect the atmosphere).
-	float dx = DistanceToNearestAtmosphereBoundary(viewHeight, V.y) / _SampleCount;
+	float dx = DistanceToNearestAtmosphereBoundary(viewHeight, V.y, rayIntersectsGround) / _SampleCount;
 	
 	float LdotV = dot(V, L);
-	for (float i = 0.5; i < _SampleCount; i++)
+	for (uint i = 0; i <= _SampleCount; i++)
 	{
-		float d = i * dx;
-		float centerDist = HeightAtDistance(viewHeight, V.y, d);
-		float3 extinction = AtmosphereExtinction(centerDist);
+		float distance = float(i) * dx;
 		
-		float sunAngle = CosAngleAtDistance(viewHeight, L.y, d * LdotV, centerDist);
-		if (!RayIntersectsGround(centerDist, sunAngle))
+		// Distance between the current sample point and the planet center.
+		float radius = HeightAtDistance(viewHeight, V.y, distance);
+		
+		// Number density at the current sample point (divided by the number density
+		// at the bottom of the atmosphere, yielding a dimensionless number).
+		float3 extinction = AtmosphereExtinction(radius);
+		
+		// Sample weight (from the trapezoidal rule).
+		float weight = i == 0 || i == _SampleCount ? 0.5 : 1.0;
+		
+		float sunAngle = CosAngleAtDistance(viewHeight, L.y, distance * LdotV, radius);
+		if (!RayIntersectsGround(radius, sunAngle))
 		{
-			float2 uv = TransmittanceUv(centerDist, sunAngle);
+			float2 uv = TransmittanceUv(radius, sunAngle);
 			float3 transmittanceToAtmosphere = _AtmosphereTransmittance.SampleLevel(_LinearClampSampler, uv, 0.0);
 			
-			float4 scatter = AtmosphereScatter(centerDist);
+			float4 scatter = AtmosphereScatter(radius);
 			float3 lighting = RayleighPhaseFunction(LdotV) * transmittanceToAtmosphere * scatter.xyz;
 			lighting += CornetteShanksPhasePartVarying(_MiePhase, LdotV) * _MiePhaseConstant * transmittanceToAtmosphere * scatter.w;
 			
-			luminance += transmittance * lighting * (1.0 - exp(-extinction * dx)) / extinction;
-			multiScatter += transmittance * (scatter.xyz + scatter.w) * (1.0 - exp(-extinction * dx)) / extinction;
+			luminance += exp(-opticalDepth) * lighting * (1.0 - exp(-extinction * dx)) / extinction * weight;
+			multiScatter += exp(-opticalDepth) * (scatter.xyz + scatter.w) * (1.0 - exp(-extinction * dx)) / extinction * weight;
 		}
 		
-		transmittance *= exp(-extinction * dx);
+		opticalDepth += extinction * dx * weight;
 	}
 	
-	
-	transmittance = ComputeTransmittanceToTopAtmosphereBoundary(viewHeight, V.y, _SampleCount, false);
+	float3 transmittance = exp(-opticalDepth);
 	
 	// Account for bounced light off the earth
 	if (RayIntersectsGround(viewHeight, V.y))
@@ -76,8 +85,8 @@ void KERNEL(uint2 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, uint gro
 
 		float LdotV = dot(V, L);
 		float NdotL = (viewHeight * L.y + d * LdotV) / centerDist;
-		float3 sunTransmittance = TransmittanceToAtmosphere(_PlanetRadius, NdotL, _LinearClampSampler);
-		luminance += sunTransmittance * transmittance * saturate(NdotL) * _GroundColor / Pi;
+		float3 sunTransmittance = TransmittanceToAtmosphere(_PlanetRadius, NdotL);
+		//luminance += sunTransmittance * transmittance * saturate(NdotL) * _GroundColor / Pi;
 	}
 	
 	#ifdef TRANSMITTANCE

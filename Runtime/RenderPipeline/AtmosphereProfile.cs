@@ -24,7 +24,7 @@ public class AtmosphereProfile : ScriptableObject
     [Header("Planet Properties")]
     [SerializeField, Range(0.01f, 1f)] private float earthScale = 1f;
     [SerializeField, Min(0)] private float planetRadius = 6.36e+6f;
-    [SerializeField, Min(0)] private float atmosphereHeight = 6e+4f;
+    [SerializeField, Min(0)] private float atmosphereHeight = 8e+4f;
     [SerializeField] private Color groundColor = new(0.4809999f, 0.4554149f, 0.4451807f);
 
     [Header("Night Sky")]

@@ -60,7 +60,7 @@ public static class RenderTextureExtensions
         }
     }
 
-    public static void Resize(this RenderTexture renderTexture, int width, int height, int depth)
+    public static void Resize(this RenderTexture renderTexture, int width, int height, int depth, out bool hasChanged)
     {
         if (renderTexture.width != width || renderTexture.height != height || renderTexture.volumeDepth != depth)
         {
@@ -69,11 +69,27 @@ public static class RenderTextureExtensions
             renderTexture.height = height;
             renderTexture.volumeDepth = depth;
             renderTexture.Create();
+            hasChanged = true;
         }
+        else
+        {
+            hasChanged = false;
+        }
+    }
+
+    public static void Resize(this RenderTexture renderTexture, int width, int height, int depth)
+    {
+        Resize(renderTexture, width, height, depth, out _);
+    }
+
+
+    public static void Resize(this RenderTexture renderTexture, int width, int height, out bool hasChanged)
+    {
+        Resize(renderTexture, width, height, 1, out hasChanged);
     }
 
     public static void Resize(this RenderTexture renderTexture, int width, int height)
     {
-        Resize(renderTexture, width, height, 1);
+        Resize(renderTexture, width, height, out _);
     }
 }

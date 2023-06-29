@@ -103,11 +103,11 @@ void KERNEL_NAME(uint2 id : SV_DispatchThreadID)
 				attenuation *= CloudTransmittanceLevelZero(P - _PlanetOffset);
 			}
 		
-			lighting += AtmosphereLightFull(P, V, _LightDirection0, _LinearClampSampler, attenuation) * ApplyExposure(_LightColor0);
+			lighting += AtmosphereLightFull(P, V, _LightDirection0, attenuation) * ApplyExposure(_LightColor0);
 		#endif
 		
 		#ifdef LIGHT_COUNT_TWO
-			lighting += AtmosphereLightFull(P, V, _LightDirection1, _LinearClampSampler, 1.0) * ApplyExposure(_LightColor1);
+			lighting += AtmosphereLightFull(P, V, _LightDirection1, 1.0) * ApplyExposure(_LightColor1);
 		#endif
         
 		float3 extinction = AtmosphereExtinction(length(P));
@@ -123,13 +123,13 @@ void KERNEL_NAME(uint2 id : SV_DispatchThreadID)
 		float3 N = normalize(P);
 		
 		#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
-			float3 color = ApplyExposure(_LightColor0) * TransmittanceToAtmosphere(P, _LightDirection0, _LinearClampSampler);
+			float3 color = ApplyExposure(_LightColor0) * TransmittanceToAtmosphere(P, _LightDirection0);
 			float NdotL = dot(N, _LightDirection0);
 			luminance += color * transmittance * saturate(NdotL) * _GroundColor * RcpPi;
 		#endif
 		
 		#ifdef LIGHT_COUNT_TWO
-			float3 color1 = ApplyExposure(_LightColor1) * TransmittanceToAtmosphere(P, _LightDirection1, _LinearClampSampler);
+			float3 color1 = ApplyExposure(_LightColor1) * TransmittanceToAtmosphere(P, _LightDirection1);
 			float NdotL1 = dot(N, _LightDirection1);
 			luminance += color1 * transmittance * saturate(NdotL1) * _GroundColor * RcpPi;
 		#endif

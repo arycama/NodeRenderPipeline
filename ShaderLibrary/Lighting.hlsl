@@ -340,7 +340,7 @@ float3 DirectionalLightColor(uint index, float3 positionWS, bool softShadows = f
     #endif
     
 	if (atmosphereTransmittance)
-		color *= TransmittanceToAtmosphere(positionWS + _PlanetOffset, lightData.Direction, _LinearClampSampler);
+		color *= TransmittanceToAtmosphere(positionWS + _PlanetOffset, lightData.Direction);
 
 	return color * ApplyExposure(lightData.Color);
 }

@@ -55,7 +55,7 @@ float4 SampleCloud(float3 P, float3 V, float startDistance, float stepLength, fl
 				float2 intersections;
 				if (!IntersectRaySphere(positionWS + _PlanetOffset, _LightDirection0, _PlanetRadius, intersections) || intersections.x < 0.0)
 				{
-					float3 color0 = TransmittanceToAtmosphere(positionWS + _PlanetOffset, _LightDirection0, _LinearClampSampler) * ApplyExposure(_LightColor0);
+					float3 color0 = TransmittanceToAtmosphere(positionWS + _PlanetOffset, _LightDirection0) * ApplyExposure(_LightColor0);
 					if (any(color0 > 0.0))
 					{
 						float lightTransmittance = 1.0;
@@ -75,7 +75,7 @@ float4 SampleCloud(float3 P, float3 V, float startDistance, float stepLength, fl
 			#endif
 		
 			#ifdef LIGHT_COUNT_TWO
-				float3 color1 = TransmittanceToAtmosphere(positionWS + _PlanetOffset, _LightDirection1, _LinearClampSampler) * ApplyExposure(_LightColor1);
+				float3 color1 = TransmittanceToAtmosphere(positionWS + _PlanetOffset, _LightDirection1) * ApplyExposure(_LightColor1);
 				if (any(color1 > 0.0))
 				{
 					float lightTransmittance = 1.0;

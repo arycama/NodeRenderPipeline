@@ -54,12 +54,12 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 	
 	#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
 		// Slight optimisation, only calculate atmospheric transmittance at surface
-		float3 lightColor0 = RcpFourPi * ApplyExposure(_LightColor0) * TransmittanceToAtmosphere(positionWS + _PlanetOffset, _LightDirection0, _LinearClampSampler);
+		float3 lightColor0 = RcpFourPi * ApplyExposure(_LightColor0) * TransmittanceToAtmosphere(positionWS + _PlanetOffset, _LightDirection0);
 	#endif
 	
 	#ifdef LIGHT_COUNT_TWO
 		// Slight optimisation, only calculate atmospheric transmittance at surface
-		float3 lightColor1 = RcpFourPi * ApplyExposure(_LightColor1) * TransmittanceToAtmosphere(positionWS + _PlanetOffset, _LightDirection1, _LinearClampSampler);
+		float3 lightColor1 = RcpFourPi * ApplyExposure(_LightColor1) * TransmittanceToAtmosphere(positionWS + _PlanetOffset, _LightDirection1);
 	#endif
 
 	float2 noise = BlueNoise2D(positionCS.xy);
