@@ -138,6 +138,13 @@ float3 TransmittanceToAtmosphere(float viewHeight, float cosAngle)
 	return _AtmosphereTransmittance.SampleLevel(_LinearClampSampler, uv, 0.0);
 }
 
+float3 TransmittanceToAtmosphere(float3 P, float3 V)
+{
+	float viewHeight = length(P);
+	float3 N = P / viewHeight;
+	return TransmittanceToAtmosphere(viewHeight, dot(N, V));
+}
+
 float3 AtmosphereMultiScatter(float viewHeight, float cosAngle)
 {
 	float2 uv = float2(0.5 * cosAngle + 0.5, (viewHeight - _PlanetRadius) / _AtmosphereHeight);

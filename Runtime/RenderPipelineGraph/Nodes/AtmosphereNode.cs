@@ -8,7 +8,7 @@ public partial class AtmosphereNode : RenderPipelineNode
 {
     private RenderTexture transmittanceTexture, multiScatterTexture;
 
-    [SerializeField, Range(1, 128)] private int transmittanceSamples = 64;
+    [SerializeField, Range(1, 512)] private int transmittanceSamples = 64;
     [SerializeField] private Vector2Int transmittanceResolution = new(256, 64);
     [SerializeField] private RenderTextureFormat transmittanceFormat = RenderTextureFormat.RGB111110Float;
 

@@ -8,7 +8,7 @@ public partial class PhysicalSkyNode : RenderPipelineNode
     private static readonly IndexedString noiseIds = new("STBN/Vec2/stbn_vec2_2Dx1D_128x128x64_");
 
     [SerializeField] private AtmosphereProfile atmosphereProfile;
-    [Input, SerializeField, Range(1, 64)] private int sampleCount = 16;
+    [Input, SerializeField, Range(1, 128)] private int sampleCount = 16;
     [Input, SerializeField] private bool debugNoise;
     [SerializeField] private CloudProfile cloudProfile;
 

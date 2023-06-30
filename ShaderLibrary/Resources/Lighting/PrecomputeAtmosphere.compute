@@ -37,7 +37,7 @@ void KERNEL(uint2 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, uint gro
 	#endif
 	
 	float viewHeight = skyParams.y;
-	float3 luminance = 0.0, multiScatter = 0.0, opticalDepth = 0.0;
+	float3 luminance = 0.0, multiScatter = 0.0, opticalDepth = 0.0, transmittance = 1.0;
 	
 	// Compute the distance to the top atmosphere boundary along the view ray,
     // assuming the viewer is in space (or NaN if the view ray does not intersect the atmosphere).
@@ -73,9 +73,10 @@ void KERNEL(uint2 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, uint gro
 		}
 		
 		opticalDepth += extinction * dx * weight;
+		transmittance *= exp(-extinction * dx);
 	}
 	
-	float3 transmittance = exp(-opticalDepth);
+	transmittance = exp(-opticalDepth);
 	
 	// Account for bounced light off the earth
 	if (RayIntersectsGround(viewHeight, V.y))
