@@ -1,4 +1,5 @@
 #pragma kernel Temporal
+#pragma enable_d3d11_debug_symbols
 
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Deferred.hlsl"
 
@@ -22,26 +23,26 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 		for (int x = -1; x <= 1; x++)
 		{
 			float3 sample = _Input[id + int2(x, y)];
-			sample = RGBToYCoCg(sample);
-			sample *= rcp(1.0 + sample.r);
+			//sample = RGBToYCoCg(sample);
+			//sample *= rcp(1.0 + sample.r);
 			minValue = min(minValue, sample);
 			maxValue = max(maxValue, sample);
 		}
 	}
 	
 	float3 input = _Input[id];
-	input = RGBToYCoCg(input);
-	input *= rcp(1.0 + input.r);
+	//input = RGBToYCoCg(input);
+	//input *= rcp(1.0 + input.r);
 	
 	float3 history = _History.SampleLevel(_LinearClampSampler, previousUv, 0.0);
-	history = RGBToYCoCg(history);
-	history *= rcp(1.0 + history.r);
+	//history = RGBToYCoCg(history);
+	//history *= rcp(1.0 + history.r);
 	history = clamp(history, minValue, maxValue);
 	
 	float3 result = lerp(history, input, 0.05);
-	result *= rcp(1.0 - result.r);
-	result = YCoCgToRGB(result);
+	//result *= rcp(1.0 - result.r);
+	//result = YCoCgToRGB(result);
 	
 	_Result[id] = result;
-	_Result[id] = _Input[id];
+	//_Result[id] = _Input[id];
 }

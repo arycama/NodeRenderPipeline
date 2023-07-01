@@ -1,0 +1,122 @@
+#pragma kernel CSMain
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Atmosphere.hlsl"
+
+RWTexture3D<float> _Result;
+float3 _ScaleOffset;
+uint _Width, _Height, _Depth;
+
+float3 GetSkyParams(float3 uv, out bool rayIntersectsGround)
+{
+	float height = uv.z * _AtmosphereHeight;
+	float viewHeight = height + _PlanetRadius;
+	
+	float cosHorizon = -sqrt(height * (height + 2.0 * _PlanetRadius)) / viewHeight;
+	
+	// Todo: remove?
+	uv.y = Remap01ToHalfTexelCoord(uv.y, _Height);
+	
+	float cosAngle;
+	rayIntersectsGround = uv.y < 0.5;
+	if (rayIntersectsGround)
+	{
+		//cosAngle = Remap(uv.y, 0.0, 0.5, -1.0, cosHorizon);
+		uv.y = (uv.y - 0.5 / _Height) * _Height / (_Height / 2.0 - 1.0);
+		uv.y = pow(uv.y, 5.0);
+		cosAngle = cosHorizon - uv.y * (1 + cosHorizon);
+	}
+	else
+	{
+		//cosAngle = Remap(uv.y, 0.5, 1.0, cosHorizon, 1.0);
+		uv.y = (uv.y - (0.5 + 0.5 / _Height)) * _Height / (_Height / 2.0 - 1.0);
+		uv.y = pow(uv.y, 5.0);
+		cosAngle = cosHorizon + uv.y * (1 - cosHorizon);
+	}
+	
+	//cosAngle = 2.0 * uv.y - 1.0;
+	
+	return float3(uv.x, cosAngle, viewHeight);
+}
+
+[numthreads(8, 8, 8)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+	float3 uv = uint3(id.x % _Width, id.yz) * _ScaleOffset;
+	
+	bool rayIntersectsGround;
+	float3 skyParams = GetSkyParams(uv, rayIntersectsGround);
+	float xi = skyParams.x;
+	float cosAngle = skyParams.y;
+	float viewHeight = skyParams.z;
+	
+	// Handle a couple of boundary cases
+	//if(uv.z == 0.0 && uv.y < 0.5)
+	//{
+	//	_Result[id] = xi;
+	//	return;
+	//}
+	//else 
+	//if (uv.z == 1.0 && uv.y >= 0.5)
+	//{
+	//	_Result[id] = xi;
+	//	return;
+	//}
+	
+	float3 colorMask = (id.x / _Width) == uint3(0, 1, 2);
+	
+	//rayIntersectsGround = RayIntersectsGround(viewHeight, cosAngle);
+	float maxDist = DistanceToNearestAtmosphereBoundary(viewHeight, cosAngle, rayIntersectsGround);
+	
+	// First compute transmittance
+	float3 transmittance = TransmittanceToAtmosphere(viewHeight, rayIntersectsGround ? -cosAngle : cosAngle);
+	if (rayIntersectsGround)
+	{
+		float groundRadius = HeightAtDistance(viewHeight, cosAngle, maxDist);
+		float groundCosAngle = CosAngleAtDistance(viewHeight, cosAngle, maxDist, groundRadius);
+		float3 groundTransmittance = TransmittanceToAtmosphere(groundRadius, -groundCosAngle);
+		transmittance = groundTransmittance / transmittance;
+	}
+	
+	float3 opacity = xi * OpacityFromTransmittance(transmittance);
+	
+	// Brute force linear search
+	float t = 0; //xi;
+	float minDist = FloatMax;
+	
+	uint sampleCount = 4096*4;
+	float dx = maxDist / float(sampleCount);
+		
+	transmittance = 1.0;
+	for (float i = 0.5; i < sampleCount; i++)
+	{
+		float distance = float(i) * dx;
+		
+		// Distance between the current sample point and the planet center.
+		float radius = HeightAtDistance(viewHeight, cosAngle, distance);
+		
+		// Number density at the current sample point (divided by the number density
+		// at the bottom of the atmosphere, yielding a dimensionless number).
+		float3 extinction = AtmosphereExtinction(radius);
+		
+		// Sample weight (from the trapezoidal rule).
+		transmittance *= exp(-extinction * dx);
+		
+		float delta = dot(colorMask, abs((1.0 - transmittance) - opacity));
+		if (delta < minDist)
+		{
+			t = distance;
+			minDist = delta;
+		}
+	}
+	
+	// Normalize (For rays at height of 0, maxDist may be 0 as it will be on the ground, so check for this case)
+	//t = maxDist == 0.0 ? xi : t * rcp(maxDist);
+	
+	// We always want the range to start at 0 and end at 1
+	if (uv.x == 0.0)
+		t = 0.0;
+	else if (uv.x == 1.0)
+		t = maxDist;
+	
+	_Result[id] = t;
+}

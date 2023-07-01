@@ -1,0 +1,400 @@
+#pragma kernel PhysicalSky
+#pragma kernel PhysicalSky LIGHT_COUNT_ONE
+#pragma kernel PhysicalSky LIGHT_COUNT_TWO
+#pragma kernel Composite
+
+//#pragma enable_d3d11_debug_symbols
+
+#ifdef __INTELLISENSE__
+	#define LIGHT_COUNT_ONE 
+	#define LIGHT_COUNT_TWO
+#endif
+
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Atmosphere.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/CloudCommon.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Color.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/MotionVectors.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Packing.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Volumetric.hlsl"
+
+RWTexture2D<float3> _Result, _LuminanceResult, _TransmittanceResult;
+RWTexture2D<uint> _Current;
+RWTexture2D<float> _FrameCount;
+Texture2D<float4> _VolumetricClouds;
+Texture3D<float> _AtmosphereCdf;
+Texture2D<float3> _Luminance, _Transmittance;
+Texture2D<float2> _Velocity;
+Texture2D<float> _Depth, _FrameCountPrevious, _PreviousDepth, _CloudDepth;
+Texture2D<uint> _Previous;
+
+float4x4 _PixelCoordToViewDirWS;
+float4 _ScaleOffset;
+float _SampleCount, _ViewHeight;
+
+uint _AtmosphereCdfWidth, _AtmosphereCdfHeight, _AtmosphereCdfDepth;
+
+float3 GetInvCdfUv(float xi, float viewHeight, float cosAngle, bool rayIntersectsGround, float3 colorMask)
+{
+	float height = max(0.0, viewHeight - _PlanetRadius);
+	
+	float3 uv;
+	uv.x = xi;
+	uv.x = Remap01ToHalfTexelCoord(uv.x, _AtmosphereCdfWidth);
+	
+	// Remap X coord based on colorMask
+	uv.x /= 3.0;
+	uv.x += dot(colorMask, float3(0.0, 1.0, 2.0)) / 3.0;
+	
+	float cosHorizon = -sqrt(height * (height + 2.0 * _PlanetRadius)) / viewHeight;
+	if (rayIntersectsGround)
+	{
+		//uv.y = Remap(Remap01ToHalfTexelCoord(Remap(cosAngle, -1.0, cosHorizon), _AtmosphereCdfHeight / 2), 0.0, 1.0, 0.0, 0.5);
+		
+		uv.y = (cosHorizon - cosAngle) / (1.0 + cosHorizon);
+		uv.y = pow(uv.y, 0.2);
+		uv.y = 0.0 + 0.5 / _AtmosphereCdfHeight + uv.y * (_AtmosphereCdfHeight / 2.0 - 1.0) / _AtmosphereCdfHeight;
+	}
+	else
+	{
+		//uv.y = Remap(Remap01ToHalfTexelCoord(Remap(cosAngle, cosHorizon, 1.0), _AtmosphereCdfHeight / 2), 0.0, 1.0, 0.5, 1.0);
+		
+		uv.y = (cosAngle - cosHorizon) / (1.0 - cosHorizon);
+		uv.y = pow(uv.y, 0.2);
+		uv.y = 0.5 + 0.5 / _AtmosphereCdfHeight + uv.y * (_AtmosphereCdfHeight / 2.0 - 1.0) / _AtmosphereCdfHeight;
+	}
+	
+	//uv.y = Remap01ToHalfTexelCoord(0.5 * cosAngle + 0.5, _AtmosphereCdfHeight);
+	
+	uv.z = Remap01ToHalfTexelCoord((height / _AtmosphereHeight), _AtmosphereCdfDepth);
+	return uv;
+}
+
+#define CLOUDS
+
+[numthreads(8, 8, 1)]
+void PhysicalSky(uint2 id : SV_DispatchThreadID)
+{
+	float3 V = -MultiplyVector(_PixelCoordToViewDirWS, float3(id + 0.5, 1.0), false);
+	float rcpLengthV = rsqrt(dot(V, V));
+	V *= rcpLengthV;
+	
+	// Select random channel
+	float2 rnd = _BlueNoise2D[id % 128];
+	float3 colorMask = floor(rnd.y * 3.0) == float3(0.0, 1.0, 2.0);
+	
+	float cloudDepth = _CloudDepth[id >> 1] * _MaxDistance * rcp(rcpLengthV);
+	
+	bool rayIntersectsGround = RayIntersectsGround(_ViewHeight, V.y);
+	float baseMaxDist = DistanceToNearestAtmosphereBoundary(_ViewHeight, V.y, rayIntersectsGround);
+	
+	#ifdef CLOUDS
+		float maxDist = min(cloudDepth, baseMaxDist);
+	#else
+		float maxDist = baseMaxDist;
+	#endif
+	
+	bool flip = false, flipB = false;
+	float scale = 1.0;
+	float3 transmittance;
+	float depth = _Depth[id];
+	float sceneDepth = LinearEyeDepth(depth) * rcp(rcpLengthV);
+	if (depth > 0.0 && sceneDepth < maxDist)
+	{
+		// Scene
+		maxDist = sceneDepth;
+		float sceneRadius = HeightAtDistance(_ViewHeight, V.y, sceneDepth);
+		float sceneCosAngle = CosAngleAtDistance(_ViewHeight, V.y, sceneDepth, sceneRadius);
+		
+		if (_ViewHeight >= sceneRadius)
+		{
+			flip = true;
+			
+			if (rayIntersectsGround)
+			{
+				// Case A
+				float3 viewTransmittance = TransmittanceToAtmosphere(_ViewHeight, -V.y);
+				float3 sceneTransmittance = TransmittanceToAtmosphere(sceneRadius, -sceneCosAngle);
+				transmittance = viewTransmittance == 0.0 ? 0.0 : sceneTransmittance / viewTransmittance;
+				
+				// Sample the planet boundary to get the max opacity that would be stored in the invCdf LUT
+				float groundRadius = HeightAtDistance(_ViewHeight, V.y, baseMaxDist);
+				float groundCosAngle = CosAngleAtDistance(_ViewHeight, V.y, baseMaxDist, groundRadius);
+				float3 groundTransmittance = TransmittanceToAtmosphere(groundRadius, -groundCosAngle);
+				float3 maxTransmittance = viewTransmittance == 0.0 ? 0.0 : groundTransmittance / viewTransmittance;
+				
+				scale = dot(colorMask, maxTransmittance == 1.0 ? 1.0 : (1.0 - transmittance) / (1.0 - maxTransmittance));
+			}
+			else
+			{
+				// Case B
+				float3 viewTransmittance = TransmittanceToAtmosphere(_ViewHeight, -V.y);
+				float3 sceneTransmittance = TransmittanceToAtmosphere(sceneRadius, -sceneCosAngle);
+				transmittance = viewTransmittance == 0.0 ? 0.0 : sceneTransmittance / viewTransmittance;
+				
+				// Sample the atmosphere boundary to get the max opacity that would be stored in the invCdf LUT
+				float3 viewTransmittance1 = TransmittanceToAtmosphere(_ViewHeight, V.y);
+				scale = dot(colorMask, viewTransmittance1 == 1.0 ? 1.0 : (1.0 - transmittance) / (1.0 - viewTransmittance1));
+			}
+		}
+		else
+		{
+			// Case C
+			float3 viewTransmittance = TransmittanceToAtmosphere(_ViewHeight, V.y);
+			float3 groundTransmittance = TransmittanceToAtmosphere(sceneRadius, sceneCosAngle);
+			transmittance = groundTransmittance == 0.0 ? 0.0 : viewTransmittance / groundTransmittance;
+			
+			scale = dot(colorMask, viewTransmittance == 1.0 ? 1.0 : (1.0 - transmittance) / (1.0 - viewTransmittance));
+		}
+	}
+	else if (rayIntersectsGround)
+	{
+		// Need to account for clouds
+		float3 viewTransmittance = TransmittanceToAtmosphere(_ViewHeight, -V.y);
+		float groundRadius = HeightAtDistance(_ViewHeight, V.y, maxDist);
+		float groundCosAngle = CosAngleAtDistance(_ViewHeight, V.y, maxDist, groundRadius);
+		float3 groundTransmittance = TransmittanceToAtmosphere(groundRadius, -groundCosAngle);
+		transmittance = viewTransmittance == 0.0 ? 0.0 : groundTransmittance / viewTransmittance;
+		
+		scale = dot(colorMask, viewTransmittance == 1.0 ? 1.0 : (1.0 - transmittance) / (1.0 - viewTransmittance));
+		
+	}
+	else
+	{
+		// Need to account for clouds
+		float3 viewTransmittance = TransmittanceToAtmosphere(_ViewHeight, V.y);
+		float groundRadius = HeightAtDistance(_ViewHeight, V.y, maxDist);
+		float groundCosAngle = CosAngleAtDistance(_ViewHeight, V.y, maxDist, groundRadius);
+		float3 groundTransmittance = TransmittanceToAtmosphere(groundRadius, groundCosAngle);
+		
+		transmittance = groundTransmittance == 0.0 ? 0.0 : viewTransmittance / groundTransmittance;
+		
+		scale = dot(colorMask, viewTransmittance == 1.0 ? 1.0 : ((1.0 - transmittance) / (1.0 - viewTransmittance)));
+	}
+	
+	// The table may be slightly inaccurate, so calculate it's max value and use that to scale the final distance
+	float3 cdfUv = GetInvCdfUv(scale, _ViewHeight, V.y, rayIntersectsGround, colorMask);
+	float maxT = _AtmosphereCdf.SampleLevel(_LinearClampSampler, cdfUv, 0.0);
+
+	float3 luminance = 0.0;
+	for (float i = rnd.x; i < _SampleCount; i++)
+	{
+		float xi = i / _SampleCount * scale;
+		
+		float3 cdfUv = GetInvCdfUv(xi, _ViewHeight, V.y, rayIntersectsGround, colorMask);
+		float t = _AtmosphereCdf.SampleLevel(_LinearClampSampler, cdfUv, 0.0) * saturate(maxDist / maxT);
+		
+		float radius = HeightAtDistance(_ViewHeight, V.y, t);
+		float cosAngle = CosAngleAtDistance(_ViewHeight, V.y, t, radius);
+		float3 extinction = AtmosphereExtinction(radius);
+		float4 scatter = AtmosphereScatter(radius);
+		
+		float3 tr;
+		if (_ViewHeight > radius)
+		{
+			if (rayIntersectsGround)
+			{
+				// Case A
+				float3 viewTransmittance = TransmittanceToAtmosphere(_ViewHeight, -V.y);
+				float3 groundTransmittance = TransmittanceToAtmosphere(radius, -cosAngle);
+				tr = viewTransmittance == 0.0 ? 0.0 : groundTransmittance / viewTransmittance;
+			}
+			else
+			{
+
+				// Case B
+				float3 viewTransmittance = TransmittanceToAtmosphere(_ViewHeight, -V.y);
+				float3 groundTransmittance = TransmittanceToAtmosphere(radius, -cosAngle);
+				tr = viewTransmittance == 0.0 ? 0.0 : groundTransmittance / viewTransmittance;
+			}
+		}
+		else
+		{
+			if (rayIntersectsGround)
+			{
+				// Case C 
+				float3 viewTransmittance = TransmittanceToAtmosphere(_ViewHeight, -V.y);
+				float3 groundTransmittance = TransmittanceToAtmosphere(radius, -cosAngle);
+				tr = groundTransmittance == 0.0 ? 0.0 : groundTransmittance / viewTransmittance;
+			}
+			else
+			{
+				// Case C 
+				float3 viewTransmittance = TransmittanceToAtmosphere(_ViewHeight, V.y);
+				float3 groundTransmittance = TransmittanceToAtmosphere(radius, cosAngle);
+				tr = groundTransmittance == 0.0 ? 0.0 : viewTransmittance / groundTransmittance;
+			}
+		}
+		
+		float3 weight = tr / dot(rcp(3.0), tr * extinction / (1.0 - transmittance));
+		
+		#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
+			float LdotV = dot(V, _LightDirection0);
+			float sunAngle = CosAngleAtDistance(_ViewHeight, _LightDirection0.y, t * LdotV, radius);
+			if (!RayIntersectsGround(radius, sunAngle))
+			{
+				float3 transmittanceToAtmosphere = TransmittanceToAtmosphere(radius, sunAngle);
+				if (any(transmittanceToAtmosphere > 0.0))
+				{
+					float attenuation = DirectionalLightShadow(t * V, 0, 0.5, false);
+					if (attenuation > 0.0)
+					{
+						attenuation *= CloudTransmittanceLevelZero(t * V);
+						if (attenuation > 0.0)
+						{
+							float2 uv = float2(0.5 * sunAngle + 0.5, (radius - _PlanetRadius) / _AtmosphereHeight);
+							float3 ms = _MultipleScatter.SampleLevel(_LinearClampSampler, uv * _AtmosphereMultiScatterRemap.xy + _AtmosphereMultiScatterRemap.zw, 0.0);
+		
+							float3 lighting = (RayleighPhaseFunction(LdotV) * transmittanceToAtmosphere + ms) * scatter.xyz;
+							lighting += (CornetteShanksPhaseFunction(_MiePhase, LdotV) * transmittanceToAtmosphere + ms) * scatter.w;
+							lighting *= attenuation;
+							luminance += ApplyExposure(_LightColor0) * lighting * weight;
+						}
+					}
+				}
+			}
+		#endif
+		
+		#ifdef LIGHT_COUNT_TWO
+			float LdotV1 = dot(V, _LightDirection1);
+			float sunAngle1 = CosAngleAtDistance(_ViewHeight, _LightDirection1.y, t * LdotV1, radius);
+			if (!RayIntersectsGround(radius, sunAngle1))
+			{
+				float3 transmittanceToAtmosphere = TransmittanceToAtmosphere(radius, sunAngle1);
+				if (any(transmittanceToAtmosphere > 0.0))
+				{
+					float2 uv = float2(0.5 * sunAngle + 0.5, (radius - _PlanetRadius) / _AtmosphereHeight);
+					float3 ms = _MultipleScatter.SampleLevel(_LinearClampSampler, uv * _AtmosphereMultiScatterRemap.xy + _AtmosphereMultiScatterRemap.zw, 0.0);
+		
+					float3 lighting = (RayleighPhaseFunction(LdotV1) * transmittanceToAtmosphere + ms) * scatter.xyz;
+					lighting += (CornetteShanksPhaseFunction(_MiePhase, LdotV1) * transmittanceToAtmosphere + ms) * scatter.w;
+					luminance += ApplyExposure(_LightColor1) * lighting * weight;
+				}
+			}
+		#endif
+	}
+	
+	if(depth == 0.0 && RayIntersectsGround(_ViewHeight, V.y))
+	{
+		#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
+		//luminance += _GroundColor 
+		#endif
+	}
+	
+	luminance /= _SampleCount;
+	_LuminanceResult[id] = luminance;
+	_TransmittanceResult[id] = transmittance;
+}
+
+[numthreads(8, 8, 1)]
+void Composite(uint2 id : SV_DispatchThreadID)
+{
+	float2 uv = ApplyScaleOffset(id, _ScaleOffset);
+	
+	float2 minVelocity = 0.0;
+	float minVelLenSqr = FloatMax;
+	float minDepth = 0.0;
+	int2 minVelocityUv = id;
+	float3 m1 = 0.0, m2 = 0.0;
+	
+	float3 minValue = FloatMax, maxValue = FloatMin;
+	for (int y = -1; y <= 1; y++)
+	{
+		for (int x = -1; x <= 1; x++)
+		{
+			float3 sample = _Luminance[id + int2(x, y)];
+			sample = RGBToYCoCg(sample);
+			sample *= rcp(1.0 + sample.r);
+			minValue = min(minValue, sample);
+			maxValue = max(maxValue, sample);
+			
+			m1 += sample;
+			m2 += Sq(sample);
+			
+			float2 velocity = _Velocity[id + int2(x, y)];
+			float velLenSqr = SqrLength(velocity);
+			if(velLenSqr < minVelLenSqr)
+			{
+				minVelocity = velocity;
+				minVelLenSqr = velLenSqr;
+			}
+			
+			float depth = _Depth[id + int2(x, y)];
+			if(depth > minDepth)
+			{
+				minDepth = depth;
+				minVelocityUv = id + int2(x, y);
+			}
+		}
+	}
+	
+	float3 result = _Luminance[id];
+	result = RGBToYCoCg(result);
+	result *= rcp(1.0 + result.r);
+	
+	float frameCount = 0.0;
+	float2 previousUv = uv - minVelocity;
+	
+	if (all(saturate(previousUv) == previousUv))
+	{
+		// Sample history, remove weighting from history and result, blend, re-apply weight
+		uint4 packedHistory = _Previous.Gather(_PointClampSampler, previousUv);
+		float4 currentDepths = LinearEyeDepth(_Depth.Gather(_PointClampSampler, uv));
+		float4 previousDepths = LinearEyeDepth(_PreviousDepth.Gather(_PointClampSampler, previousUv));
+		float4 frameCountPrev = _FrameCountPrevious.Gather(_PointClampSampler, previousUv) * 255.0;
+		float4 bilinearWeights = BilinearWeights(previousUv, _ScreenSize.xy);
+		float distanceToPoint = LinearEyeDepth(_Depth[id]);
+		
+		float3 history = 0.0;
+		float _DepthRejection = 1.0;
+		float4 bilateralWeights = saturate(1.0 - (currentDepths - previousDepths) * (_DepthRejection / distanceToPoint));
+		
+		float _ClampVelocityWeight = 16.0;
+		float velocityWeight = saturate(1.0 - length(minVelocity) * _ClampVelocityWeight);
+		
+		[unroll]
+		for (uint i = 0; i < 4; i++)
+		{
+			float3 historySample = UnpackFromR11G11B10f(packedHistory[i]);
+			historySample = RGBToYCoCg(historySample);
+			historySample *= rcp(1.0 + historySample.r);
+			
+			history += bilinearWeights[i] * lerp(result, historySample, bilateralWeights[i]);
+			frameCount += bilinearWeights[i] * frameCountPrev[i] * velocityWeight * bilateralWeights[i];
+		}
+	
+		float speed = 1.0 / (1.0 + frameCount);
+		
+		float _ClampWindowScale = 1.5;
+		
+		float3 extents = 0.5 * (maxValue - minValue);// * _ClampWindowScale;
+		float3 center = 0.5 * (maxValue + minValue);
+		
+		//center = m1 / 9.0;
+		//extents = sqrt(abs(m2 / 9.0 - Sq(center)));// * _ClampWindowScale; // * lerp(0.5, _ClampWindowScale, velocityWeight);
+		
+		//history = clamp(history, minValue, maxValue);
+		history = ClipToAABB(history, center, extents);
+		
+		//if(_SampleCount == 1.0)
+			result = lerp(history, result, speed);
+	}
+	
+	//if(any(result) )
+	
+	result *= rcp(1.0 - result.r);
+	result = YCoCgToRGB(result);
+	
+	_Current[id] = PackToR11G11B10f(result);
+	
+	// Composite clouds and sky
+	float3 transmittance = _Transmittance[id];
+	float4 clouds = _VolumetricClouds[id >> 1];
+	
+	#ifdef CLOUDS
+	result += clouds.rgb * transmittance;
+	transmittance *= clouds.a;
+	#endif
+	
+	_Result[id] = _Result[id] * transmittance + result;
+	_FrameCount[id] = min(20.0, frameCount + 1.0) / 255.0;
+}
