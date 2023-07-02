@@ -1,5 +1,4 @@
 #pragma kernel Temporal
-#pragma enable_d3d11_debug_symbols
 
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Deferred.hlsl"
 
@@ -18,30 +17,36 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 	float2 previousUv = uv - motion;
 	
 	float3 minValue = FloatMax, maxValue = FloatMin;
+	float3 mean = 0.0, stdDev = 0.0;
 	for (int y = -1; y <= 1; y++)
 	{
 		for (int x = -1; x <= 1; x++)
 		{
 			float3 sample = _Input[id + int2(x, y)];
-			//sample = RGBToYCoCg(sample);
-			//sample *= rcp(1.0 + sample.r);
+			sample = RGBToYCoCg(sample);
+			sample *= rcp(1.0 + sample.r);
 			minValue = min(minValue, sample);
 			maxValue = max(maxValue, sample);
+			mean += sample;
+			stdDev += sample * sample;
 		}
 	}
 	
+	mean /= 9.0;
+	stdDev = sqrt(abs(stdDev / 9.0 - Sq(mean)));
+	
 	float3 input = _Input[id];
-	//input = RGBToYCoCg(input);
-	//input *= rcp(1.0 + input.r);
+	input = RGBToYCoCg(input);
+	input *= rcp(1.0 + input.r);
 	
 	float3 history = _History.SampleLevel(_LinearClampSampler, previousUv, 0.0);
-	//history = RGBToYCoCg(history);
-	//history *= rcp(1.0 + history.r);
-	history = clamp(history, minValue, maxValue);
+	history = RGBToYCoCg(history);
+	history *= rcp(1.0 + history.r);
+	history = ClipToAABB(history, mean, stdDev);
 	
 	float3 result = lerp(history, input, 0.05);
-	//result *= rcp(1.0 - result.r);
-	//result = YCoCgToRGB(result);
+	result *= rcp(1.0 - result.r);
+	result = YCoCgToRGB(result);
 	
 	_Result[id] = result;
 	//_Result[id] = _Input[id];

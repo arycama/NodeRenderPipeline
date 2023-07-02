@@ -69,12 +69,6 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 	
 	float3 luminance = 0.0;
 	
-	#define NO_PDF 1
-	
-	float3 refractDir = V;//refract(V, N, rcp(1.34));
-	//if(positionCS.x > _ScreenSize.x / 2)
-	//	refractDir = V;
-	
 	#ifdef SINGLE_SAMPLE
 	{
 		float xi = noise.x;
@@ -85,10 +79,10 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 	#endif
 		
 		float t = -log(1.0 - xi * (1.0 - exp(-dot(_Extinction, channelMask) * underwaterDistance))) / dot(_Extinction, channelMask);
-		float3 tr = _Extinction / (exp(_Extinction * t) - _Extinction * rcp(_Extinction * exp(_Extinction * (underwaterDistance - t))));
-		float3 pdf = dot(tr, 1.0 / 3.0);
-		float3 P = positionWS + refractDir * t;
-		
+		float3 tr = exp(_Extinction * t) / _Extinction - rcp(_Extinction * exp(_Extinction * (underwaterDistance - t)));
+		float weight = rcp(dot(rcp(tr), 1.0 / 3.0));
+		float3 P = positionWS + V * t;
+
 		#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
 			float attenuation = DirectionalLightShadow(P, 0, 0.5, false);
 			if(attenuation > 0.0)
@@ -104,45 +98,32 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 						shadowDistance0 = saturate(shadowDepth - shadowPosition.z) * _WaterShadowFar;
 					}
 
-					float3 ls = lightColor0 * attenuation * exp(-_Extinction * shadowDistance0);
-				
-					#if NO_PDF
-						luminance += exp(-_Extinction * t) * _Extinction * ls / pdf;
-					#else
-						luminance += exp(-_Extinction * t) * _Extinction * ls / pdf;
-					#endif
+					luminance += lightColor0 * attenuation * exp(-_Extinction * (shadowDistance0 + t)) * weight;
 				}
 			}
 		#endif
 		
 		#ifdef LIGHT_COUNT_TWO
 			float shadowDistance1 = max(0.0, positionWS.y - P.y) / max(1e-6, saturate(_LightDirection1.y));
-		
-			//#if NO_PDF
-			//	luminance += exp(-_Extinction * shadowDistance1) * lightColor1;
-			//#else
-			//	luminance += exp(-_Extinction * shadowDistance1) * _Extinction * (exp(-_Extinction * shadowDistance1) * lightColor1) / pdf;
-			//#endif
+			luminance += lightColor1 * exp(-_Extinction * (shadowDistance1 + t)) * weight;
 		#endif
 	}
-	
-	float3 transmittance = exp(-underwaterDistance * _Extinction);
-	float3 opacity = OpacityFromTransmittance(transmittance);
 	
 	#ifndef SINGLE_SAMPLE
 		luminance /= _Steps;
 	#endif
-	
-	#if NO_PDF
-		//luminance *= 3.0;
-	#endif
+
+	luminance *= _Extinction;
 	
 	// Ambient 
-	//luminance += _AmbientSh[0].xyz * rcp(2.0 * sqrt(Pi)) * (1.0 - transmittance);
+	float3 finalTransmittance = exp(-underwaterDistance * _Extinction);
+	luminance += _AmbientSh[0].xyz * rcp(2.0 * sqrt(Pi)) * (1.0 - finalTransmittance);
 	luminance *= _Color;
+	
+	luminance = IsInfOrNaN(luminance) ? 0.0 : luminance;
 
 	if(underwaterDepth != _FarClipValue)
-		luminance += _UnderwaterResult[refractionUv] * transmittance;
+		luminance += _UnderwaterResult[refractionUv] * exp(-_Extinction * underwaterDistance);
 	
 	// Apply roughness to transmission
 	float4 waterRoughnessMask = _WaterRoughnessMask[positionCS.xy];

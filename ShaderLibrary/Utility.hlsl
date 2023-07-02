@@ -59,6 +59,21 @@ float SqrLength(float2 x) { return dot(x, x); }
 float SqrLength(float3 x) { return dot(x, x); }
 float SqrLength(float4 x) { return dot(x, x); }
 
+bool1 IsNaN(float1 x) { return (asuint(x) & 0x7FFFFFFF) > 0x7F800000; }
+bool2 IsNaN(float2 x) { return (asuint(x) & 0x7FFFFFFF) > 0x7F800000; }
+bool3 IsNaN(float3 x) { return (asuint(x) & 0x7FFFFFFF) > 0x7F800000; }
+bool4 IsNaN(float4 x) { return (asuint(x) & 0x7FFFFFFF) > 0x7F800000; }
+
+bool1 IsInf(float1 x) { return (asuint(x) & 0x7FFFFFFF) == 0x7F800000; }
+bool2 IsInf(float2 x) { return (asuint(x) & 0x7FFFFFFF) == 0x7F800000; }
+bool3 IsInf(float3 x) { return (asuint(x) & 0x7FFFFFFF) == 0x7F800000; }
+bool4 IsInf(float4 x) { return (asuint(x) & 0x7FFFFFFF) == 0x7F800000; }
+
+bool1 IsInfOrNaN(float1 x) { return (asuint(x) & 0x7FFFFFFF) >= 0x7F800000; }
+bool2 IsInfOrNaN(float2 x) { return (asuint(x) & 0x7FFFFFFF) >= 0x7F800000; }
+bool3 IsInfOrNaN(float3 x) { return (asuint(x) & 0x7FFFFFFF) >= 0x7F800000; }
+bool4 IsInfOrNaN(float4 x) { return (asuint(x) & 0x7FFFFFFF) >= 0x7F800000; }
+
 float3 NLerp(float3 A, float3 B, float t)
 {
 	return normalize(lerp(A, B, t));
