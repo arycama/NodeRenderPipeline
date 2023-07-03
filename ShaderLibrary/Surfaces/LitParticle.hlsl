@@ -94,7 +94,7 @@ float4 Fragment(FragmentInput input) : SV_Target
 		float viewScale = _DistortionStrength;
 
 		if (_Test)
-			viewScale = _DistortionStrength * _ScreenParams.y * -CameraAspect * 0.25 / input.positionCS.w;
+			viewScale = _DistortionStrength * _ScreenSize.y * -CameraAspect * 0.25 / input.positionCS.w;
 
 		float distortionStrength = _MainTex.Sample(_TrilinearRepeatSampler, uv).r * viewScale;
 		float3 normalTS = UnpackNormalAG(_BumpMap.Sample(_TrilinearRepeatSampler, uv));

@@ -348,14 +348,6 @@ float FresnelSchlickTIR(float nt, float ni, float3 n, float3 i)
 	return R0 + (1.0f - R0) * pow(1.0 - CosX, 5.0);
 }
 
-// Converts clip-space depth to linear depth, handling orthographic and perspective
-float LinearDepth(float depth)
-{
-	float persp = LinearEyeDepth(depth).r;
-	float ortho = (_ProjectionParams.z - _ProjectionParams.y) * (1 - depth) + _ProjectionParams.y;
-	return lerp(persp, ortho, unity_OrthoParams.w);
-}
-
 Texture2D<float> _NormalLength;
 
 float atanh(float x)

@@ -8,22 +8,19 @@ uint PcgHash(uint state)
 	return (word >> 22u) ^ word;
 }
 
-uint2 PcgHash(uint2 state)
+uint PcgHash(uint2 v)
 {
-	uint2 word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-	return (word >> 22u) ^ word;
+	return PcgHash(v.x ^ PcgHash(v.y));
 }
 
-uint3 PcgHash(uint3 state)
+uint PcgHash(uint3 v)
 {
-	uint3 word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-	return (word >> 22u) ^ word;
+	return PcgHash(v.x ^ PcgHash(v.yz));
 }
 
-uint4 PcgHash(uint4 state)
+uint PcgHash(uint4 v)
 {
-	uint4 word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-	return (word >> 22u) ^ word;
+	return PcgHash(v.x ^ PcgHash(v.yzw));
 }
 
 uint PermuteState(uint state) { return state * 747796405u + 2891336453u; }

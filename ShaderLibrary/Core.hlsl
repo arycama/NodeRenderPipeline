@@ -1,47 +1,23 @@
 ﻿#ifndef CORE_INCLUDED
 #define CORE_INCLUDED
 
-#pragma warning (disable : 3571)
+float4 _Time; // (t/20, t, t*2, t*3)
+float4 unity_DeltaTime; // dt, 1/dt, smoothdt, 1/smoothdt
 
-cbuffer UnityPerCamera
-{
-	float4 _Time; // (t/20, t, t*2, t*3)
-	float4 _SinTime; // sin(t/8), sin(t/4), sin(t/2), sin(t)
-	float4 _CosTime; // cos(t/8), cos(t/4), cos(t/2), cos(t)
-	float4 unity_DeltaTime; // dt, 1/dt, smoothdt, 1/smoothdt
+float3 _WorldSpaceCameraPos;
 
-	float3 _WorldSpaceCameraPos;
+// x = 1 or -1 (-1 if projection is flipped)
+// y = near plane
+// z = far plane
+// w = 1/far plane
+float4 _ProjectionParams;
 
-	 // x = 1 or -1 (-1 if projection is flipped)
-    // y = near plane
-    // z = far plane
-    // w = 1/far plane
-	float4 _ProjectionParams;
-
-    // x = width
-    // y = height
-    // z = 1 + 1.0/width
-    // w = 1 + 1.0/height
-	float4 _ScreenParams;
-
-    // Values used to linearize the Z buffer (http://www.humus.name/temp/Linearize%20depth.txt)
-    // x = 1-far/near
-    // y = far/near
-    // z = x/far
-    // w = y/far
-    // or in case of a reversed depth buffer (UNITY_REVERSED_Z is 1)
-    // x = -1+far/near
-    // y = 1
-    // z = x/far
-    // w = 1/far
-	float4 _ZBufferParams;
-
-    // x = orthographic camera's width
-    // y = orthographic camera's height
-    // z = unused
-    // w = 1.0 if camera is ortho, 0.0 if perspective
-	float4 unity_OrthoParams;
-};
+// Values used to linearize the Z buffer (http://www.humus.name/temp/Linearize%20depth.txt)
+// x = -1+far/near
+// y = 1
+// z = x/far
+// w = 1/far
+float4 _ZBufferParams;
 
 cbuffer UnityPerDraw
 {
@@ -61,24 +37,21 @@ cbuffer UnityPerDraw
 	float4 unity_MotionVectorsParams;
 };
 
-cbuffer ShaderVariablesGlobal
-{
-	float4x4 _ViewMatrix;
-	float4x4 _CameraViewMatrix;
-	float4x4 _InvViewMatrix;
-	float4x4 _ProjMatrix;
-	float4x4 _ViewProjMatrix;
-	float4x4 _CameraViewProjMatrix;
-	float4x4 _InvViewProjMatrix;
+float4x4 _ViewMatrix;
+float4x4 _CameraViewMatrix;
+float4x4 _InvViewMatrix;
+float4x4 _ProjMatrix;
+float4x4 _ViewProjMatrix;
+float4x4 _CameraViewProjMatrix;
+float4x4 _InvViewProjMatrix;
 	
-	float4x4 _NonJitteredViewProjMatrix;
-	float4x4 _PrevViewMatrix;
-	float4x4 _PrevViewProjMatrix;
-	float4x4 _PrevInvViewProjMatrix;
-	float4x4 _PrevInvProjMatrix;
+float4x4 _NonJitteredViewProjMatrix;
+float4x4 _PrevViewMatrix;
+float4x4 _PrevViewProjMatrix;
+float4x4 _PrevInvViewProjMatrix;
+float4x4 _PrevInvProjMatrix;
 	
-	float4 _ScreenSize;
-};
+float4 _ScreenSize;
 
 float3 _PreviousCameraPosition;
 float3 _PreviousCameraDelta;
