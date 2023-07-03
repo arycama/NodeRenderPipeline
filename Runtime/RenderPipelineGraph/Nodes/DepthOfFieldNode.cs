@@ -37,17 +37,16 @@ public partial class DepthOfFieldNode : RenderPipelineNode
 
         var focalLength = sensorHeight / (2.0f * Mathf.Tan(camera.fieldOfView * Mathf.Deg2Rad / 2.0f));
 
-        var sensorScale = (0.5f / sensorHeight) * camera.pixelHeight;
-
         float F = focalLength;
         float A = focalLength / apertureSize;
         float P = focalDistance;
         float maxFarCoC = (A * F) / (P - F) / sensorHeight * camera.pixelHeight;
 
         scope.Command.SetComputeFloatParam(computeShader, "_FocalDistance", focalDistance);
-        scope.Command.SetComputeFloatParam(computeShader, "_FocalLength", focalLength / 1000f);
-        scope.Command.SetComputeFloatParam(computeShader, "_ApertureSize", focalLength / apertureSize);
+        scope.Command.SetComputeFloatParam(computeShader, "_FocalLength", focalLength);
+        scope.Command.SetComputeFloatParam(computeShader, "_ApertureSize", apertureSize);
         scope.Command.SetComputeFloatParam(computeShader, "_MaxCoC", maxFarCoC);
+        scope.Command.SetComputeFloatParam(computeShader, "_SensorHeight", sensorHeight);
 
         scope.Command.SetComputeFloatParam(computeShader, "_SampleRadius", sampleRadius);
         scope.Command.SetComputeIntParam(computeShader, "_SampleCount", sampleCount);

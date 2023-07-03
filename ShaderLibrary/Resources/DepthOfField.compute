@@ -1,4 +1,5 @@
 #pragma kernel CSMain
+#pragma enable_d3d11_debug_symbols
 
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/SpaceTransforms.hlsl"
@@ -8,7 +9,7 @@ RWTexture2D<float3> _Result;
 Texture2D<float3> _Input;
 Texture2D<float> _Depth;
 
-float _ApertureSize, _FocalDistance, _FocalLength, _SampleRadius, _MaxCoC;
+float _ApertureSize, _FocalDistance, _FocalLength, _SampleRadius, _MaxCoC, _SensorHeight;
 uint _SampleCount;
 
 float CalculateCoC(float depth)
@@ -16,7 +17,7 @@ float CalculateCoC(float depth)
 	if (depth == _FocalDistance)
 		return 1.0;
 	
-	return _ApertureSize * abs(depth - _FocalDistance) / depth * (_FocalLength / (_FocalDistance - _FocalLength));
+	return (_FocalLength / _ApertureSize) * abs(depth - _FocalDistance) / depth * (_FocalLength / 1000.0 / (_FocalDistance - _FocalLength / 1000.0));
 }
 
 float CocWeight(float coc)
@@ -27,7 +28,12 @@ float CocWeight(float coc)
 [numthreads(8, 8, 1)]
 void CSMain(uint2 id : SV_DispatchThreadID)
 {
-	_FocalDistance = clamp(LinearEyeDepth(_Depth[_ScreenSize.xy / 2]), _NearClipPlane, _FarClipPlane);
+	_FocalDistance = LinearEyeDepth(_Depth[_ScreenSize.xy / 2]);
+	
+	float F = _FocalLength;
+	float A = _FocalLength / _ApertureSize;
+	float P = _FocalDistance;
+	_MaxCoC = (A * F) / (P - F) / _SensorHeight * _ScreenSize.y;
 	
 	float centerDepth = LinearEyeDepth(_Depth[id]);
 	float centerCoc = CalculateCoC(centerDepth);
