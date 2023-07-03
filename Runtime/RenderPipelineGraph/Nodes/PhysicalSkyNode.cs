@@ -50,7 +50,7 @@ public partial class PhysicalSkyNode : RenderPipelineNode
             volumeDepth = cdfDepth,
         };
 
-        invCdfTexture = new RenderTexture(cdfDesc).Created();
+        invCdfTexture = new RenderTexture(cdfDesc) { hideFlags = HideFlags.HideAndDontSave }.Created();
     }
 
     public override void Cleanup()

@@ -12,12 +12,14 @@ uint _MaxWidth, _MaxHeight;
 void Temporal(uint2 id : SV_DispatchThreadID)
 {
 	// Reprojection
-	float2 motion = _MotionVectors[id];
+	float2 motion = 0.0;
 	float2 uv = (id + 0.5) * _ScreenSize.zw;
-	float2 previousUv = uv - motion;
+	float2 maxVelocity = 0.0;
+	float maxVelLenSqr = 0.0;
+	float minDepth = 0.0;
+	int2 minVelocityUv = id;
 	
-	float3 minValue = FloatMax, maxValue = FloatMin;
-	float3 mean = 0.0, stdDev = 0.0;
+	float3 minValue = FloatMax, maxValue = FloatMin, mean = 0.0, stdDev = 0.0, result = 0.0;
 	for (int y = -1; y <= 1; y++)
 	{
 		for (int x = -1; x <= 1; x++)
@@ -29,22 +31,53 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 			maxValue = max(maxValue, sample);
 			mean += sample;
 			stdDev += sample * sample;
+			
+			float2 delta = abs(id - (id + float2(x, y) + _Jitter * _ScreenSize.xy));
+			float weight = saturate(1.0 - delta.x) * saturate(1.0 - delta.y);
+			result += sample * weight;
+			
+			float2 velocity = _MotionVectors[id + int2(x, y)];
+			float velLenSqr = SqrLength(velocity);
+			if (velLenSqr > maxVelLenSqr)
+			{
+				motion = velocity;
+				maxVelLenSqr = velLenSqr;
+			}
+			
+			float depth = _Depth[id + int2(x, y)];
+			if (depth > minDepth)
+			{
+				minDepth = depth;
+				minVelocityUv = id + int2(x, y);
+			}
 		}
 	}
 	
 	mean /= 9.0;
-	stdDev = sqrt(abs(stdDev / 9.0 - Sq(mean)));
+	stdDev = sqrt(abs(stdDev / 9.0 - Sq(mean)));// * 0.75;
 	
-	float3 input = _Input[id];
-	input = RGBToYCoCg(input);
-	input *= rcp(1.0 + input.r);
+	// Clamp mean/stdDev to min/Max
+	//minValue = max(minValue, mean - stdDev);
+	//maxValue = min(maxValue, mean + stdDev);
 	
-	float3 history = _History.SampleLevel(_LinearClampSampler, previousUv, 0.0);
-	history = RGBToYCoCg(history);
-	history *= rcp(1.0 + history.r);
-	history = ClipToAABB(history, mean, stdDev);
+	mean = 0.5 * (maxValue + minValue);
+	stdDev = 0.5 * (maxValue - minValue);
 	
-	float3 result = lerp(history, input, 0.05);
+	motion = _MotionVectors[minVelocityUv];
+	float2 previousUv = uv - motion;
+	if(all(saturate(previousUv) == previousUv))
+	{
+		float3 history = _History.SampleLevel(_LinearClampSampler, previousUv, 0.0);
+	
+		history = Bicubic5Tap(_History, previousUv, 0.25, _ScreenSize);
+	
+		history = RGBToYCoCg(history);
+		history *= rcp(1.0 + history.r);
+		history = ClipToAABB(history, mean, stdDev);
+	
+		result = lerp(history, result, 0.05);
+	}
+	
 	result *= rcp(1.0 - result.r);
 	result = YCoCgToRGB(result);
 	
