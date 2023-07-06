@@ -36,7 +36,7 @@ public partial class GpuInstancedCullingNode : RenderPipelineNode
 
     public override void Execute(ScriptableRenderContext context, Camera camera)
     {
-        if ((camera.cameraType != CameraType.SceneView && camera.cameraType != CameraType.Game) || gpuInstanceBuffers.rendererInstanceIDsBuffer == null)
+        if ((camera.cameraType != CameraType.SceneView && camera.cameraType != CameraType.Game && camera.cameraType != CameraType.Reflection) || gpuInstanceBuffers.rendererInstanceIDsBuffer == null)
         {
             return;
         }

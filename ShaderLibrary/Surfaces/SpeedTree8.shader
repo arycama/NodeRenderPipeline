@@ -50,6 +50,7 @@ Shader "Surface/Nature/SpeedTree 8"
             HLSLPROGRAM
             #pragma vertex Vertex
             #pragma fragment Fragment
+            #pragma multi_compile _ REFLECTION_PROBE_RENDERING
 
             #include "SpeedTree8Common.hlsl"
             ENDHLSL

@@ -2,12 +2,12 @@ using System.Collections.Generic;
 using UnityEngine;
 
 [ExecuteAlways]
-public class CustomReflectionProbe : MonoBehaviour
+public class EnvironmentProbe : MonoBehaviour
 {
     private static Material previewMaterial;
     private static Mesh previewMesh;
 
-    public static List<CustomReflectionProbe> reflectionProbes = new();
+    public static List<EnvironmentProbe> reflectionProbes = new();
 
     [SerializeField, Min(0)]
     private float blendDistance = 1f;

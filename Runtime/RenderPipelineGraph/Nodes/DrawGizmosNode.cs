@@ -13,7 +13,7 @@ public partial class DrawGizmosNode : RenderPipelineNode
     {
         using (var scope = context.ScopedCommandBuffer())
         {
-            GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution());
+            GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution(), out var viewProjectionMatrix);
         }
 
 #if UNITY_EDITOR

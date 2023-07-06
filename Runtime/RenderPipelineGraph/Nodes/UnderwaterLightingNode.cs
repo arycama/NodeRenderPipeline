@@ -63,7 +63,7 @@ public partial class UnderwaterLightingNode : RenderPipelineNode
         // Render underwater, get a temporary texture to save result
         var underwaterResultDesc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, RenderTextureFormat.RGB111110Float) { enableRandomWrite = true };
 
-        GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution());
+        GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution(), out var viewProjectionMatrix);
 
         scope.Command.GetTemporaryRT(underwaterResultId, underwaterResultDesc);
 

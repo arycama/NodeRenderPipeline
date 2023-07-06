@@ -66,6 +66,9 @@ Texture3D<float3> _VolumetricLighting;
 float _EVSMExponent, _LightLeakBias, _VarianceBias;
 float _DirectionalShadowDistance, _DirectionalShadowCascadeScale, _DirectionalShadowCascadeBias, _DirectionalShadowCascadeFade, _DirectionalShadowCascadeFadeScale, _DirectionalShadowCascadeFadeBias;
 
+float3 _OriginalCameraPosition, _ReflectionCameraPosition;
+float4x4 _CameraViewProjectionMatrix;
+
 // ref: Practical Realtime Strategies for Accurate Indirect Occlusion
 // Update ambient occlusion to colored ambient occlusion based on statitics of how light is bouncing in an object and with the albedo of the object
 float3 GTAOMultiBounce(float visibility, float3 albedo)
@@ -255,22 +258,39 @@ float GetNoHSquared(float radiusTan, float NoL, float NoV, float VoL)
 
 float DirectionalLightShadow(float3 positionWS, float shadowIndex, float jitter = 0.5, bool softShadows = false)
 {
+	bool useReflectionProbes = false;
+	#ifdef REFLECTION_PROBE_RENDERING
+        useReflectionProbes = true;
+    #endif
+    
 	float viewZ = WorldToClip(positionWS).w;
-    //if(viewZ < 1.0)
-	//	return 1.0;
+    
+    // For reflection probes, we need to convert to the camera-relative position
+	if (useReflectionProbes)
+	{
+		positionWS = positionWS + _ReflectionCameraPosition - _OriginalCameraPosition;
+		viewZ = MultiplyPoint(_CameraViewProjectionMatrix, positionWS).w;
+	}
     
     // Calculate the cascade from near plane distance. Max(0) required because shadow near plane for cascades may be further than camera
     // near plane, causing nearby pixels to be below 0
 	float cascade = max(0.0, log2(max(1.0, viewZ)) * _DirectionalShadowCascadeScale + _DirectionalShadowCascadeBias);
 
     // Cascade blending
-	float fraction = frac(cascade) * _DirectionalShadowCascadeFadeScale + _DirectionalShadowCascadeFadeBias;
-	if (fraction > jitter)
-		cascade++;
+	if (!useReflectionProbes)
+	{
+		float fraction = frac(cascade) * _DirectionalShadowCascadeFadeScale + _DirectionalShadowCascadeFadeBias;
+		if (fraction > jitter)
+			cascade++;
+        
+		if (cascade >= _CascadeCount)
+			return 1.0;
+	}
+    else
+	{
+		cascade = _CascadeCount - 1.0;
+	}
     
-	if (cascade >= _CascadeCount)
-		return 1.0;
-
 	float slice = shadowIndex * _CascadeCount + cascade;
 	float3x4 cascadeData = _DirectionalShadowMatrices[slice];
 	float3 positionLS = MultiplyPoint3x4(cascadeData, positionWS);
@@ -325,7 +345,7 @@ float3 DirectionalLightColor(uint index, float3 positionWS, bool softShadows = f
     
 	float3 color = attenuation;
     
-     #ifdef WATER_SHADOW_ON
+#ifdef WATER_SHADOW_ON
 	    float shadowDistance = max(0.0, -_WorldSpaceCameraPos.y - positionWS.y) / max(1e-6, saturate(lightData.Direction.y));
 	    float3 shadowPosition = MultiplyPoint3x4(_WaterShadowMatrix, positionWS);
 	    if (index == 0 && all(saturate(shadowPosition) == shadowPosition))

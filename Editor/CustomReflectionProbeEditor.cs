@@ -2,14 +2,14 @@
 using UnityEditor.IMGUI.Controls;
 using UnityEngine;
 
-[CustomEditor(typeof(CustomReflectionProbe)), CanEditMultipleObjects]
+[CustomEditor(typeof(EnvironmentProbe)), CanEditMultipleObjects]
 public class CustomReflectionProbeEditor : Editor
 {
     private BoxBoundsHandle boxHandle = new BoxBoundsHandle();
 
     private void OnSceneGUI()
     {
-        var p = target as CustomReflectionProbe;
+        var p = target as EnvironmentProbe;
         Undo.RecordObject(p, "Modify Reflection Probe");
 
         var t = p.transform;

@@ -21,19 +21,87 @@ RWTexture2D<float3> Result;
 Texture2D<float> Depth;
 float4x4 _PixelCoordToViewDirWS;
 
+float3 GetLighting1(float4 positionCS, float3 N, float3 T, PbrInput input)
+{
+	float3 positionWS = PixelToWorld(positionCS.xyz);
+	float3 V = normalize(-positionWS);
+
+	// Geometry
+	float NdotV = dot(N, V);
+	float3 B = normalize(cross(N, T));
+	float perceptualRoughness = ConvertAnisotropicRoughnessToPerceptualRoughness(input.roughness);
+	float3 R = reflect(-V, N);
+	
+	// Environment lighting
+	// Ref https://jcgt.org/published/0008/01/03/
+	float2 f_ab = GGXDirectionalAlbedo(NdotV, perceptualRoughness);
+	float3 FssEss = lerp(f_ab.x, f_ab.y, input.f0);
+
+	// Multiple scattering
+	float Ess = f_ab.y;
+	float Ems = 1.0 - Ess;
+	float3 Favg = AverageFresnel(input.f0);
+	float3 Fms = FssEss * Favg / (1.0 - (1.0 - Ess) * Favg);
+
+	// Dielectrics
+	float3 Edss = 1.0 - (FssEss + Fms * Ems);
+	float3 kD = input.albedo * input.opacity * Edss;
+	float3 bkD = input.translucency * input.opacity * Edss;
+	
+	float3 ambient = AmbientLight(input.bentNormal, input.albedo * input.opacity, input.occlusion);
+	float3 backAmbient = AmbientLight(-V, input.translucency * input.opacity, input.occlusion);
+	
+	float3 irradiance, backIrradiance;
+	
+	float3 iblR = GetSpecularDominantDir(N, R, perceptualRoughness, NdotV);
+	float iblMipLevel = PerceptualRoughnessToMipmapLevel(perceptualRoughness);
+	float4 probe = SampleReflectionProbe(positionWS, iblR, iblMipLevel, input.bentNormal, input.albedo * input.opacity, input.occlusion, irradiance);
+	float3 radiance = probe.rgb;
+	if (probe.a < 1.0)
+	{
+		float3 skyRadiance = _SkyReflection.SampleLevel(_TrilinearClampSampler, iblR, iblMipLevel);
+		radiance = lerp(skyRadiance, probe.rgb, probe.a);
+		irradiance = lerp(ambient, irradiance, probe.a);
+		backIrradiance = lerp(backAmbient, irradiance, probe.a);
+	}
+	else
+	{
+		backIrradiance = irradiance;
+	}
+	
+	float specularOcclusion = SpecularOcclusion(dot(N, R), perceptualRoughness, input.occlusion, dot(input.bentNormal, R));
+	radiance *= specularOcclusion;
+	
+	// Ambient
+	float3 luminance = FssEss * radiance + Fms * Ems * irradiance + (kD * irradiance + bkD * backIrradiance);
+	
+	luminance = 0.0;
+	
+	for (uint i = 0; i < _DirectionalLightCount; i++)
+	{
+		DirectionalLightData lightData = _DirectionalLightData[i];
+    
+		// Earth shadow 
+		float2 intersections;
+		if (IntersectRaySphere(positionWS + _PlanetOffset, lightData.Direction, _PlanetRadius, intersections) && intersections.x >= 0.0)
+			continue;
+    
+		float3 lightColor = TransmittanceToAtmosphere(positionWS + _PlanetOffset, lightData.Direction) * ApplyExposure(lightData.Color);
+		luminance += input.albedo * saturate(dot(N, lightData.Direction)) * RcpPi * lightColor;
+	}
+	
+	return luminance;
+}
+
 [numthreads(8, 8, 1)]
 void Deferred (uint2 id : SV_DispatchThreadID)
 {	
 	float depth = Depth[id];
 	if(depth == _FarClipValue)
 	{
-		#ifdef REFLECTION_PROBE_RENDERING
-			float3 V = -MultiplyVector(_PixelCoordToViewDirWS, float3(id + 0.5, 1.0), false);
-			Result[id] = _SkyReflection.SampleLevel(_LinearClampSampler, V, 0.0);
-		#else
-			Result[id] = 0;
-		#endif
-		
+		// If depth is empty, just render the sky. 
+		float3 V = -MultiplyVector(_PixelCoordToViewDirWS, float3(id + 0.5, 1.0), false);
+		Result[id] = _SkyReflection.SampleLevel(_LinearClampSampler, V, 0.0);
 		return;
 	}
 
@@ -48,11 +116,10 @@ void Deferred (uint2 id : SV_DispatchThreadID)
 	// Apply exposure for reflection emission, as we don't apply exposure when it is captured
 	#ifdef REFLECTION_PROBE_RENDERING
 		surface.Emission = ApplyExposure(surface.Emission);
-	#else
-	Result[id] = surface.Occlusion;
-	return;
 	#endif
+	
+	bool isSky = depth == 0.0;
 
 	float4 positionCS = float4(id + 0.5, depth, linearEyeDepth);
-	Result[id] = GetLighting(positionCS, surface.Normal, tangentWS, input) + surface.Emission;
+	Result[id] = GetLighting1(positionCS, surface.Normal, tangentWS, input) + surface.Emission;
 }

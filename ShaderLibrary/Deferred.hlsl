@@ -109,9 +109,9 @@ SurfaceData SurfaceDataFromGBuffer(uint2 positionCS)
 	
 	#ifdef REFLECTION_PROBE_RENDERING
 		surface.Albedo = gbuffer0.rgb;
-		surface.Metallic = gbuffer0.a;
+		surface.Metallic = 0.0;
 		surface.Normal = normalWS;
-		surface.PerceptualRoughness = gbuffer1.a;
+		surface.PerceptualRoughness = 1.0;
 		surface.tangentWS = GetLocalFrame(normalWS)[0];
 		surface.Emission = _GBuffer2[positionCS].xyz;
 	#else
@@ -191,8 +191,8 @@ GBufferOut SurfaceToGBuffer(SurfaceData surface, float2 positionCS)
 	GBufferOut output;
 	
 	#ifdef REFLECTION_PROBE_RENDERING
-		output.gBuffer0 = float4(surface.Albedo, surface.Metallic);
-		output.gBuffer1 = PackGBufferNormal(surface.Normal, ConvertAnisotropicPerceptualRoughnessToPerceptualRoughness(surface.PerceptualRoughness));
+		output.gBuffer0 = float4(surface.Albedo, 1.0);
+		output.gBuffer1 = PackGBufferNormal(surface.Normal, 1.0);
 	
 		#ifndef NO_EMISSION
 			output.emission = surface.Emission;

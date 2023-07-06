@@ -2,13 +2,13 @@ using System;
 using System.Collections.Generic;
 using NodeGraph;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 
 [NodeMenuItem("Lighting/Reflection Probe System")]
 public partial class ReflectionProbeSystemNode : RenderPipelineNode
 {
     private readonly static Vector4[] cullingPlanes = new Vector4[6];
-    private static readonly RenderBuffer[] colorBuffers = new RenderBuffer[3];
 
     [SerializeField, Pow2(512)] private int resolution = 128;
     [SerializeField] private float nearClip = 0.1f;
@@ -21,13 +21,27 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
     [SerializeField, Pow2(64)] private int clusterDepth = 32;
     [SerializeField, Pow2(64)] private int maxLightsPerTile = 32;
 
-    [SerializeField] private RenderPipelineSubGraph reflectionProbeSubGraph;
+    [SerializeField] private RenderPipelineSubGraph gbufferSubGraph;
+    [SerializeField] private RenderPipelineSubGraph lightingSubGraph;
 
     [Input] private ComputeBuffer ambient;
     [Input] private RenderTargetIdentifier skyReflection;
     [Input] private RenderTargetIdentifier atmosphereTransmittance;
     [Input] private RenderTargetIdentifier exposure;
     [Input] private GpuInstanceBuffers gpuInstanceBuffers;
+
+    [Header("Camera")]
+    [Input] private Vector3 cameraPosition;
+    [Input] private Matrix4x4 viewProjectionMatrix;
+
+    [Header("Lighting")]
+    [Input] private int directionalCascades;
+    [Input] private SmartComputeBuffer<DirectionalLightData> directionalLightDataBuffer;
+    //[Input] private SmartComputeBuffer<LightData> lightDataBuffer;
+    //[Input] private SmartComputeBuffer<Matrix4x4> spotlightShadowMatricesBuffer;
+    //[Input] private SmartComputeBuffer<Matrix4x4> areaShadowMatricesBuffer;
+    [Input] private SmartComputeBuffer<Matrix3x4> directionalShadowMatrices;
+    [Input] private RenderTargetIdentifier directionalShadows;
 
     [Output] private SmartComputeBuffer<ReflectionProbeData> reflectionProbeDataBuffer;
     [Output] private ComputeBuffer ambientBuffer;
@@ -78,25 +92,17 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 
         exposureReadback = OnExposureReadback;
 
-        if (reflectionProbeSubGraph != null)
-            reflectionProbeSubGraph.Initialize();
+        if (lightingSubGraph != null)
+            lightingSubGraph.Initialize();
+
+        if(gbufferSubGraph != null)
+            gbufferSubGraph.Initialize();
     }
 
     public override void Cleanup()
     {
         foreach (var probe in readyProbes)
-        {
-            DestroyImmediate(probe.Camera.gameObject);
-
-            foreach (var item in probe.AlbedoMetallic)
-                DestroyImmediate(item);
-
-            foreach (var item in probe.NormalRoughness)
-                DestroyImmediate(item);
-
-            foreach (var item in probe.Emission)
-                DestroyImmediate(item);
-        }
+            probe.Cleanup();
 
         DestroyImmediate(reflectionProbeArray);
         DestroyImmediate(tempConvolveProbe);
@@ -106,23 +112,35 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 
         readyProbes.Clear();
 
-        if (reflectionProbeSubGraph != null)
-            reflectionProbeSubGraph.Cleanup();
+        if (lightingSubGraph != null)
+            lightingSubGraph.Cleanup();
+
+        if(gbufferSubGraph != null)
+            gbufferSubGraph.Cleanup();
     }
 
     public override void NodeChanged()
     {
-        if (reflectionProbeSubGraph != null)
+        if (lightingSubGraph != null)
         {
-            reflectionProbeSubGraph.Cleanup();
-            reflectionProbeSubGraph.Initialize();
+            lightingSubGraph.Cleanup();
+            lightingSubGraph.Initialize();
+        }
+
+        if(gbufferSubGraph != null)
+        {
+            gbufferSubGraph.Cleanup();
+            gbufferSubGraph.Initialize();
         }
     }
 
     public override void FrameRenderComplete()
     {
-        if (reflectionProbeSubGraph != null)
-            reflectionProbeSubGraph.FrameRenderComplete();
+        if (lightingSubGraph != null)
+            lightingSubGraph.FrameRenderComplete();
+
+        if(gbufferSubGraph != null)
+            gbufferSubGraph.FrameRenderComplete();
     }
 
     public override void Execute(ScriptableRenderContext context, Camera camera)
@@ -155,9 +173,9 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 
     private void AddNewProbes(ScriptableRenderContext context)
     {
-        foreach (var newProbe in CustomReflectionProbe.reflectionProbes)
+        foreach (var newProbe in EnvironmentProbe.reflectionProbes)
         {
-            // 
+            // Skip if we have max probe
             if (readyProbes.Count == maxActiveProbes)
                 return;
 
@@ -174,12 +192,13 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             camera.aspect = 1f;
             camera.nearClipPlane = nearClip;
             camera.farClipPlane = farClip;
+            camera.cameraType = CameraType.Reflection;
 
             // Do all faces at once for now, worry about culling later
             // Set position
             camera.transform.position = newProbe.transform.position;
 
-            var item = new ReadyProbeData(newProbe, new RenderTexture[6], new RenderTexture[6], new RenderTexture[6], camera, previousExposure);
+            var item = new ReadyProbeData(newProbe, new RenderTexture[6], new RenderTexture[6], new RenderTexture[6], new RenderTexture[6], camera, previousExposure);
 
             using (var scope = context.ScopedCommandBuffer())
                 scope.Command.EnableShaderKeyword("REFLECTION_PROBE_RENDERING");
@@ -190,60 +209,48 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
                 var up = CoreUtils.upVectorList[i];
                 camera.transform.rotation = Quaternion.LookRotation(fwd, up);
 
-                if (!camera.TryGetCullingParameters(out var cullingPrameters))
-                    throw new InvalidOperationException();
-
-                var albedoMetallic = new RenderTexture(resolution, resolution, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB).Created();
-                colorBuffers[0] = albedoMetallic.colorBuffer;
-
-                var normalRoughness = new RenderTexture(resolution, resolution, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear).Created();
-                colorBuffers[1] = normalRoughness.colorBuffer;
-
+                var depth = new RenderTexture(resolution, resolution, 16, RenderTextureFormat.Depth).Created();
+                var albedo = new RenderTexture(resolution, resolution, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB).Created();
+                var normal = new RenderTexture(resolution, resolution, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear).Created();
                 var emission = new RenderTexture(resolution, resolution, 0, RenderTextureFormat.RGB111110Float, RenderTextureReadWrite.Linear).Created();
-                colorBuffers[2] = emission.colorBuffer;
 
-                var renderTargetSetup = new RenderTargetSetup(colorBuffers, albedoMetallic.depthBuffer, 0, (CubemapFace)i);
-                var renderTargetBinding = new RenderTargetBinding(renderTargetSetup);
-
-                // Draw
-                cullingPrameters.cullingOptions = CullingOptions.ForceEvenIfCameraIsNotActive | CullingOptions.DisablePerObjectCulling;
-                cullingPrameters.cullingMask = (uint)layerMask.value;
-                var cullingResults = context.Cull(ref cullingPrameters);
-
+                Matrix4x4 viewProjectionMatrix;
                 using (var scope = context.ScopedCommandBuffer("Reflection Probe", true))
                 {
-                    scope.Command.SetRenderTarget(renderTargetBinding);
-                    scope.Command.ClearRenderTarget(true, true, Color.clear);
-                    GraphicsUtilities.SetupCameraProperties(scope.Command, 0, camera, context, Vector2Int.one * resolution, true);
+                    //scope.Command.SetRenderTarget(renderTargetBinding);
+                    //scope.Command.ClearRenderTarget(true, true, Color.clear);
+                    GraphicsUtilities.SetupCameraProperties(scope.Command, 0, camera, context, Vector2Int.one * resolution, out viewProjectionMatrix, true);
                     scope.Command.SetInvertCulling(true);
 
                     scope.Command.SetGlobalFloat("_ExposureValue", 1f);
                     scope.Command.SetGlobalFloat("_ExposureValueRcp", 1f);
 
                     GeometryUtilities.CalculateFrustumPlanes(camera, cullingPlanes);
-
-                    // TODO: Convert to subgraph
-                    //foreach (var terrain in TerrainRenderer.TerrainRenderers)
-                    //{
-                    //    terrain.Cull(scope.Command, camera.transform.position, cullingPlanes, 6);
-                    //    terrain.Render(scope.Command, "ShadowCaster", camera.transform.position);
-                    //}
-
-                    var rendererList = context.CreateRendererList(new UnityEngine.Rendering.RendererUtils.RendererListDesc(new ShaderTagId("Deferred"), cullingResults, camera)
-                    {
-                        excludeObjectMotionVectors = true,
-                        layerMask = layerMask,
-                        renderQueueRange = RenderQueueRange.opaque,
-                        rendererConfiguration = PerObjectData.None,
-                        sortingCriteria = SortingCriteria.CommonOpaque,
-                    });
-
-                    scope.Command.DrawRendererList(rendererList);
-
-                    item.AlbedoMetallic[i] = albedoMetallic;
-                    item.NormalRoughness[i] = normalRoughness;
-                    item.Emission[i] = emission;
                 }
+
+                if(gbufferSubGraph != null)
+                {
+                    var worldToView = Matrix4x4.Rotate(Quaternion.Inverse(camera.transform.rotation));
+
+                    gbufferSubGraph.AddRelayInput("View Matrix", worldToView);
+                    gbufferSubGraph.AddRelayInput("View Projection Matrix", viewProjectionMatrix);
+                    gbufferSubGraph.AddRelayInput("Inverse View Matrix", Matrix4x4.Rotate(camera.transform.rotation));
+                    gbufferSubGraph.AddRelayInput("Culling Planes", new Vector4Array(cullingPlanes));
+                    gbufferSubGraph.AddRelayInput("Culling Planes Count", cullingPlanes.Length);
+                    gbufferSubGraph.AddRelayInput("Gpu Instance Buffers", gpuInstanceBuffers);
+
+                    gbufferSubGraph.AddRelayInput("Target Resolution", resolution);
+                    gbufferSubGraph.AddRelayInput("Depth Target", (RenderTargetIdentifier)depth);
+                    gbufferSubGraph.AddRelayInput("Albedo Target", (RenderTargetIdentifier)albedo);
+                    gbufferSubGraph.AddRelayInput("Normal Target", (RenderTargetIdentifier)normal);
+                    gbufferSubGraph.AddRelayInput("Emission Target", (RenderTargetIdentifier)emission);
+                    gbufferSubGraph.Render(context, camera, 0);
+                }
+
+                item.Depth[i] = depth;
+                item.Albedo[i] = albedo;
+                item.Normal[i] = normal;
+                item.Emission[i] = emission;
             }
 
             using (var scope = context.ScopedCommandBuffer())
@@ -343,31 +350,41 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
     private void RelightProbeFace(ScriptableRenderContext context, ReadyProbeData relightData, Camera camera, int tempId, int i, Vector3 fwd, Vector3 up)
     {
         // Evaluate
-        if (reflectionProbeSubGraph != null)
+        if (lightingSubGraph != null)
         {
-            reflectionProbeSubGraph.AddRelayInput("Depth", new RenderTargetIdentifier(relightData.AlbedoMetallic[i]));
-            reflectionProbeSubGraph.AddRelayInput("_GBuffer0", new RenderTargetIdentifier(relightData.AlbedoMetallic[i]));
-            reflectionProbeSubGraph.AddRelayInput("_GBuffer1", new RenderTargetIdentifier(relightData.NormalRoughness[i]));
-            reflectionProbeSubGraph.AddRelayInput("_GBuffer2", new RenderTargetIdentifier(relightData.Emission[i]));
-            reflectionProbeSubGraph.AddRelayInput("Result", new RenderTargetIdentifier(tempId));
-            reflectionProbeSubGraph.AddRelayInput("_ExposureValue", previousExposure);
-            reflectionProbeSubGraph.AddRelayInput("_ExposureValueRcp", 1f / previousExposure);
-            reflectionProbeSubGraph.AddRelayInput("_AmbientSh", ambient);
-            reflectionProbeSubGraph.AddRelayInput("_AtmosphereTransmittance", atmosphereTransmittance);
-            reflectionProbeSubGraph.AddRelayInput("_SkyReflection", skyReflection);
-            reflectionProbeSubGraph.AddRelayInput("_Resolution", resolution);
-            reflectionProbeSubGraph.AddRelayInput("_ReflectionProbeData", reflectionProbeDataBuffer.ComputeBuffer);
-            reflectionProbeSubGraph.AddRelayInput("_ReflectionProbes", new RenderTargetIdentifier(reflectionProbeArray));
-            reflectionProbeSubGraph.AddRelayInput("_ReflectionProbeCount", reflectionProbeDataBuffer.Count);
-            reflectionProbeSubGraph.AddRelayInput("GpuInstanceBuffers", gpuInstanceBuffers);
+            lightingSubGraph.AddRelayInput("Depth", new RenderTargetIdentifier(relightData.Depth[i]));
+            lightingSubGraph.AddRelayInput("_GBuffer0", new RenderTargetIdentifier(relightData.Albedo[i]));
+            lightingSubGraph.AddRelayInput("_GBuffer1", new RenderTargetIdentifier(relightData.Normal[i]));
+            lightingSubGraph.AddRelayInput("_GBuffer2", new RenderTargetIdentifier(relightData.Emission[i]));
+            lightingSubGraph.AddRelayInput("Result", new RenderTargetIdentifier(tempId));
+            lightingSubGraph.AddRelayInput("_ExposureValue", previousExposure);
+            lightingSubGraph.AddRelayInput("_ExposureValueRcp", 1f / previousExposure);
+            lightingSubGraph.AddRelayInput("_AmbientSh", ambient);
+            lightingSubGraph.AddRelayInput("_AtmosphereTransmittance", atmosphereTransmittance);
+            lightingSubGraph.AddRelayInput("_SkyReflection", skyReflection);
+            lightingSubGraph.AddRelayInput("_Resolution", resolution);
+            lightingSubGraph.AddRelayInput("_ReflectionProbeData", reflectionProbeDataBuffer.ComputeBuffer);
+            lightingSubGraph.AddRelayInput("_ReflectionProbes", new RenderTargetIdentifier(reflectionProbeArray));
+            lightingSubGraph.AddRelayInput("_ReflectionProbeCount", reflectionProbeDataBuffer.Count);
+            lightingSubGraph.AddRelayInput("GpuInstanceBuffers", gpuInstanceBuffers);
 
+            // Camera
+            lightingSubGraph.AddRelayInput("CameraPosition", cameraPosition);
+            lightingSubGraph.AddRelayInput("ViewProjectionMatrix", viewProjectionMatrix);
+
+            // Lighting
+            lightingSubGraph.AddRelayInput("DirectionalCascades", directionalCascades);
+            lightingSubGraph.AddRelayInput("DirectionalLightDataBuffer", directionalLightDataBuffer);
+            lightingSubGraph.AddRelayInput("DirectionalShadowMatrices", directionalShadowMatrices);
+            lightingSubGraph.AddRelayInput("DirectionalShadows", directionalShadows);
+            
             using (var scope = context.ScopedCommandBuffer("Reflection Probe Relight", true))
             {
-                GraphicsUtilities.SetupCameraProperties(scope.Command, 0, camera, context, Vector2Int.one * resolution, true);
+                GraphicsUtilities.SetupCameraProperties(scope.Command, 0, camera, context, Vector2Int.one * resolution, out var viewProjectionMatrix, true);
                 scope.Command.SetInvertCulling(true);
             }
 
-            reflectionProbeSubGraph.Render(context, camera, FrameCount);
+            lightingSubGraph.Render(context, camera, FrameCount);
 
             // Copy to temp probe
             using (var scope = context.ScopedCommandBuffer("Reflection Probe Relight", true))
@@ -380,21 +397,40 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 
     public class ReadyProbeData
     {
-        public CustomReflectionProbe Probe;
-        public RenderTexture[] AlbedoMetallic;
-        public RenderTexture[] NormalRoughness;
+        public EnvironmentProbe Probe;
+        public RenderTexture[] Depth;
+        public RenderTexture[] Albedo;
+        public RenderTexture[] Normal;
         public RenderTexture[] Emission;
         public Camera Camera;
         public float exposure;
 
-        public ReadyProbeData(CustomReflectionProbe item1, RenderTexture[] item2, RenderTexture[] item3, RenderTexture[] emission, Camera camera, float exposure)
+        public ReadyProbeData(EnvironmentProbe item1, RenderTexture[] depth, RenderTexture[] albedo, RenderTexture[] normal, RenderTexture[] emission, Camera camera, float exposure)
         {
+            Depth = depth ?? throw new ArgumentNullException(nameof(depth));
             Probe = item1 ?? throw new ArgumentNullException(nameof(item1));
-            AlbedoMetallic = item2 ?? throw new ArgumentNullException(nameof(item2));
-            NormalRoughness = item3 ?? throw new ArgumentNullException(nameof(item3));
+            Albedo = albedo ?? throw new ArgumentNullException(nameof(albedo));
+            Normal = normal ?? throw new ArgumentNullException(nameof(normal));
             Emission = emission ?? throw new ArgumentNullException(nameof(emission));
             Camera = camera ?? throw new ArgumentException(nameof(camera));
             this.exposure = exposure;
+        }
+
+        public void Cleanup()
+        {
+            DestroyImmediate(Camera.gameObject);
+
+            foreach (var item in Depth)
+                DestroyImmediate(item);
+
+            foreach (var item in Albedo)
+                DestroyImmediate(item);
+
+            foreach (var item in Normal)
+                DestroyImmediate(item);
+
+            foreach (var item in Emission)
+                DestroyImmediate(item);
         }
     }
 }

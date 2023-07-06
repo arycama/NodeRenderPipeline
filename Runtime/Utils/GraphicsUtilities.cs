@@ -241,7 +241,7 @@ public static class GraphicsUtilities
         return new Vector4((float)x, (float)y, (float)z, (float)w);
     }
 
-    public static void SetupCameraProperties(CommandBuffer command, int frameCount, Camera camera, ScriptableRenderContext context, Vector2Int resolution, Vector4[] cullingPlanes, bool flip = false)
+    public static void SetupCameraProperties(CommandBuffer command, int frameCount, Camera camera, ScriptableRenderContext context, Vector2Int resolution, Vector4[] cullingPlanes, out Matrix4x4 viewProjectionMatrix, bool flip = false)
     {
         context.SetupCameraProperties(camera);
 
@@ -291,14 +291,15 @@ public static class GraphicsUtilities
 
         gpuProjectionMatrix[1, 1] = -gpuProjectionMatrix[1, 1];
         gpuProjectionMatrix[1, 2] = -gpuProjectionMatrix[1, 2];
-        command.SetGlobalMatrix("_ViewProjMatrix", gpuProjectionMatrix * worldToView);
+        viewProjectionMatrix = gpuProjectionMatrix * worldToView;
+        command.SetGlobalMatrix("_ViewProjMatrix", viewProjectionMatrix);
 
         //var zBufferParams = ZBufferParams(near, far, SystemInfo.usesReversedZBuffer);
         //command.SetGlobalVector("_ZBufferParams", zBufferParams);
     }
 
-    public static void SetupCameraProperties(CommandBuffer command, int frameCount, Camera camera, ScriptableRenderContext context, Vector2Int resolution, bool flip = false)
+    public static void SetupCameraProperties(CommandBuffer command, int frameCount, Camera camera, ScriptableRenderContext context, Vector2Int resolution, out Matrix4x4 viewProjectionMatrix, bool flip = false)
     {
-        SetupCameraProperties(command, frameCount, camera, context, resolution, cullingPlanes, flip);
+        SetupCameraProperties(command, frameCount, camera, context, resolution, cullingPlanes, out viewProjectionMatrix, flip);
     }
 }

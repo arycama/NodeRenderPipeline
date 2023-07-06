@@ -129,7 +129,7 @@ public partial class RenderWaterNode : RenderPipelineNode
 
         // Set Vectors
         using var scope = context.ScopedCommandBuffer("Ocean", true);
-        GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution());
+        GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution(), out var viewProjectionMatrix);
         scope.Command.SetGlobalVector("_OceanScale", oceanScale);
         scope.Command.SetGlobalVector("_RcpCascadeScales", rcpScales);
         scope.Command.SetGlobalVector("_OceanTexelSize", rcpTexelSizes);

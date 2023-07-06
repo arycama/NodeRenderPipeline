@@ -16,6 +16,10 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
     [Input] private RenderTargetIdentifier skyReflection;
     [Input] private int resolution;
 
+    [Header("Camera")]
+    [Input] private Vector3 cameraPosition;
+    [Input] private Matrix4x4 viewProjectionMatrix;
+
     [Input] private ComputeBuffer lightList;
     [Input] private SmartComputeBuffer<LightData> lightDataBuffer;
     [Input] private SmartComputeBuffer<DirectionalLightData> directionalLightBuffer;
@@ -43,7 +47,7 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
 
         using var scope = context.ScopedCommandBuffer("Deferred Reflection Probe Lighting");
 
-        GraphicsUtilities.SetupCameraProperties(scope.Command, 0, camera, context, Vector2Int.one * resolution, true);
+        GraphicsUtilities.SetupCameraProperties(scope.Command, 0, camera, context, Vector2Int.one * resolution, out var viewProjectionMatrix, true);
 
         scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "Depth", depth, 0, RenderTextureSubElement.Depth);
         scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_GBuffer0", gbuffer0, 0, RenderTextureSubElement.Color);
@@ -58,12 +62,12 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
 
         scope.Command.SetComputeIntParam(deferredComputeShader, "_Resolution", resolution);
 
-        scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_LightClusterList", lightList);
-        scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_LightData", lightDataBuffer);
+        //scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_LightClusterList", lightList);
+       // scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_LightData", lightDataBuffer);
         scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_DirectionalLightData", directionalLightBuffer);
-        scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_LightClusterIndices", lightClusterId);
+        //scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_LightClusterIndices", lightClusterId);
         scope.Command.SetComputeIntParam(deferredComputeShader, "_DirectionalLightCount", directionalLightBuffer.Count);
-        scope.Command.SetComputeIntParam(deferredComputeShader, "_LightCount", lightDataBuffer.Count);
+       // scope.Command.SetComputeIntParam(deferredComputeShader, "_LightCount", lightDataBuffer.Count);
 
         scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_DirectionalShadowMatrices", directionalShadowMatrices);
         scope.Command.SetComputeFloatParam(deferredComputeShader, "_CascadeCount", cascadeCount);
@@ -73,11 +77,13 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
         scope.Command.SetComputeIntParam(deferredComputeShader, "_ReflectionProbeCount", reflectionProbeDataBufferCount);
         scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_DirectionalShadows", directionalShadows);
 
-        
+        scope.Command.SetComputeMatrixParam(deferredComputeShader, "_CameraViewProjectionMatrix", viewProjectionMatrix);
+        scope.Command.SetComputeVectorParam(deferredComputeShader, "_OriginalCameraPosition", cameraPosition);
+        scope.Command.SetComputeVectorParam(deferredComputeShader, "_ReflectionCameraPosition", camera.transform.position);
 
-        scope.Command.SetComputeFloatParam(deferredComputeShader, "_ClusterScale", clusterScale);
-        scope.Command.SetComputeFloatParam(deferredComputeShader, "_ClusterBias", clusterBias);
-        scope.Command.SetComputeIntParam(deferredComputeShader, "_TileSize", tileSize);
+        // scope.Command.SetComputeFloatParam(deferredComputeShader, "_ClusterScale", clusterScale);
+        //scope.Command.SetComputeFloatParam(deferredComputeShader, "_ClusterBias", clusterBias);
+        // scope.Command.SetComputeIntParam(deferredComputeShader, "_TileSize", tileSize);
 
         var viewToWorld = Matrix4x4.Rotate(camera.transform.rotation);
         var viewDirMatrix = Matrix4x4Extensions.ComputePixelCoordToWorldSpaceViewDirectionMatrix(Vector2Int.one * resolution, Vector2.zero, 90, 1, viewToWorld, true);

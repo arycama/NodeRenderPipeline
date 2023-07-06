@@ -17,6 +17,6 @@ public partial class ResetCameraPropertiesNode : RenderPipelineNode
         projection[1, 2] = 0f;
         camera.projectionMatrix = projection;
 
-        GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution());
+        GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution(), out var viewProjectionMatrix);
     }
 }

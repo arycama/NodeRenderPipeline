@@ -322,43 +322,45 @@ float3 GetLighting(float4 positionCS, float3 N, float3 T, PbrInput input, out fl
 		illuminance += illum * lightColor;
 	}
 	
-	uint3 clusterIndex;
-	clusterIndex.xy = floor(positionCS.xy) / _TileSize;
-	clusterIndex.z = log2(positionCS.w) * _ClusterScale + _ClusterBias;
+	#ifndef REFLECTION_PROBE_RENDERING
+		uint3 clusterIndex;
+		clusterIndex.xy = floor(positionCS.xy) / _TileSize;
+		clusterIndex.z = log2(positionCS.w) * _ClusterScale + _ClusterBias;
 
-	uint2 lightOffsetAndCount = _LightClusterIndices[clusterIndex];
-	uint startOffset = lightOffsetAndCount.x;
-	uint lightCount = lightOffsetAndCount.y;
+		uint2 lightOffsetAndCount = _LightClusterIndices[clusterIndex];
+		uint startOffset = lightOffsetAndCount.x;
+		uint lightCount = lightOffsetAndCount.y;
 
-	// Would it be better to combine this with the above, so we're only calling evaluate light once?
-	for (i = 0; i < lightCount; i++)
-	{
-		int index = _LightClusterList[startOffset + i];
-		LightData lightData = _LightData[index];
-		LightCommon light = GetLightColor(lightData, positionWS, jitter, true);
-
-		// Handle different lights
-		float3 illum = 0;
-		switch (lightData.lightType)
+		// Would it be better to combine this with the above, so we're only calling evaluate light once?
+		for (i = 0; i < lightCount; i++)
 		{
-			//case 0: // Directional
-			case 1: // Spot
-			case 2: // Point
-			case 3: // Pyramid
-			case 4: // Box
-			{
-					luminance += EvaluateLight(input, T, B, N, light.direction, V, input.bentNormal, illum) * light.color;
-					break;
-				}
-			case 5: // Tube
-			case 6: // Rectangle
-				luminance += LtcLight(input, positionWS, lightData, lightData.lightType == 5, N) * light.color;
-				break;
-		}
-		
-		illuminance += illum * light.color;
-	}
+			int index = _LightClusterList[startOffset + i];
+			LightData lightData = _LightData[index];
+			LightCommon light = GetLightColor(lightData, positionWS, jitter, true);
 
+			// Handle different lights
+			float3 illum = 0;
+			switch (lightData.lightType)
+			{
+				//case 0: // Directional
+				case 1: // Spot
+				case 2: // Point
+				case 3: // Pyramid
+				case 4: // Box
+				{
+						luminance += EvaluateLight(input, T, B, N, light.direction, V, input.bentNormal, illum) * light.color;
+						break;
+					}
+				case 5: // Tube
+				case 6: // Rectangle
+					luminance += LtcLight(input, positionWS, lightData, lightData.lightType == 5, N) * light.color;
+					break;
+			}
+		
+			illuminance += illum * light.color;
+		}
+	#endif
+	
 	return luminance;
 }
 

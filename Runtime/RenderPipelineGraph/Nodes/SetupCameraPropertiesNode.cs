@@ -18,6 +18,8 @@ public partial class SetupCameraPropertiesNode : RenderPipelineNode
     [Output] private Vector2 jitter;
     [Output] private Vector4Array cullingPlanes;
     [Output] private int cullingPlanesCount = 6;
+    [Output] private Matrix4x4 viewProjectionMatrix;
+    [Output] private Vector3 cameraPosition;
 
     [Input, Output] private NodeConnection connection;
 
@@ -78,9 +80,10 @@ public partial class SetupCameraPropertiesNode : RenderPipelineNode
         scope.Command.SetGlobalMatrix("_PrevInvProjMatrix", nonJitteredProjectionMatrix.inverse);
         scope.Command.SetGlobalMatrix("_NonJitteredViewProjMatrix", nonJitteredViewProjectionMatrix);
         scope.Command.SetGlobalVector("_Jitter", jitter);
-        GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution(), staticCullingPlanes);
+        GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution(), staticCullingPlanes, out viewProjectionMatrix);
 
         cullingPlanes = new Vector4Array(staticCullingPlanes);
+        cameraPosition = camera.transform.position;
 
 #if UNITY_EDITOR
         //ScriptableRenderContext.EmitGeometryForCamera(camera);

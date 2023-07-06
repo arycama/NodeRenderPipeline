@@ -46,7 +46,7 @@ public partial class SkyReflectionNode : RenderPipelineNode
     public override void Execute(ScriptableRenderContext context, Camera camera)
     {
         using var scope = context.ScopedCommandBuffer("Sky Reflection", true);
-        GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution());
+        GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution(), out var viewProjectionMatrix);
 
         var tempSkyId = Shader.PropertyToID("_TempSky");
         scope.Command.GetTemporaryRT(tempSkyId, resolution, resolution, 0, FilterMode.Bilinear, RenderTextureFormat.RGB111110Float, RenderTextureReadWrite.Linear, 1, true);

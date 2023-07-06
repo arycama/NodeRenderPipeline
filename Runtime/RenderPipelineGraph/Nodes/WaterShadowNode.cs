@@ -20,7 +20,7 @@ public partial class WaterShadowNode : RenderPipelineNode
     {
         using var scope = context.ScopedCommandBuffer("Water Shadow", true);
 
-        GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution());
+        GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution(), out var viewProjectionMatrix);
 
         // Render
         var waterShadowId = Shader.PropertyToID("_WaterShadow");

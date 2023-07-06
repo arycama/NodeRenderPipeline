@@ -81,6 +81,9 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 	result *= rcp(1.0 - result.r);
 	result = YCoCgToRGB(result);
 	
+	if (any((asuint(result) & 0x7FFFFFFF) >= 0x7F800000))
+		result = 0.0;
+	
 	_Result[id] = result;
 	//_Result[id] = _Input[id];
 }

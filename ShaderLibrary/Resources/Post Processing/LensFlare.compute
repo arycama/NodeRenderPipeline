@@ -64,10 +64,10 @@ void CSMain (uint2 id : SV_DispatchThreadID)
 //const static float fThreshold = 0.1f;
  
 //float4 LensFlarePS(in float2 in_vTexCoord : TEXCOORD0,
-// uniform int NumSamples,
-// uniform float4 vTint,
-// uniform float fTexScale,
-// uniform float fBlurScale) : COLOR0
+// int NumSamples,
+// float4 vTint,
+// float fTexScale,
+// float fBlurScale) : COLOR0
 //{
 // // The flare should appear on the opposite side of the screen as the
 // // source of the light, so first we mirror the texture coordinate.
