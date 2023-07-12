@@ -90,6 +90,7 @@
             HLSLPROGRAM
             #pragma vertex Vertex
             #pragma fragment Fragment
+            #pragma multi_compile _ REFLECTION_PROBE_RENDERING
 
             #define MOTION_VECTORS_ON
             #include "SpeedTree8Imposter.hlsl"

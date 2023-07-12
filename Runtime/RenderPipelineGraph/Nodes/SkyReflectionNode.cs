@@ -6,8 +6,6 @@ using UnityEngine.Rendering;
 [NodeMenuItem("Lighting/Sky Reflection")]
 public partial class SkyReflectionNode : RenderPipelineNode
 {
-    private static readonly int skyReflectionId = Shader.PropertyToID("_SkyReflectionTexture");
-
     [SerializeField, Pow2(512)] private int resolution = 128;
     [SerializeField] private AtmosphereProfile atmosphereProfile;
     [SerializeField] private CloudProfile cloudProfile;
@@ -17,6 +15,7 @@ public partial class SkyReflectionNode : RenderPipelineNode
     [Input] private RenderTargetIdentifier cloudCoverage;
     [Input] private RenderTargetIdentifier atmosphereTransmittance;
     [Input] private RenderTargetIdentifier multiScatter;
+    [Input] private RenderTargetIdentifier cloudAmbient;
     [Input] private CullingResults cullingResults;
     [Output] private RenderTargetIdentifier reflection;
 
@@ -25,22 +24,13 @@ public partial class SkyReflectionNode : RenderPipelineNode
     [Input] private RenderTargetIdentifier detailNoise;
     [Input] private RenderTargetIdentifier weather;
 
-    [Output] private ComputeBuffer ambient;
-
     [Input, Output] private NodeConnection connection;
 
     private int propertyId;
 
-    private readonly Dictionary<Camera, ComputeBuffer> ambientCache = new();
-
     public override void Initialize()
     {
         propertyId = GetShaderPropertyId("Sky Reflection");
-    }
-
-    public override void Cleanup()
-    {
-        ambientCache.Cleanup(data => data.Release());
     }
 
     public override void Execute(ScriptableRenderContext context, Camera camera)
@@ -59,7 +49,7 @@ public partial class SkyReflectionNode : RenderPipelineNode
             useMipMap = true
         };
 
-        scope.Command.GetTemporaryRT(skyReflectionId, skyDescriptor);
+        scope.Command.GetTemporaryRT(propertyId, skyDescriptor);
 
         var skyComputeShader = Resources.Load<ComputeShader>("PhysicalSky");
 
@@ -100,10 +90,7 @@ public partial class SkyReflectionNode : RenderPipelineNode
         scope.Command.SetComputeTextureParam(skyComputeShader, kernel, "_MultipleScatter", multiScatter);
         scope.Command.SetComputeTextureParam(skyComputeShader, kernel, "_Exposure", exposure);
         scope.Command.SetComputeTextureParam(skyComputeShader, kernel, "_CloudCoverage", cloudCoverage);
-
-        // TODO: If this isn't filled, we should run the compute shader twice, once to generate the ambient, and once for the actual result
-        var ambientSh = ambientCache.CreateIfNotAdded(camera, () => new ComputeBuffer(9, sizeof(float) * 4));
-        scope.Command.SetComputeBufferParam(skyComputeShader, kernel, "_AmbientSh", ambientSh);
+        scope.Command.SetComputeTextureParam(skyComputeShader, kernel, "_CloudAmbient", cloudAmbient);
 
         scope.Command.SetComputeVectorParam(skyComputeShader, "_StarColor", atmosphereProfile.StarColor.linear);
         scope.Command.SetComputeVectorParam(skyComputeShader, "_GroundColor", atmosphereProfile.GroundColor.linear);
@@ -129,33 +116,12 @@ public partial class SkyReflectionNode : RenderPipelineNode
             using (var keywordScope = scope.Command.KeywordScope(keyword))
                 scope.Command.DispatchNormalized(skyComputeShader, kernel, resolution, resolution, 1);
 
-            scope.Command.CopyTexture(tempSkyId, 0, 0, skyReflectionId, i, 0);
+            scope.Command.CopyTexture(tempSkyId, 0, 0, propertyId, i, 0);
         }
 
         scope.Command.ReleaseTemporaryRT(tempSkyId);
 
-        // Convolution
-        var convolveComputeShader = Resources.Load<ComputeShader>("AmbientConvolution");
-        scope.Command.GenerateMips(skyReflectionId);
-
-        // Calculate ambient (Before convolution)
-
-        scope.Command.SetComputeTextureParam(convolveComputeShader, 0, "_AmbientProbeInputCubemap", skyReflectionId);
-        scope.Command.SetComputeBufferParam(convolveComputeShader, 0, "_AmbientProbeOutputBuffer", ambientSh);
-        scope.Command.DispatchCompute(convolveComputeShader, 0, 1, 1, 1);
-
-        scope.Command.SetGlobalBuffer("_AmbientSh", ambientSh);
-        ambient = ambientSh;
-
-        scope.Command.BeginSample("Convolution");
-
-        scope.Command.GetTemporaryRT(propertyId, skyDescriptor);
-
-        ReflectionConvolution.Convolve(scope.Command, skyReflectionId, propertyId, resolution);
-
-        scope.Command.ReleaseTemporaryRT(skyReflectionId);
-        scope.Command.EndSample("Convolution");
-
+        scope.Command.GenerateMips(propertyId);
         reflection = propertyId;
     }
 

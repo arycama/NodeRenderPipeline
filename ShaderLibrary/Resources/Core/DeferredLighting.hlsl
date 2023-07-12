@@ -1,4 +1,4 @@
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Brdf.hlsl"
+﻿#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Brdf.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Deferred.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Utility.hlsl"
 

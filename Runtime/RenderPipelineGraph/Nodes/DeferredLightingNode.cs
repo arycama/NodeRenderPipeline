@@ -5,7 +5,7 @@ using UnityEngine.Rendering;
 [NodeMenuItem("Lighting/Deferred Lighting")]
 public partial class DeferredLightingNode : RenderPipelineNode
 {
-    [Input] private ComputeBuffer ambient;
+    [Input] private GraphicsBuffer ambient;
 
     [Input] private SmartComputeBuffer<DirectionalLightData> directionalLightBuffer;
     [Input] private SmartComputeBuffer<Matrix4x4> spotlightShadowMatrices;
@@ -61,7 +61,7 @@ public partial class DeferredLightingNode : RenderPipelineNode
         scope.Command.SetGlobalTexture("_GBuffer4", gBuffer4);
 
         scope.Command.SetGlobalTexture("_Exposure", exposure);
-        propertyBlock.SetBuffer("_AmbientSh", ambient);
+        propertyBlock.SetConstantBuffer("AmbientSh", ambient, 0, ambient.count * ambient.stride);
         scope.Command.SetGlobalTexture("_AtmosphereTransmittance", atmosphereTransmittance);
         scope.Command.SetGlobalTexture("_SkyReflection", skyReflection);
         scope.Command.SetGlobalTexture("_ReflectionBuffer", screenSpaceReflections);

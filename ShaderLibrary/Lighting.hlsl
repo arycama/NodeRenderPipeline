@@ -148,13 +148,14 @@ float VoxelOcclusion(float3 positionWS)
 #endif
 
 Texture2D<float4> _CloudCoverage;
-Buffer<float4> _AmbientSh;
+
+cbuffer AmbientSh
+{
+	float4 _AmbientSh[9];
+};
 
 float3 AmbientLight(float3 n, float3 albedo, float occlusion)
 {
-    if (_FlatAmbient)
-        return 12.5;
-
     // Calculate the zonal harmonics expansion for V(x, ωi)*(n.l)
 	float t = FastACosPos(sqrt(saturate(1.0 - occlusion)));
     float a = sin(t);
@@ -188,12 +189,8 @@ float3 CornetteShanksZonalHarmonics(float g)
 
 float3 AmbientLightCornetteShanks(float3 n, float gBack, float gFront, float gBlend)
 {
-    if (_FlatAmbient)
-        return 12.5;
 
-    float3 zh0 = CornetteShanksZonalHarmonics(gBack);
-    float3 zh1 = CornetteShanksZonalHarmonics(gFront);
-    float3 A = lerp(zh0, zh1, gBlend);
+	float3 A = CornetteShanksZonalHarmonics(gBack);
 
     float3 irradiance =
         _AmbientSh[0].xyz * A.x +

@@ -116,7 +116,7 @@ void Scatter(uint3 id : SV_DispatchThreadID)
 		float angle = dot(V, L);
 		float4 atmosphereScatter = AtmosphereScatter(length(P));
 		float3 scatterColor = atmosphereScatter.xyz * RayleighPhaseFunction(angle);
-		scatterColor += atmosphereScatter.w * CornetteShanksPhasePartVarying(_MiePhase, angle) * _MiePhaseConstant;
+		scatterColor += atmosphereScatter.w * HenyeyGreensteinPhaseFunction(_MiePhase, angle);
 		
 		luminance += scatterColor * light.color;
 	}

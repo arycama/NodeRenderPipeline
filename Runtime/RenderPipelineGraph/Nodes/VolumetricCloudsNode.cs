@@ -16,9 +16,9 @@ public partial class VolumetricCloudsNode : RenderPipelineNode
     [Input] private RenderTargetIdentifier depth;
     [Input] private RenderTargetIdentifier atmosphereTransmittance;
     [Input] private RenderTargetIdentifier atmosphereMultiScatter;
-    [Input] private ComputeBuffer ambient;
     [Input] private CullingResults cullingResults;
     [Input] private RenderTargetIdentifier exposure;
+    [Input] private RenderTargetIdentifier cloudAmbient;
 
     [Output] private RenderTargetIdentifier result;
     [Output] private RenderTargetIdentifier cloudDepth;
@@ -64,8 +64,8 @@ public partial class VolumetricCloudsNode : RenderPipelineNode
         scope.Command.SetComputeTextureParam(computeShader, cloudKernel, "_Result", tempId);
         scope.Command.SetComputeTextureParam(computeShader, cloudKernel, "_DepthResult", tempCloudDepthId);
         scope.Command.SetComputeTextureParam(computeShader, cloudKernel, "_Exposure", exposure);
+        scope.Command.SetComputeTextureParam(computeShader, cloudKernel, "_CloudAmbient", cloudAmbient);
 
-        scope.Command.SetComputeBufferParam(computeShader, cloudKernel, "_AmbientSh", ambient);
         scope.Command.SetComputeMatrixParam(computeShader, "_PixelCoordToViewDirWS", mat);
         scope.Command.SetComputeFloatParam(computeShader, "_FogEnabled", CoreUtils.IsSceneViewFogEnabled(camera) ? 1f : 0f);
 

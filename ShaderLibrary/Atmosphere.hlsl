@@ -6,16 +6,12 @@
 #include "Utility.hlsl"
 #include "Volumetric.hlsl"
 
-float4 _AtmosphereExtinctionScale, _AtmosphereExtinctionOffset, _AtmosphereScatterOffset;
-float3 _AtmosphereOzoneScale;
 float _PlanetRadius;
-float3 _AtmosphereOzoneOffset;
 float _AtmosphereHeight;
 float3 _OzoneAbsorption;
 float _TopRadius;
 
 float _MiePhase;
-float _MiePhaseConstant;
 float _OzoneWidth;
 float _OzoneHeight;
 	
@@ -24,32 +20,32 @@ float _AtmospherePropertiesPad;
 	
 float3 _RayleighScatter;
 float _RayleighHeight, _MieHeight, _MieScatter, _MieAbsorption;
-float4 _AtmosphereTransmittanceRemap, _AtmosphereMultiScatterRemap;
+float4 _AtmosphereTransmittanceRemap, _AtmosphereMultiScatterRemap, _AtmosphereAmbientRemap;
 
 Texture2D<float3> _AtmosphereTransmittance;
 Texture2D<float3> _MultipleScatter;
 
-float DistanceToTopAtmosphereBoundary(float viewHeight, float cosAngle)
+float DistanceToTopAtmosphereBoundary(float radius, float cosAngle)
 {
-	float discriminant = Sq(viewHeight) * (Sq(cosAngle) - 1.0) + Sq(_TopRadius);
-	return max(0.0, -viewHeight * cosAngle + sqrt(max(0.0, discriminant)));
+	float discriminant = Sq(radius) * (Sq(cosAngle) - 1.0) + Sq(_TopRadius);
+	return max(0.0, -radius * cosAngle + sqrt(max(0.0, discriminant)));
 }
 
-float DistanceToBottomAtmosphereBoundary(float r, float mu)
+float DistanceToBottomAtmosphereBoundary(float radius, float cosAngle)
 {
-	float discriminant = r * r * (mu * mu - 1.0) + Sq(_PlanetRadius);
-	return max(0.0, (-r * mu - sqrt(max(0.0, discriminant))));
+	float discriminant = Sq(radius) * (Sq(cosAngle) - 1.0) + Sq(_PlanetRadius);
+	return max(0.0, (-radius * cosAngle - sqrt(max(0.0, discriminant))));
 }
 
-float DistanceToNearestAtmosphereBoundary(float r, float mu, bool ray_r_mu_intersects_ground)
+float DistanceToNearestAtmosphereBoundary(float radius, float cosAngle, bool ray_r_mu_intersects_ground)
 {
 	if (ray_r_mu_intersects_ground)
 	{
-		return DistanceToBottomAtmosphereBoundary(r, mu);
+		return DistanceToBottomAtmosphereBoundary(radius, cosAngle);
 	}
 	else
 	{
-		return DistanceToTopAtmosphereBoundary(r, mu);
+		return DistanceToTopAtmosphereBoundary(radius, cosAngle);
 	}
 }
 
@@ -76,25 +72,23 @@ float2 TransmittanceUv(float viewHeight, float cosAngle)
 	return float2(x_mu, x_r) * _AtmosphereTransmittanceRemap.xy + _AtmosphereTransmittanceRemap.zw;
 }
 
-float2 UvToSkyParams(float2 uv)
+void UvToSkyParams(float2 uv, out float height, out float cosAngle, out float d)
 {
 	// Distance to top atmosphere boundary for a horizontal ray at ground level.
 	float H = sqrt(Sq(_TopRadius) - Sq(_PlanetRadius));
 	
 	// Distance to the horizon, from which we can compute r:
 	float rho = H * uv.y;
-	float r = sqrt(rho * rho + Sq(_PlanetRadius));
+	height = sqrt(Sq(rho) + Sq(_PlanetRadius));
 	
 	// Distance to the top atmosphere boundary for the ray (r,mu), and its minimum
 	// and maximum values over all mu - obtained for (r,1) and (r,mu_horizon) -
 	// from which we can recover mu:
-	float d_min = _TopRadius - r;
+	float d_min = _TopRadius - height;
 	float d_max = rho + H;
-	float d = d_min + uv.x * (d_max - d_min);
-	float mu = d == 0.0 ? 1.0 : (H * H - rho * rho - d * d) / (2.0 * r * d);
-	mu = clamp(mu, -1.0, 1.0);
-	
-	return float2(mu, r);
+	d = Remap(uv.x, 0.0, 1.0, d_min, d_max);
+	cosAngle = d == 0.0 ? 1.0 : (Sq(H) - Sq(rho) - Sq(d)) / (2.0 * height * d);
+	cosAngle = clamp(cosAngle, -1.0, 1.0);
 }
 
 // Calculates the height above the atmosphere based on the current view height, angle and distance
@@ -114,22 +108,25 @@ float CosAngleAtDistance(float viewHeight, float cosAngle, float distance)
 	return CosAngleAtDistance(viewHeight, cosAngle, distance, heightAtDistance);
 }
 
-float3 AtmosphereExtinctionNoOzone(float centerDistance)
-{
-	float4 rayleighMieExtinctionCombined = exp2(centerDistance * _AtmosphereExtinctionScale + _AtmosphereExtinctionOffset);
-	return rayleighMieExtinctionCombined.xyz + rayleighMieExtinctionCombined.w;
-}
-
 float3 AtmosphereExtinction(float centerDistance)
 {
-	float3 ozoneExtinction = max(0.0, _OzoneAbsorption - abs(centerDistance * _AtmosphereOzoneScale + _AtmosphereOzoneOffset));
-	return AtmosphereExtinctionNoOzone(centerDistance) + ozoneExtinction;
+	float height = max(0.0, centerDistance - _PlanetRadius);
+	
+	float3 extinction = exp(-height / _RayleighHeight) * _RayleighScatter;
+	extinction += exp(-height / _MieHeight) * (_MieAbsorption + _MieScatter);
+	extinction += max(0.0, 1.0 - abs(height - _OzoneHeight) / _OzoneWidth) * _OzoneAbsorption;
+	return extinction;
 }
 
 // Returns rayleigh (rgb and mie (a) scatter coefficient
 float4 AtmosphereScatter(float centerDistance)
 {
-	return exp2(centerDistance * _AtmosphereExtinctionScale + _AtmosphereScatterOffset);
+	float height = max(0.0, centerDistance - _PlanetRadius);
+	
+	float4 result;
+	result.xyz = exp(-height / _RayleighHeight) * _RayleighScatter;
+	result.w = exp(-height / _MieHeight) * _MieScatter;
+	return result;
 }
 
 float3 TransmittanceToAtmosphere(float viewHeight, float cosAngle)
@@ -143,6 +140,23 @@ float3 TransmittanceToAtmosphere(float3 P, float3 V)
 	float viewHeight = length(P);
 	float3 N = P / viewHeight;
 	return TransmittanceToAtmosphere(viewHeight, dot(N, V));
+}
+
+float3 TransmittanceToPoint(float radius0, float cosAngle0, float radius1, float cosAngle1)
+{
+	float3 lowTransmittance, highTransmittance;
+	if (radius0 > radius1)
+	{
+		lowTransmittance = TransmittanceToAtmosphere(radius1, -cosAngle1);
+		highTransmittance = TransmittanceToAtmosphere(radius0, -cosAngle0);
+	}
+	else
+	{
+		lowTransmittance = TransmittanceToAtmosphere(radius0, cosAngle0);
+		highTransmittance = TransmittanceToAtmosphere(radius1, cosAngle1);
+	}
+		
+	return highTransmittance == 0.0 ? 0.0 : lowTransmittance * rcp(highTransmittance);
 }
 
 float3 AtmosphereMultiScatter(float viewHeight, float cosAngle)
@@ -161,7 +175,7 @@ float3 AtmosphereLight(float3 P, float3 V, float3 L)
 	float angle = dot(V, L);
 	float4 atmosphereScatter = AtmosphereScatter(length(P));
 	float3 scatterColor = atmosphereScatter.xyz * RayleighPhaseFunction(angle);
-	scatterColor += atmosphereScatter.w * CornetteShanksPhasePartVarying(_MiePhase, angle) * _MiePhaseConstant;
+	scatterColor += atmosphereScatter.w * HenyeyGreensteinPhaseFunction(_MiePhase, angle);
 		
 	return scatterColor * TransmittanceToAtmosphere(P, L);
 }

@@ -11,7 +11,7 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
     [Input] private RenderTargetIdentifier gbuffer2;
 
     [Input] private float previousExposure;
-    [Input] private ComputeBuffer ambient;
+    [Input] private GraphicsBuffer ambient;
     [Input] private RenderTargetIdentifier atmosphereTransmittance;
     [Input] private RenderTargetIdentifier skyReflection;
     [Input] private int resolution;
@@ -56,7 +56,7 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
         scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "Result", result);
         scope.Command.SetComputeFloatParam(deferredComputeShader, "_ExposureValue", previousExposure);
         scope.Command.SetComputeFloatParam(deferredComputeShader, "_ExposureValueRcp", 1f / previousExposure);
-        scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_AmbientSh", ambient);
+        scope.Command.SetComputeConstantBufferParam(deferredComputeShader, "AmbientSh", ambient, 0, ambient.count * ambient.stride);
         scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_AtmosphereTransmittance", atmosphereTransmittance);
         scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_SkyReflection", skyReflection);
 

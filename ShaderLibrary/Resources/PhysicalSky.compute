@@ -25,6 +25,7 @@ float3 _StarColor;
 #ifdef __INTELLISENSE__
 	#define LIGHT_COUNT_ONE 
 	#define LIGHT_COUNT_TWO
+	#define REFLECTION_PROBE
 #endif
 
 [numthreads(8, 8, 1)]
@@ -136,8 +137,8 @@ void KERNEL_NAME(uint2 id : SV_DispatchThreadID)
 	}
 	
 #ifdef REFLECTION_PROBE
-	float4 cloudCoverage = _CloudCoverage[uint2(0, 0)];
-	luminance = luminance * cloudCoverage.a + cloudCoverage.rgb;
+	//float4 cloudCoverage = _CloudCoverage[uint2(0, 0)];
+	//luminance = luminance * cloudCoverage.a + cloudCoverage.rgb;
 	
 	luminance += clouds.rgb * transmittance;
 	transmittance *= clouds.a;
@@ -165,15 +166,15 @@ void SpatialDenoise(int2 id : SV_DispatchThreadID)
 {
 	float centerDepth = _Depth.mips[1][id];
 	
-	if (centerDepth == 0.0)
-	{
-		float cloudDepth = _CloudDepth[id] * _MaxDistance;
-		centerDepth = cloudDepth;
-	}
-	else
-	{
+	//if (centerDepth == 0.0)
+	//{
+	//	float cloudDepth = _CloudDepth[id] * _MaxDistance;
+	//	centerDepth = cloudDepth;
+	//}
+	//else
+	//{
 		centerDepth = LinearEyeDepth(centerDepth);
-	}
+	//}
 			
 	float3 scatter = 0.0, transmittance = 0.0;
 	float weightSum = 0.0;
@@ -220,9 +221,9 @@ void SpatialDenoise(int2 id : SV_DispatchThreadID)
 	scatter /= weightSum;
 	transmittance /= weightSum;
 	
-	float4 clouds = _VolumetricClouds[id];
-	scatter += clouds.rgb * transmittance;
-	transmittance *= clouds.a;
+	//float4 clouds = _VolumetricClouds[id];
+	//scatter += clouds.rgb * transmittance;
+	//transmittance *= clouds.a;
 	
 	_ScatterResult[id] = scatter;
 	_TransmittanceResult[id] = transmittance;
@@ -273,11 +274,11 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 			scatterStdDev += scatterColor * scatterColor;
 			transmittanceStdDev += transmittanceColor * transmittanceColor;
 			
-			if (depth == 0.0)
-			{
-				float cloudDepth = _CloudDepth[clamp(id + float2(x, y), 0, floor(_ScreenSize.xy * 0.5) - 1)] * _MaxDistance;
-				depth = EyeToDeviceDepth(cloudDepth);
-			}
+			//if (depth == 0.0)
+			//{
+			//	float cloudDepth = _CloudDepth[clamp(id + float2(x, y), 0, floor(_ScreenSize.xy * 0.5) - 1)] * _MaxDistance;
+			//	depth = EyeToDeviceDepth(cloudDepth);
+			//}
 			
 			if (depth > closestDepth)
 			{
@@ -411,8 +412,8 @@ void Upsample(int2 id : SV_DispatchThreadID)
 	//transmittance = _Transmittance[id >> 1];
 	//scatter = _Scatter[id >> 1];
 	
-	float4 cloudCoverage = _CloudCoverage[uint2(0, 0)];
-	scatter = scatter * cloudCoverage.a + cloudCoverage.rgb;
+	//float4 cloudCoverage = _CloudCoverage[uint2(0, 0)];
+	//scatter = scatter * cloudCoverage.a + cloudCoverage.rgb;
 	
 	// Render stars just before output. This ensures it will be full res
 	float3 V = -MultiplyVector(_PixelCoordToViewDirWS, float3(id.xy + 0.5, 1.0), false);

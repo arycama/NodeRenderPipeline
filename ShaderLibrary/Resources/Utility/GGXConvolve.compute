@@ -5,13 +5,15 @@
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/GGX.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Material.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/MatrixUtils.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Random.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Sampling.hlsl"
 
 RWTexture2DArray<float3> Result;
 TextureCube<float3> Input;
 
 float4x4 _PixelCoordToViewDirWS[6];
-float InvOmegaP, Level;
+float InvOmegaP, Level, RcpSampleCount, Roughness;
+uint SampleCount;
 
 [numthreads(8, 8, 1)]
 void GGXConvolve(uint3 id : SV_DispatchThreadID)
@@ -28,13 +30,12 @@ void GGXConvolve(uint3 id : SV_DispatchThreadID)
 	float3 lightInt = float3(0.0, 0.0, 0.0);
 	float cbsdfInt = 0.0;
 
-	uint sampleCount = GetIBLRuntimeFilterSampleCount(Level);
-	for (uint i = 0; i < sampleCount; ++i)
+	for (uint i = 0; i < SampleCount; ++i)
 	{
 		float3 L;
 		float NdotL, NdotH, LdotH;
 
-		float2 u = Fibonacci2d(i, sampleCount);
+		float2 u = Hammersley2dSeq(i, SampleCount);
 
         // Note: if (N == V), all of the microsurface normals are visible.
 		SampleGGXDir(u, V, localToWorld, roughness, L, NdotL, NdotH, LdotH, true);
@@ -54,7 +55,7 @@ void GGXConvolve(uint3 id : SV_DispatchThreadID)
 		float pdf = 0.25 * D_GGX(NdotH, roughness);
 		
         // TODO: improve the accuracy of the sample's solid angle fit for GGX.
-		float omegaS = rcp(sampleCount) * rcp(pdf);
+		float omegaS = RcpSampleCount * rcp(pdf);
 
         // 'invOmegaP' is precomputed on CPU and provided as a parameter to the function.
         // float omegaP = FOUR_PI / (6.0 * cubemapWidth * cubemapWidth);

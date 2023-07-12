@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using NodeGraph;
 using UnityEngine;
-using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 
 [NodeMenuItem("Lighting/Reflection Probe System")]
@@ -24,7 +23,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
     [SerializeField] private RenderPipelineSubGraph gbufferSubGraph;
     [SerializeField] private RenderPipelineSubGraph lightingSubGraph;
 
-    [Input] private ComputeBuffer ambient;
+    [Input] private GraphicsBuffer ambient;
     [Input] private RenderTargetIdentifier skyReflection;
     [Input] private RenderTargetIdentifier atmosphereTransmittance;
     [Input] private RenderTargetIdentifier exposure;
@@ -210,7 +209,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
                 camera.transform.rotation = Quaternion.LookRotation(fwd, up);
 
                 var depth = new RenderTexture(resolution, resolution, 16, RenderTextureFormat.Depth).Created();
-                var albedo = new RenderTexture(resolution, resolution, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB).Created();
+                var albedo = new RenderTexture(resolution, resolution, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB).Created();
                 var normal = new RenderTexture(resolution, resolution, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear).Created();
                 var emission = new RenderTexture(resolution, resolution, 0, RenderTextureFormat.RGB111110Float, RenderTextureReadWrite.Linear).Created();
 

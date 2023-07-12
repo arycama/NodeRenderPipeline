@@ -1,115 +1,129 @@
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Atmosphere.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Lighting.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Random.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Sampling.hlsl"
 
-#pragma kernel Transmittance KERNEL=Transmittance TRANSMITTANCE
-#pragma kernel MultiScatter KERNEL=MultiScatter MULTI_SCATTER
-
 #ifdef __INTELLISENSE__
+	#define AMBIENT
 	#define MULTI_SCATTER
-	//#define TRANSMITTANCE
 #endif
+
+#pragma kernel Transmittance
+#pragma kernel MultiScatter KERNEL=MultiScatter MULTI_SCATTER
+#pragma kernel Ambient KERNEL=Ambient AMBIENT
 
 RWTexture2D<float3> Result;
 float2 _ScaleOffset;
 uint _SampleCount;
 
-static const uint _ThreadCount = 64;
+[numthreads(64, 1, 1)]
+void Transmittance(uint2 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
+{
+	float2 uv = id * _ScaleOffset;
+	float viewHeight, viewCosAngle, rayLength;
+	UvToSkyParams(uv, viewHeight, viewCosAngle, rayLength);
+	
+	float3 opticalDepth = 0.0;
+	for (float i = 0.5; i < _SampleCount; i++)
+	{
+		float distance = float(i) / _SampleCount * rayLength;
+		float radius = HeightAtDistance(viewHeight, viewCosAngle, distance);
+		opticalDepth += AtmosphereExtinction(radius);
+	}
+	
+	float dx = rayLength / _SampleCount;
+	Result[id] = exp(-opticalDepth * dx);
+}
 
+static const uint _ThreadCount = 64;
 groupshared float3 MultiScatterShared[_ThreadCount], ScatterShared[_ThreadCount];
 
 [numthreads(_ThreadCount, 1, 1)]
 void KERNEL(uint2 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
 {
-	#ifdef TRANSMITTANCE
-		float2 uv = id * _ScaleOffset;
-		float2 skyParams = UvToSkyParams(uv);
-		float3 V = float3(SinFromCos(skyParams.x), skyParams.x, 0.0);
-		float3 L = 0.0;
-		bool rayIntersectsGround = false;
-	#else
-		float2 uv = groupId * _ScaleOffset;
-		float2 skyParams = float2(2.0 * uv.x - 1.0, uv.y * _AtmosphereHeight + _PlanetRadius);
-		float3 L = float3(SinFromCos(skyParams.x), skyParams.x, 0.0);
-		float2 u = Hammersley2dSeq(groupIndex, _ThreadCount);
-		float3 V = SampleSphereUniform(u.x, u.y);
-		bool rayIntersectsGround = RayIntersectsGround(skyParams.y, V.y);
-	#endif
+	float2 uv = groupId * _ScaleOffset;
+	float viewHeight = uv.y * _AtmosphereHeight + _PlanetRadius;
+	float lightCosAngle = 2.0 * uv.x - 1.0;
 	
-	float viewHeight = skyParams.y;
-	float3 luminance = 0.0, multiScatter = 0.0, opticalDepth = 0.0, transmittance = 1.0;
+	float3 L = float3(SinFromCos(lightCosAngle), lightCosAngle, 0.0);
+	float2 u = Hammersley2dSeq(groupIndex, _ThreadCount);
+	float3 V = SampleSphereUniform(u.x, u.y);
+	float viewCosAngle = V.y;
 	
-	// Compute the distance to the top atmosphere boundary along the view ray,
-    // assuming the viewer is in space (or NaN if the view ray does not intersect the atmosphere).
-	float dx = DistanceToNearestAtmosphereBoundary(viewHeight, V.y, rayIntersectsGround) / _SampleCount;
-	
+	float sampleCount = _ThreadCount;
+	bool rayIntersectsGround = RayIntersectsGround(viewHeight, viewCosAngle);
+	float rayLength = DistanceToNearestAtmosphereBoundary(viewHeight, viewCosAngle, rayIntersectsGround);
+	float dx = rayLength / sampleCount;
 	float LdotV = dot(V, L);
-	for (uint i = 0; i <= _SampleCount; i++)
-	{
-		float distance = float(i) * dx;
-		
-		// Distance between the current sample point and the planet center.
-		float radius = HeightAtDistance(viewHeight, V.y, distance);
-		
-		// Number density at the current sample point (divided by the number density
-		// at the bottom of the atmosphere, yielding a dimensionless number).
-		float3 extinction = AtmosphereExtinction(radius);
-		
-		// Sample weight (from the trapezoidal rule).
-		float weight = i == 0 || i == _SampleCount ? 0.5 : 1.0;
-		
-		float sunAngle = CosAngleAtDistance(viewHeight, L.y, distance * LdotV, radius);
-		if (!RayIntersectsGround(radius, sunAngle))
-		{
-			float2 uv = TransmittanceUv(radius, sunAngle);
-			float3 transmittanceToAtmosphere = _AtmosphereTransmittance.SampleLevel(_LinearClampSampler, uv, 0.0);
-			
-			float4 scatter = AtmosphereScatter(radius);
-			float3 lighting = RayleighPhaseFunction(LdotV) * transmittanceToAtmosphere * scatter.xyz;
-			lighting += CornetteShanksPhasePartVarying(_MiePhase, LdotV) * _MiePhaseConstant * transmittanceToAtmosphere * scatter.w;
-			
-			luminance += exp(-opticalDepth) * lighting * (1.0 - exp(-extinction * dx)) / extinction * weight;
-			multiScatter += exp(-opticalDepth) * (scatter.xyz + scatter.w) * (1.0 - exp(-extinction * dx)) / extinction * weight;
-		}
-		
-		opticalDepth += extinction * dx * weight;
-		transmittance *= exp(-extinction * dx);
-	}
 	
-	transmittance = exp(-opticalDepth);
+	
+	float3 luminance = 0.0, multiScatter = 0.0;
+	for (float i = 0.5; i < sampleCount; i++)
+	{
+		float distance = i / sampleCount * rayLength;
+		float sampleRadius = HeightAtDistance(viewHeight, viewCosAngle, distance);
+		float sunAngle = CosAngleAtDistance(viewHeight, L.y, distance * LdotV, sampleRadius);
+
+		float4 scatter = AtmosphereScatter(sampleRadius);
+		
+		#ifdef AMBIENT
+			// Uniform phase function for ambient, as we don't take cosPhi into account
+			float3 lighting = IsotropicPhaseFunction() * scatter.xyz;
+			lighting += IsotropicPhaseFunction() * scatter.w;
+		#else
+			float3 lighting = RayleighPhaseFunction(LdotV) * scatter.xyz;
+			lighting += HenyeyGreensteinPhaseFunction(_MiePhase, LdotV) * scatter.w;
+		#endif
+		
+		lighting *= TransmittanceToAtmosphere(sampleRadius, sunAngle);
+		float sampleCosAngle = CosAngleAtDistance(viewHeight, viewCosAngle, distance, sampleRadius);
+		float3 transmittance = TransmittanceToPoint(viewHeight, viewCosAngle, sampleRadius, sampleCosAngle);
+		float3 extinction = AtmosphereExtinction(sampleRadius);
+		
+		if (!RayIntersectsGround(sampleRadius, sunAngle))
+			luminance += transmittance * lighting * (1.0 - exp(-extinction * dx)) / extinction;
+		
+		multiScatter += transmittance * (scatter.xyz + scatter.w) * (1.0 - exp(-extinction * dx)) / extinction;
+		
+		#ifdef AMBIENT
+			float2 uv = ApplyScaleOffset(float2(0.5 * sunAngle + 0.5, (sampleRadius - _PlanetRadius) / _AtmosphereHeight), _AtmosphereMultiScatterRemap);
+			float3 ms = _MultipleScatter.SampleLevel(_LinearClampSampler, uv, 0.0);
+			luminance += ms * (scatter.xyz + scatter.w);
+		#endif
+	}
 	
 	// Account for bounced light off the earth
-	if (RayIntersectsGround(viewHeight, V.y))
+	if (rayIntersectsGround)
 	{
-		float d = dx * _SampleCount;
-		float centerDist = HeightAtDistance(viewHeight, V.y, d);
-
-		float LdotV = dot(V, L);
-		float NdotL = (viewHeight * L.y + d * LdotV) / centerDist;
-		float3 sunTransmittance = TransmittanceToAtmosphere(_PlanetRadius, NdotL);
-		//luminance += sunTransmittance * transmittance * saturate(NdotL) * _GroundColor / Pi;
+		float cosLightAngle = CosAngleAtDistance(viewHeight, L.y, rayLength * LdotV, _PlanetRadius);
+		float3 sunTransmittance = TransmittanceToAtmosphere(_PlanetRadius, cosLightAngle);
+		float3 transmittance = TransmittanceToPoint(viewHeight, viewCosAngle, _PlanetRadius, cosLightAngle);
+		luminance += sunTransmittance * transmittance * saturate(cosLightAngle) * _GroundColor * RcpPi;
 	}
 	
-	#ifdef TRANSMITTANCE
-		Result[id] = transmittance;
-	#endif
+	ScatterShared[groupIndex] = luminance;
+	MultiScatterShared[groupIndex] = multiScatter;
+
+	[unroll]
+	for (uint s = 32; s > 0; s >>= 1)
+	{
+		GroupMemoryBarrierWithGroupSync();
+		
+		if (groupIndex >= s)
+			continue;
+		
+		ScatterShared[groupIndex] = (ScatterShared[groupIndex] + ScatterShared[groupIndex + s]) * 0.5;
+		MultiScatterShared[groupIndex] = (MultiScatterShared[groupIndex] + MultiScatterShared[groupIndex + s]) * 0.5;
+	}
+	
+	if (groupIndex > 0)
+		return;
 	
 	#ifdef MULTI_SCATTER
-		ScatterShared[groupIndex] = luminance;
-		MultiScatterShared[groupIndex] = multiScatter;
-
-		for (uint s = 32; s > 0; s >>= 1)
-		{
-			GroupMemoryBarrierWithGroupSync();
-		
-			if (groupIndex < s)
-			{
-				ScatterShared[groupIndex] = (ScatterShared[groupIndex] + ScatterShared[groupIndex + s]) * 0.5;
-				MultiScatterShared[groupIndex] = (MultiScatterShared[groupIndex] + MultiScatterShared[groupIndex + s]) * 0.5;
-			}
-		}
+		Result[groupId] = ScatterShared[0] / (1.0 - MultiScatterShared[0]);
+	#endif
 	
-		if (groupIndex == 0)
-			Result[groupId] = ScatterShared[0] / (1.0 - MultiScatterShared[0] / (4.0 * Pi));
+	#ifdef AMBIENT
+		Result[groupId] = ScatterShared[0] * FourPi;
 	#endif
 }

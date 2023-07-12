@@ -7,7 +7,7 @@ public partial class UnderwaterLightingNode : RenderPipelineNode
 {
     [SerializeField] private Material material;
 
-    [Input] private ComputeBuffer ambient;
+    [Input] private GraphicsBuffer ambient;
 
     [Input] private SmartComputeBuffer<DirectionalLightData> directionalLightBuffer;
     [Input] private SmartComputeBuffer<Matrix4x4> spotlightShadowMatrices;
@@ -86,7 +86,7 @@ public partial class UnderwaterLightingNode : RenderPipelineNode
         var propertyBlock = GenericPool<MaterialPropertyBlock>.Get();
         propertyBlock.Clear();
 
-        propertyBlock.SetBuffer("_AmbientSh", ambient);
+        propertyBlock.SetConstantBuffer("AmbientSh", ambient, 0, ambient.count * ambient.stride);
         propertyBlock.SetBuffer("_LightClusterList", lightList);
         propertyBlock.SetBuffer("_LightData", lightData);
         propertyBlock.SetBuffer("_DirectionalLightData", directionalLightBuffer);

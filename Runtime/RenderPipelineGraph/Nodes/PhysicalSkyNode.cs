@@ -26,7 +26,6 @@ public partial class PhysicalSkyNode : RenderPipelineNode
     [Input] private RenderTargetIdentifier cloudDepth;
     [Input] private RenderTargetIdentifier cloudCoverage;
 
-    [Input] private ComputeBuffer ambient;
     [Input] private CullingResults cullingResults;
     [Input] private RenderTargetIdentifier directionalShadows;
     [Input, Output] private RenderTargetIdentifier result;
@@ -138,8 +137,6 @@ public partial class PhysicalSkyNode : RenderPipelineNode
         var tempDesc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, RenderTextureFormat.RGB111110Float) { enableRandomWrite = true };
         scope.Command.GetTemporaryRT(luminanceTemp, tempDesc);
         scope.Command.GetTemporaryRT(transmittanceTemp, tempDesc);
-
-        scope.Command.SetComputeBufferParam(computeShader, kernelIndex, "_AmbientSh", ambient);
 
         scope.Command.SetComputeTextureParam(computeShader, kernelIndex, "_Exposure", exposure);
         scope.Command.SetComputeTextureParam(computeShader, kernelIndex, "_AtmosphereTransmittance", transmittance);

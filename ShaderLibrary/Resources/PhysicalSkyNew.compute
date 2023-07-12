@@ -82,7 +82,7 @@ void PhysicalSky(uint2 id : SV_DispatchThreadID)
 	float2 rnd = _BlueNoise2D[id % 128];
 	float3 colorMask = floor(rnd.y * 3.0) == float3(0.0, 1.0, 2.0);
 	
-	float cloudDepth = _CloudDepth[id >> 1] * _MaxDistance * rcp(rcpLengthV);
+	float cloudDepth = _CloudDepth[id >> 1];
 	
 	bool rayIntersectsGround = RayIntersectsGround(_ViewHeight, V.y);
 	float baseMaxDist = DistanceToNearestAtmosphereBoundary(_ViewHeight, V.y, rayIntersectsGround);
@@ -230,6 +230,11 @@ void PhysicalSky(uint2 id : SV_DispatchThreadID)
 		#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
 			float LdotV = dot(V, _LightDirection0);
 			float sunAngle = CosAngleAtDistance(_ViewHeight, _LightDirection0.y, t * LdotV, radius);
+		
+			float2 uv = ApplyScaleOffset(float2(0.5 * sunAngle + 0.5, (radius - _PlanetRadius) / _AtmosphereHeight), _AtmosphereMultiScatterRemap);
+			float3 ms = _MultipleScatter.SampleLevel(_LinearClampSampler, uv, 0.0);
+			float3 lighting = ms * (scatter.xyz + scatter.w);
+		
 			if (!RayIntersectsGround(radius, sunAngle))
 			{
 				float3 transmittanceToAtmosphere = TransmittanceToAtmosphere(radius, sunAngle);
@@ -238,37 +243,38 @@ void PhysicalSky(uint2 id : SV_DispatchThreadID)
 					float attenuation = DirectionalLightShadow(t * V, 0, 0.5, false);
 					if (attenuation > 0.0)
 					{
-						attenuation *= CloudTransmittanceLevelZero(t * V);
+						#ifdef CLOUDS
+							attenuation *= CloudTransmittanceLevelZero(t * V);
+						#endif
+					
 						if (attenuation > 0.0)
 						{
-							float2 uv = float2(0.5 * sunAngle + 0.5, (radius - _PlanetRadius) / _AtmosphereHeight);
-							float3 ms = _MultipleScatter.SampleLevel(_LinearClampSampler, uv * _AtmosphereMultiScatterRemap.xy + _AtmosphereMultiScatterRemap.zw, 0.0);
-		
-							float3 lighting = (RayleighPhaseFunction(LdotV) * transmittanceToAtmosphere + ms) * scatter.xyz;
-							lighting += (CornetteShanksPhaseFunction(_MiePhase, LdotV) * transmittanceToAtmosphere + ms) * scatter.w;
-							lighting *= attenuation;
-							luminance += ApplyExposure(_LightColor0) * lighting * weight;
+							lighting += (RayleighPhaseFunction(LdotV) * transmittanceToAtmosphere) * scatter.xyz * attenuation;
+							lighting += (CornetteShanksPhaseFunction(_MiePhase, LdotV) * transmittanceToAtmosphere) * scatter.w * attenuation;
 						}
 					}
 				}
 			}
+		
+			luminance += ApplyExposure(_LightColor0) * lighting * weight;
 		#endif
 		
 		#ifdef LIGHT_COUNT_TWO
 			float LdotV1 = dot(V, _LightDirection1);
 			float sunAngle1 = CosAngleAtDistance(_ViewHeight, _LightDirection1.y, t * LdotV1, radius);
+			float2 uv1 = ApplyScaleOffset(float2(0.5 * sunAngle1 + 0.5, (radius - _PlanetRadius) / _AtmosphereHeight), _AtmosphereMultiScatterRemap);
+			float3 ms1 = _MultipleScatter.SampleLevel(_LinearClampSampler, uv1, 0.0);
+			luminance += ApplyExposure(_LightColor1) * ms1 * (scatter.xyz + scatter.w) * weight;
+		
 			if (!RayIntersectsGround(radius, sunAngle1))
 			{
 				float3 transmittanceToAtmosphere = TransmittanceToAtmosphere(radius, sunAngle1);
 				if (any(transmittanceToAtmosphere > 0.0))
 				{
-					float2 uv = float2(0.5 * sunAngle + 0.5, (radius - _PlanetRadius) / _AtmosphereHeight);
-					float3 ms = _MultipleScatter.SampleLevel(_LinearClampSampler, uv * _AtmosphereMultiScatterRemap.xy + _AtmosphereMultiScatterRemap.zw, 0.0);
-		
-					float3 lighting = (RayleighPhaseFunction(LdotV1) * transmittanceToAtmosphere + ms) * scatter.xyz;
-					lighting += (CornetteShanksPhaseFunction(_MiePhase, LdotV1) * transmittanceToAtmosphere + ms) * scatter.w;
+					float3 lighting = RayleighPhaseFunction(LdotV1) * transmittanceToAtmosphere * scatter.xyz;
+					lighting += CornetteShanksPhaseFunction(_MiePhase, LdotV1) * transmittanceToAtmosphere * scatter.w;
 					luminance += ApplyExposure(_LightColor1) * lighting * weight;
-				}
+				} 
 			}
 		#endif
 	}

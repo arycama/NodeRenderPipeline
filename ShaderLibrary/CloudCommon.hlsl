@@ -4,7 +4,7 @@
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Lighting.hlsl"
 
 Texture3D<float> _CloudNoise, _CloudDetail;
-Texture2D<float3> _WeatherTexture;
+Texture2D<float3> _WeatherTexture, _CloudAmbient;
 
 float3 _LightColor0, _LightDirection0, _LightColor1, _LightDirection1;
 float _Thickness, _Height, _WeatherScale;
@@ -28,7 +28,7 @@ float SampleCloudDensity(float3 positionWS)
 
 	positionWS += _WorldSpaceCameraPos;
 	float baseNoise = _CloudNoise.SampleLevel(_LinearRepeatSampler, positionWS * _NoiseScale, 0);
-	float3 weatherData = _WeatherTexture.SampleLevel(_LinearRepeatSampler, positionWS.xz * _WeatherScale + _WindSpeed * _Time.y, 0);
+	float3 weatherData = _WeatherTexture.SampleLevel(_LinearRepeatSampler, positionWS.xz * _WeatherScale + _WindSpeed * _Time.y * 0, 0);
     
 	float cloudCoverage = gradient * weatherData.r;
 	float baseCloud = saturate(Remap(baseNoise, 1.0 - cloudCoverage, 1.0)) * cloudCoverage;
@@ -104,10 +104,6 @@ float4 SampleCloud(float3 P, float3 V, float startDistance, float stepLength, fl
 	}
 	
 	averageDepth = weightedTransmittanceSum / max(1e-6, transmittanceSum);// / (0.5 + 0.5 / sampleCount);
-	
-	// Apply Ambient 
-	color.rgb += AmbientLightCornetteShanks(V, 0.0, 0.0, 0.5) * (1.0 - color.a);
-
 	return color;
 }
 
@@ -120,7 +116,7 @@ float4 RenderCloud(float3 P, float3 rayDir, uint2 id, float depth, float sceneDe
 
 	bool isMaxDepth = depth == _FarClipValue;
 
-	cloudDepth = _MaxDistance * 2;
+	cloudDepth = IntersectRaySphereSimple(P + _PlanetOffset, rayDir, _TopRadius);
 	float startDistance = 0, endDistance = 0;
 
 	bool belowClouds = length(P + _PlanetOffset) < _PlanetRadius + _Height;

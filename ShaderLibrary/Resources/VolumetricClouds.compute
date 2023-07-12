@@ -101,13 +101,23 @@ void Cloud(uint2 id : SV_DispatchThreadID)
 	float sceneDepth = lengthV * LinearEyeDepth(depth);
 
 	float cloudDepth;
-	float4 cloudResult = RenderCloud(P, V, id, depth, sceneDepth, cloudDepth, noise);
+	float4 color = RenderCloud(P, V, id, depth, sceneDepth, cloudDepth, noise);
+	color.a = saturate(Remap(color.a, _TransmittanceThreshold));
 	
 	// Adjust max cloud depth based on alpha
 	float maxDistance = IntersectRaySphereSimple(P + _PlanetOffset, V, _TopRadius);
-	cloudDepth = lerp(cloudDepth, maxDistance, cloudResult.a);
-	cloudResult.a = saturate(Remap(cloudResult.a, _TransmittanceThreshold));
+	cloudDepth = lerp(cloudDepth, maxDistance, color.a);
 	
-	_Result[id] = cloudResult;
-	_DepthResult[id] = cloudDepth / _MaxDistance / lengthV;
+	// Apply Ambient 
+	float3 sampleP = P + V * cloudDepth + _PlanetOffset;
+	float viewHeight = length(sampleP);
+	float3 N = normalize(sampleP);
+	float LdotV = dot(_LightDirection0, N);
+	
+	float2 uv = ApplyScaleOffset(float2(0.5 * LdotV + 0.5, (viewHeight - _PlanetRadius) / _AtmosphereHeight), _AtmosphereAmbientRemap);
+	float3 ambient = _CloudAmbient.SampleLevel(_LinearClampSampler, uv, 0.0);
+	color.rgb += ambient * (1.0 - color.a);
+	
+	_Result[id] = color;
+	_DepthResult[id] = cloudDepth;
 }
