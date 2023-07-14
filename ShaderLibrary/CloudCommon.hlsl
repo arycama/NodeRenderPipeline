@@ -28,7 +28,7 @@ float SampleCloudDensity(float3 positionWS)
 
 	positionWS += _WorldSpaceCameraPos;
 	float baseNoise = _CloudNoise.SampleLevel(_LinearRepeatSampler, positionWS * _NoiseScale, 0);
-	float3 weatherData = _WeatherTexture.SampleLevel(_LinearRepeatSampler, positionWS.xz * _WeatherScale + _WindSpeed * _Time.y * 0, 0);
+	float3 weatherData = _WeatherTexture.SampleLevel(_LinearRepeatSampler, positionWS.xz * _WeatherScale + _WindSpeed * _Time.y, 0);
     
 	float cloudCoverage = gradient * weatherData.r;
 	float baseCloud = saturate(Remap(baseNoise, 1.0 - cloudCoverage, 1.0)) * cloudCoverage;

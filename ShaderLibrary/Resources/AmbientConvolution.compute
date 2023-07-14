@@ -7,22 +7,22 @@
 #pragma kernel AmbientProbeConvolution PROBE
 
 #ifdef __INTELLISENSE__
-    #define PROBE
+    //#define PROBE
 #endif
 
 RWBuffer<float4> _AmbientProbeOutputBuffer;
 TextureCube<float3> _AmbientProbeInputCubemap;
 
 static const uint _SampleCount = 256;
-static const uint _ShCoeffCount = 9;
+static const uint _ShCoeffCount = 7;
 
 // Allocate space for parallel reduction (so half the number of samples.
-groupshared float3 outputSHCoeffsLDS[_ShCoeffCount * _SampleCount / 2];
+groupshared float4 OutputSHCoeffs[_SampleCount][_ShCoeffCount];
 
 uint _DstOffset;
 
 [numthreads(_SampleCount, 1, 1)]
-void AmbientProbeConvolution(uint dispatchThreadId : SV_DispatchThreadID)
+void AmbientProbeConvolution(uint groupIndex : SV_GroupIndex)
 {
     float2 cubeSize;
     _AmbientProbeInputCubemap.GetDimensions(cubeSize.x, cubeSize.y);
@@ -39,69 +39,89 @@ void AmbientProbeConvolution(uint dispatchThreadId : SV_DispatchThreadID)
     float omegaS = rcp(_SampleCount) * rcp(pdf);
     float mipLevel = 0.5 * log2(omegaS * invOmegaP);
 
-    float2 u = Hammersley2dSeq(dispatchThreadId, _SampleCount);
+	float2 u = Hammersley2dSeq(groupIndex, _SampleCount);
     float3 n = SampleSphereUniform(u.x, u.y);
 
     // Sample once per thread
     float weight = 4.0 * Pi / _SampleCount;
     float3 value = _AmbientProbeInputCubemap.SampleLevel(_LinearClampSampler, n, mipLevel) * weight;
 
-    float3 outputSHCoeffs[_ShCoeffCount];
-
-    outputSHCoeffs[0] = value * 1.0 / (2.0 * SqrtPi);
-	outputSHCoeffs[1] = value * sqrt(3.0) / (2.0 * SqrtPi) * n.y;
-	outputSHCoeffs[2] = value * sqrt(3.0) / (2.0 * SqrtPi) * n.z;
-	outputSHCoeffs[3] = value * sqrt(3.0) / (2.0 * SqrtPi) * n.x;
-	outputSHCoeffs[4] = value * sqrt(15.0) / (2.0 * SqrtPi) * n.y * n.x;
-	outputSHCoeffs[5] = value * sqrt(15.0) / (2.0 * SqrtPi) * n.y * n.z;
-	outputSHCoeffs[6] = value * sqrt(5.0) / (4.0 * SqrtPi) * (3.0 * n.z * n.z - 1.0);
-	outputSHCoeffs[7] = value * sqrt(15.0) / (2.0 * SqrtPi) * n.x * n.z;
-	outputSHCoeffs[8] = value * sqrt(15.0) / (4.0 * SqrtPi) * (n.x * n.x - n.y * n.y);
-
-    // Parallel reduction of all threads result.
-	for (uint k = 0; k < (uint) log2(_SampleCount); ++k)
-    {
-        // Each loop iteration, even threads store their result in LDS, odd threads sum them up back to local VGPR until all results are summed up.
-        if ((dispatchThreadId & ((2 << k) - 1)) == (1 << k))
-        {
-            uint index = dispatchThreadId >> (k + 1);
-            for (uint coeff = 0; coeff < _ShCoeffCount; ++coeff)
-            {
-                outputSHCoeffsLDS[index * _ShCoeffCount + coeff] = outputSHCoeffs[coeff];
-            }
-        }
-
-        GroupMemoryBarrierWithGroupSync();
-
-        if ((dispatchThreadId & ((2 << k) - 1)) == 0)
-        {
-            uint index = dispatchThreadId >> (k + 1);
-            for (uint coeff = 0; coeff < _ShCoeffCount; ++coeff)
-            {
-                outputSHCoeffs[coeff] += outputSHCoeffsLDS[index * _ShCoeffCount + coeff];
-            }
-        }
-
-        GroupMemoryBarrierWithGroupSync();
-    }
+    // Sum the values
+	float3 outputSHCoeffs[9];
+	outputSHCoeffs[0] = value;
+	outputSHCoeffs[1] = value * n.y;
+	outputSHCoeffs[2] = value * n.z;
+	outputSHCoeffs[3] = value * n.x;
+	outputSHCoeffs[4] = value * n.y * n.x;
+	outputSHCoeffs[5] = value * n.y * n.z;
+	outputSHCoeffs[6] = value * (3.0 * n.z * n.z - 1.0);
+	outputSHCoeffs[7] = value * n.x * n.z;
+	outputSHCoeffs[8] = value * (n.x * n.x - n.y * n.y);
+    
+    // Clamped cosine convolution coefs
+	float A0 = sqrt(FourPi / 1.0) * sqrt(1.0 * Pi) / 2.0;
+	float A1 = sqrt(FourPi / 3.0) * sqrt(3.0 * Pi) / 3.0;
+	float A2 = sqrt(FourPi / 5.0) * sqrt(5.0 * Pi) / 16.0;
+    
+	float Y[9] =
+	{
+		1.0 / (2.0 * SqrtPi), // 0  0
+        -sqrt(3.0) / (2.0 * SqrtPi), // 1 -1
+        sqrt(3.0) / (2.0 * SqrtPi), // 1  0
+        -sqrt(3.0) / (2.0 * SqrtPi), // 1  1
+        sqrt(15.0) / (2.0 * SqrtPi), // 2 -2
+        -sqrt(15.0) / (2.0 * SqrtPi), // 2 -1
+        sqrt(5.0) / (4.0 * SqrtPi), // 2  0
+        -sqrt(15.0) / (2.0 * SqrtPi), // 2  1
+        sqrt(15.0) / (4.0 * SqrtPi) // 2  2
+	};
+    
+	outputSHCoeffs[0] *= Y[0] * (Y[0] * A0) * RcpPi;
+	outputSHCoeffs[1] *= Y[1] * (Y[1] * A1) * RcpPi;
+	outputSHCoeffs[2] *= Y[2] * (Y[2] * A1) * RcpPi;
+	outputSHCoeffs[3] *= Y[3] * (Y[3] * A1) * RcpPi;
+	outputSHCoeffs[4] *= Y[4] * (Y[4] * A2) * RcpPi;
+	outputSHCoeffs[5] *= Y[5] * (Y[5] * A2) * RcpPi;
+	outputSHCoeffs[6] *= Y[6] * (Y[6] * A2) * RcpPi;
+	outputSHCoeffs[7] *= Y[7] * (Y[7] * A2) * RcpPi;
+	outputSHCoeffs[8] *= Y[8] * (Y[8] * A2) * RcpPi;
+	
+	OutputSHCoeffs[groupIndex][0] = float4(outputSHCoeffs[3].r, outputSHCoeffs[1].r, outputSHCoeffs[2].r, outputSHCoeffs[0].r - outputSHCoeffs[6].r);
+	OutputSHCoeffs[groupIndex][1] = float4(outputSHCoeffs[3].g, outputSHCoeffs[1].g, outputSHCoeffs[2].g, outputSHCoeffs[0].g - outputSHCoeffs[6].g);
+	OutputSHCoeffs[groupIndex][2] = float4(outputSHCoeffs[3].b, outputSHCoeffs[1].b, outputSHCoeffs[2].b, outputSHCoeffs[0].b - outputSHCoeffs[6].b);
+	OutputSHCoeffs[groupIndex][3] = float4(outputSHCoeffs[4].r, outputSHCoeffs[5].r, outputSHCoeffs[6].r * 3.0, outputSHCoeffs[7].r);
+	OutputSHCoeffs[groupIndex][4] = float4(outputSHCoeffs[4].g, outputSHCoeffs[5].g, outputSHCoeffs[6].g * 3.0, outputSHCoeffs[7].g);
+	OutputSHCoeffs[groupIndex][5] = float4(outputSHCoeffs[4].b, outputSHCoeffs[5].b, outputSHCoeffs[6].b * 3.0, outputSHCoeffs[7].b);
+	OutputSHCoeffs[groupIndex][6] = float4(outputSHCoeffs[8].r, outputSHCoeffs[8].g, outputSHCoeffs[8].b, 1.0);
+	
+	for (uint s = _SampleCount >> 1; s > 0; s >>= 1)
+	{
+		GroupMemoryBarrierWithGroupSync();
+		
+		if (groupIndex < s)
+		{
+			[unroll]
+			for (uint i = 0; i < _ShCoeffCount; i++)
+			{
+				OutputSHCoeffs[groupIndex][i] += OutputSHCoeffs[groupIndex + s][i];
+			}
+		}
+	}
 
     // Write to memory
-    if (dispatchThreadId == 0)
-    {
-        #ifdef PROBE
-		    float3 l0 = outputSHCoeffs[0];
-		    float3 l1 = outputSHCoeffs[1];
-		    float3 l2 = outputSHCoeffs[2];
-		    float3 l3 = outputSHCoeffs[3];
+	if (groupIndex < 7)
+	{
+		#ifdef PROBE
+			float3 l0 = outputSHCoeffs[0];
+			float3 l1 = outputSHCoeffs[1];
+			float3 l2 = outputSHCoeffs[2];
+			float3 l3 = outputSHCoeffs[3];
         
-		    _AmbientProbeOutputBuffer[_DstOffset + 0] = float4(l0.r, l1.r, l2.r, l3.r);
-		    _AmbientProbeOutputBuffer[_DstOffset + 1] = float4(l0.g, l1.g, l2.g, l3.g);
-		    _AmbientProbeOutputBuffer[_DstOffset + 2] = float4(l0.b, l1.b, l2.b, l3.b);
-        #else
-            for (uint i = 0; i < _ShCoeffCount; ++i)
-            {
-                _AmbientProbeOutputBuffer[i] = float4(outputSHCoeffs[i], 1.0);
-            }
-        #endif
-    }
+			_AmbientProbeOutputBuffer[_DstOffset + 0] = float4(l0.r, l1.r, l2.r, l3.r);
+			_AmbientProbeOutputBuffer[_DstOffset + 1] = float4(l0.g, l1.g, l2.g, l3.g);
+			_AmbientProbeOutputBuffer[_DstOffset + 2] = float4(l0.b, l1.b, l2.b, l3.b);
+		#else
+			_AmbientProbeOutputBuffer[groupIndex] = OutputSHCoeffs[0][groupIndex];
+		#endif
+	}
 }

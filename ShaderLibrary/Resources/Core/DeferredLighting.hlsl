@@ -23,3 +23,4 @@ float3 Fragment(float4 positionCS : SV_Position) : SV_Target
 	float3 tangentWS = frame[0] * dot(surface.tangentWS, frame[0]) + frame[1] * dot(surface.tangentWS, frame[1]);
 	return GetLighting(float4(positionCS.xy, depth, linearEyeDepth), surface.Normal, tangentWS, input) + surface.Emission;
 }
+;

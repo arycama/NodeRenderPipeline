@@ -87,7 +87,7 @@ float3 GetLighting1(float4 positionCS, float3 N, float3 T, PbrInput input)
 			continue;
     
 		float3 lightColor = TransmittanceToAtmosphere(positionWS + _PlanetOffset, lightData.Direction) * ApplyExposure(lightData.Color);
-		luminance += input.albedo * saturate(dot(N, lightData.Direction)) * RcpPi * lightColor;
+		//luminance += input.albedo * saturate(dot(N, lightData.Direction)) * RcpPi * lightColor;
 	}
 	
 	return luminance;

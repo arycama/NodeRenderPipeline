@@ -105,7 +105,7 @@ void KERNEL(uint2 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, uint gro
 	MultiScatterShared[groupIndex] = multiScatter;
 
 	[unroll]
-	for (uint s = 32; s > 0; s >>= 1)
+	for (uint s = _ThreadCount >> 1; s > 0; s >>= 1)
 	{
 		GroupMemoryBarrierWithGroupSync();
 		

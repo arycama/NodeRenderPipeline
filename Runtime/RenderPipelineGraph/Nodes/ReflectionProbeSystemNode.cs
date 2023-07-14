@@ -120,6 +120,9 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 
     public override void NodeChanged()
     {
+        Cleanup();
+        Initialize();
+
         if (lightingSubGraph != null)
         {
             lightingSubGraph.Cleanup();
