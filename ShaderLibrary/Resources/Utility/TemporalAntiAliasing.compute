@@ -54,11 +54,11 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 	}
 	
 	mean /= 9.0;
-	stdDev = sqrt(abs(stdDev / 9.0 - Sq(mean)));// * 0.75;
+	stdDev = sqrt(abs(stdDev / 9.0 - Sq(mean)));
 	
 	// Clamp mean/stdDev to min/Max
-	//minValue = max(minValue, mean - stdDev);
-	//maxValue = min(maxValue, mean + stdDev);
+	minValue = max(minValue, mean - stdDev);
+	maxValue = min(maxValue, mean + stdDev);
 	
 	mean = 0.5 * (maxValue + minValue);
 	stdDev = 0.5 * (maxValue - minValue);

@@ -28,7 +28,7 @@ float PerceptualRoughnessToRoughness(float perceptualRoughness)
 
 float LengthToRoughness(float len)
 {
-	len = Remap(len, 2.0 / 3.0, 1.0);
+	len = saturate(Remap(len, 2.0 / 3.0, 1.0));
 	float2 uv = Remap01ToHalfTexelCoord(float2(len, 0.5), float2(256.0, 1));
 	return _LengthToRoughness.SampleLevel(_LinearClampSampler, uv, 0.0);
 }

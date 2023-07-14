@@ -144,15 +144,15 @@ void InstanceCull(uint2 groupThreadId : SV_GroupThreadID, uint groupIndex : SV_G
 		return;
 	
 	// Each thread writes one cell data to global memory
-	uint cellData = _CellData[groupIndex];
+	int cellData = _CellData[groupIndex];
 	
 	// If there is only one pass, calculate lod factors. Otherwise it must be done in a seperate pass
 	#if defined(FIRST) && defined(FINAL)
-		uint lod = (cellData >> 20) & 0xF;
+		int lod = (cellData >> 20) & 0xF;
 		int offset = 1 << lod;
 	
-		uint dataColumn = ((cellData.x >> 0) & 0x3FF) * offset;
-		uint dataRow = ((cellData.x >> 10) & 0x3FF) * offset;
+		int dataColumn = ((cellData.x >> 0) & 0x3FF) * offset;
+		int dataRow = ((cellData.x >> 10) & 0x3FF) * offset;
 	
 		int2 right = int2(dataColumn + offset, dataRow + 0);
 		int2 up = int2(dataColumn + 0, dataRow + offset);

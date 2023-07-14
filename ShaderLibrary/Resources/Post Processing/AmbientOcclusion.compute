@@ -110,7 +110,7 @@ void Compute(uint2 id : SV_DispatchThreadID)
 				// Falloff
 				float start = _WorldRadius * 0.75 * ratio;
 				float end = _WorldRadius * ratio;
-				float weight = 1;//saturate((end - distance(sPosV, cPosV)) / (end - start));
+				float weight = saturate((end - distance(sPosV, cPosV)) / (end - start));
 				float sHorizonCos = lerp(lowHorizonCos, dot(sHorizonV, viewV), weight);
 			
 				if (sHorizonCos >= cHorizonCos)

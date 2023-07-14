@@ -62,8 +62,8 @@ HullInput Vertex(VertexInput input)
 {
 	uint column = input.vertexID % _VerticesPerEdge;
 	uint row = input.vertexID / _VerticesPerEdge;
-	float x = column;
-	float y = row;
+	uint x = column;
+	uint y = row;
 	
 	uint cellData = _PatchData[input.instanceID];
 	uint dataColumn = (cellData >> 0) & 0x3FF;
@@ -83,7 +83,7 @@ HullInput Vertex(VertexInput input)
 	if (row == 0)
 		x = (floor(column * exp2(-diffs.w)) + (frac(column * exp2(-diffs.w)) > 0.5)) * exp2(diffs.w);
 	
-	float2 vertex = (float2(x, y) * _RcpVerticesPerEdgeMinusOne + float2(dataColumn, dataRow)) * exp2(lod);
+	float2 vertex = ((uint2(x, y) << lod) * _RcpVerticesPerEdgeMinusOne + (uint2(dataColumn, dataRow) << lod));
 	
 	HullInput output;
 	output.patchData = uint4(column, row, lod, cellData);

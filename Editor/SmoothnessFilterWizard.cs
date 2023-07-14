@@ -102,7 +102,7 @@ public class SmoothnessFilterImporter : AssetPostprocessor
 
         var computeShader = Resources.Load<ComputeShader>("Utility/SmoothnessFilter");
         var generateLengthToSmoothnessKernel = computeShader.FindKernel("GenerateLengthToSmoothness");
-        computeShader.SetFloat("_MaxIterations", 32);
+        computeShader.SetFloat("_MaxIterations", 256);
         computeShader.SetFloat("_Resolution", 256);
         computeShader.SetTexture(generateLengthToSmoothnessKernel, "_LengthToRoughnessResult", lengthToSmoothness);
         computeShader.DispatchNormalized(generateLengthToSmoothnessKernel, 256, 1, 1);

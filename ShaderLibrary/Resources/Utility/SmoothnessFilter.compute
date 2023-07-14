@@ -22,30 +22,25 @@ float4 PackNormalDxt(float3 normal)
 void GenerateLengthToSmoothness(uint2 id : SV_DispatchThreadID)
 {
     float uv = id.x / (_Resolution - 1.0);
-	float t = Remap(uv, 2.0 / 3.0); // Remap target
+	float target = Remap(uv, 0.0, 1.0, 2.0 / 3.0, 1.0); // Remap target
+    
+	float t = 0; //xi;
+	float minDelta = FloatMax;
 
-    // Bisection
-    float a = 0.0;
-    float b = 1.0;
-
-    float fa = RoughnessToNormalLength(a) - t;
-    for (float i = 0; i < _MaxIterations; i++)
+    for (float i = 0; i < 256.0; i++)
     {
-        float p = a + (b - a) / 2;
-        float fp = RoughnessToNormalLength(p) - t;
+		float xi = i / (256.0 - 1.0);
+        float currentLength = RoughnessToNormalLength(xi);
 
-        if (sign(fa) * sign(fp) > 0.0)
-        {
-            a = p;
-            fa = fp;
-        }
-        else
-        {
-            b = p;
-        }
-    }
+		float delta = abs(currentLength - target);
+		if (delta < minDelta)
+		{
+			minDelta = delta;
+			t = xi;
+		}
+	}
 
-    _LengthToRoughnessResult[id] = a + (b - a) / 2;
+	_LengthToRoughnessResult[id] = t;
 }
 
 [numthreads(8, 8, 1)]

@@ -368,7 +368,7 @@ float3 F_Schlick(float3 f0, float u)
 float ProjectedSphereRadius(float worldRadius, float3 worldPosition)
 {
 	float d2 = dot(worldPosition, worldPosition);
-	return worldRadius * abs(CameraAspect) * rsqrt(d2 - worldRadius * worldRadius);
+	return worldRadius * abs(CameraAspect) * rsqrt(max(0.0, d2 - worldRadius * worldRadius));
 }
 
 // Total number of pixels in a texture

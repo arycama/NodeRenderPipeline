@@ -4,6 +4,7 @@
 #define TESSELLATION_UTILS_INCLUDED
 
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Core.hlsl"
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Geometry.hlsl"
 
 // Returns true if triangle with given 3 world positions is outside of camera's view frustum.
 // cullEps is distance outside of frustum that is still considered to be inside (i.e. max displacement)
@@ -48,7 +49,7 @@ float CalculateSphereEdgeFactor(float3 corner0, float3 corner1, float targetEdge
 {
 	float3 edgeCenter = 0.5 * (corner0 + corner1);
 	float r = 0.5 * distance(corner0, corner1);
-	return min(64.0, CalculateSphereEdgeFactor(r, edgeCenter, targetEdgeLength));
+	return CalculateSphereEdgeFactor(r, edgeCenter, targetEdgeLength);
 }
 
 float4 BarycentricInterpolate(float4 point0, float4 point1, float4 point2, float3 weights)
