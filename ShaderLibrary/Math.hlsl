@@ -36,7 +36,7 @@ float FastACosPos(float inX)
 {
 	float x = abs(inX);
 	float res = (0.0468878 * x + -0.203471) * x + HalfPi; // p(x)
-	return res * sqrt(1.0 - x);
+	return res * sqrt(max(0.0, 1.0 - x));
 }
 
 // Input [0, 1] and output [0, PI/2], 9 VALU
@@ -44,7 +44,7 @@ float3 FastACosPos(float3 inX)
 {
 	float3 x = abs(inX);
 	float3 res = (0.0468878 * x + -0.203471) * x + HalfPi; // p(x)
-	return res * sqrt(1.0 - x);
+	return res * sqrt(max(0.0, 1.0 - x));
 }
 
 // Ref: https://seblagarde.wordpress.com/2014/12/01/inverse-trigonometric-functions-gpu-optimization-for-amd-gcn-architecture/

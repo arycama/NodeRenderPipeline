@@ -73,6 +73,7 @@ void CSMain(uint2 id : SV_DispatchThreadID)
 	//result /= _SampleCount;
 	
 	_Result[id] = result;
+	_Result[id] = _Input[id];
 }
 
 [numthreads(8, 8, 1)]

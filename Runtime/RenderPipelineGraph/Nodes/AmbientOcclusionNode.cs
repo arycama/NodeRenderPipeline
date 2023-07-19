@@ -12,6 +12,8 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
 
     [SerializeField, Input] private bool isEnabled = true;
 
+    [SerializeField, Range(0f, 1f)] private float scaleFactor = 0.5f;
+
     [Header("Appareance")]
     [Input, SerializeField] private bool debugNoise;
     [Input, SerializeField, Range(1f, 32f)] private float worldRadius = 5f;
@@ -72,7 +74,10 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
         if (!isEnabled)
             return;
 
-        var desc0 = new RenderTextureDescriptor(camera.pixelWidth >> 1, camera.pixelHeight >> 1, GraphicsFormat.R32_SInt, 0) { enableRandomWrite = true };
+        var width = Mathf.FloorToInt(camera.pixelWidth * scaleFactor);
+        var height = Mathf.FloorToInt(camera.pixelHeight * scaleFactor);
+
+        var desc0 = new RenderTextureDescriptor(width, height, GraphicsFormat.R32_SInt, 0) { enableRandomWrite = true };
 
         using var scope = context.ScopedCommandBuffer("Ambient Occlusion", true);
         scope.Command.SetRenderTarget(BuiltinRenderTextureType.None);
@@ -145,6 +150,9 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
 
     private void ComputeAO(CommandBuffer command, Camera camera, RenderTargetIdentifier result)
     {
+        var width = Mathf.FloorToInt(camera.pixelWidth * scaleFactor);
+        var height = Mathf.FloorToInt(camera.pixelHeight * scaleFactor);
+
         var blueNoise2D = Resources.Load<Texture2D>(blueNoiseIds.GetString(debugNoise ? 0 : FrameCount % 64));
 
         var tanHalfFovY = Mathf.Tan(camera.fieldOfView * Mathf.Deg2Rad * 0.5f);
@@ -164,11 +172,15 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
         command.SetComputeFloatParam(computeShader, "_DirectionCount", directionCount);
         command.SetComputeFloatParam(computeShader, "_MaxScreenRadius", maxScreenRadius * camera.pixelHeight);
         command.SetComputeFloatParam(computeShader, "_MaxMips", Texture2DExtensions.MipCount(camera.pixelWidth, camera.pixelHeight) - 1);
+        command.SetComputeFloatParam(computeShader, "_ScaleFactor", scaleFactor);
 
         command.SetComputeIntParam(computeShader, "_MaxWidth", camera.pixelWidth - 1);
         command.SetComputeIntParam(computeShader, "_MaxHeight", camera.pixelHeight - 1);
-        command.SetComputeIntParam(computeShader, "_Width", camera.pixelWidth);
-        command.SetComputeIntParam(computeShader, "_Height", camera.pixelHeight);
+        command.SetComputeIntParam(computeShader, "_FullWidth", camera.pixelWidth);
+        command.SetComputeIntParam(computeShader, "_FullHeight", camera.pixelHeight);
+        command.SetComputeIntParam(computeShader, "_Width", width);
+        command.SetComputeIntParam(computeShader, "_Height", height);
+        command.SetComputeVectorParam(computeShader, "_Resolution", new Vector2(width, height));
 
         command.SetComputeTextureParam(computeShader, computeKernel, "_BlueNoise2D", blueNoise2D);
         command.SetComputeTextureParam(computeShader, computeKernel, "_Result", result);
@@ -176,7 +188,7 @@ public partial class AmbientOcclusionNode : RenderPipelineNode
         command.SetComputeTextureParam(computeShader, computeKernel, "_Depth", depth);
 
         using var profilerScope = command.ProfilerScope("Compute");
-        command.DispatchNormalized(computeShader, computeKernel, camera.pixelWidth >> 1, camera.pixelHeight >> 1, 1);
+        command.DispatchNormalized(computeShader, computeKernel, width, height, 1);
     }
 
     public override void Cleanup()

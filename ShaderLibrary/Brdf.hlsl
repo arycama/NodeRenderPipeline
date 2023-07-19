@@ -35,12 +35,6 @@ PbrInput SurfaceDataToPbrInput(SurfaceData surface)
 	return output;
 }
 
-// Ref: "Crafting a Next-Gen Material Pipeline for The Order: 1886".
-float ClampNdotV(float NdotV)
-{
-	return max(NdotV, 0.0001); // Approximately 0.0057 degree bias
-}
-
 // Helper function to return a set of common angle used when evaluating BSDF
 // NdotL and NdotV are unclamped
 void GetBSDFAngle(float3 V, float3 L, float NdotL, float NdotV,
@@ -72,24 +66,17 @@ float DV_SmithJointGGXAniso(float TdotH, float BdotH, float NdotH, float TdotV, 
 	return (RcpPi * 0.5) * (D.x * G.x) / max(D.y * G.y, FloatMin);
 }
 
-float3 EvaluateLight(PbrInput input, float3 T, float3 B, float3 N, float3 L, float3 V, float3 bentNormal, out float3 illuminance)
+float3 EvaluateLight(PbrInput input, float3 T, float3 B, float3 N, float3 L, float3 V, float3 bentNormal, out float3 illuminance, float NdotV)
 {
-	float NdotV = ClampNdotV(dot(N, V));
 	float NdotL = dot(N, L);
 	bool t = (NdotL > 0.0);
 
 	// Diffuse
 	float perceptualRoughness = ConvertAnisotropicRoughnessToPerceptualRoughness(input.roughness);
-	
-
-	
-	
 	illuminance = saturate(NdotL);
 	
-	float factor = NdotL * dot(N, V) >= 0.0;
-	
-	float diffuseTerm = GGXDiffuse(saturate(NdotL * factor), NdotV, perceptualRoughness, Max3(input.f0));
-	float diffuseTerm1 = GGXDiffuse(saturate(-NdotL * (1.0 - factor)), NdotV, perceptualRoughness, Max3(input.f0));
+	float diffuseTerm = GGXDiffuse(saturate(NdotL), NdotV, perceptualRoughness, Max3(input.f0));
+	float diffuseTerm1 = GGXDiffuse(saturate(-NdotL), NdotV, perceptualRoughness, Max3(input.f0));
 
 	#ifdef THIN_SURFACE_BSDF
 		if (!t)
@@ -101,22 +88,15 @@ float3 EvaluateLight(PbrInput input, float3 T, float3 B, float3 N, float3 L, flo
 	#endif
 	
 	// Impl from Cod WWII, but with bent NdotL
-	float microShadow = saturate(Sq(saturate(dot(bentNormal, L) * factor) * rsqrt(saturate(1.0 - input.occlusion))));
-	float microShadow1 = saturate(Sq(saturate(dot(-bentNormal, L) * (1.0 - factor)) * rsqrt(saturate(1.0 - input.occlusion))));
+	float microShadow = saturate(Sq(saturate(dot(bentNormal, L)) * rsqrt(saturate(1.0 - input.occlusion))));
+	float microShadow1 = saturate(Sq(saturate(dot(-bentNormal, L)) * rsqrt(saturate(1.0 - input.occlusion))));
 	
-	float3 diffuse = input.albedo * input.opacity * microShadow * diffuseTerm * saturate(NdotL * factor);
-	diffuse += input.translucency * microShadow1 * diffuseTerm1 * saturate(-NdotL * (1.0 - factor));
+	float3 diffuse = input.albedo * input.opacity * microShadow * diffuseTerm * saturate(NdotL);
+	diffuse += input.translucency * microShadow1 * diffuseTerm1 * saturate(-NdotL);
 
-	NdotL = saturate(NdotL * factor);
+	NdotL = saturate(NdotL);
 	float LdotV, NdotH, LdotH, invLenLV;
 	GetBSDFAngle(V, L, NdotL, NdotV, LdotV, NdotH, LdotH, invLenLV);
-	
-	// Translucency
-	float subsurfaceThickness = (abs(NdotV) + 1.0) * 0.5;
-	float subsurfaceRough = Sq(0.7 - (1.0 - perceptualRoughness) * 0.5);
-	float subsurface = saturate(-LdotV);
-	subsurface = subsurfaceRough / (Pi * Sq(subsurface * subsurface * (subsurfaceRough - 1.0) + 1.0)) * subsurfaceThickness;
-	//diffuse += subsurface * input.translucency;
 	
 	#ifdef REFLECTION_PROBE_RENDERING
 		return diffuse;
@@ -150,12 +130,11 @@ float3 EvaluateLight(PbrInput input, float3 T, float3 B, float3 N, float3 L, flo
 	return diffuse + (F * DV + ms) * NdotL * microShadow;
 }
 
-float3 LtcLight(PbrInput input, float3 positionWS, LightData lightData, bool isLine, float3 N)
+float3 LtcLight(PbrInput input, float3 positionWS, LightData lightData, bool isLine, float3 N, float NdotV)
 {
 	float3 V = normalize(-positionWS);
 
 	// Precompute
-	float NdotV = dot(N, V);
 	float3x3 orthoBasisViewNormal = GetOrthoBasisViewNormal(V, N, NdotV);
 
 	// UVs for sampling the LUTs
@@ -246,10 +225,15 @@ float3 GetSpecularDominantDir(float3 N, float3 R, float perceptualRoughness, flo
 float3 GetLighting(float4 positionCS, float3 N, float3 T, PbrInput input, out float3 illuminance, out float3 transmittance)
 {
 	float3 positionWS = PixelToWorld(positionCS.xyz);
+
 	float3 V = normalize(-positionWS);
+	float NdotV;
+	input.bentNormal = GetViewReflectedNormal(input.bentNormal, V, NdotV);
+	N = GetViewReflectedNormal(N, V, NdotV);
+	
+	T = Orthonormalize(T, N);
 
 	// Geometry
-	float NdotV = dot(N, V);
 	float3 B = normalize(cross(N, T));
 	float perceptualRoughness = ConvertAnisotropicRoughnessToPerceptualRoughness(input.roughness);
 	float3 R = reflect(-V, N);
@@ -271,9 +255,8 @@ float3 GetLighting(float4 positionCS, float3 N, float3 T, PbrInput input, out fl
 	float3 kD = input.albedo * input.opacity * Edss;
 	float3 bkD = input.translucency * input.opacity * Edss;
 	
-	float factor = dot(N, V) >= 0.0;
-	float3 ambient = AmbientLight(input.bentNormal * factor, input.albedo * input.opacity, input.occlusion);
-	float3 backAmbient = AmbientLight(-input.bentNormal * (1.0 - factor), input.translucency * input.opacity, input.occlusion);
+	float3 ambient = AmbientLight(input.bentNormal, input.albedo * input.opacity, input.occlusion);
+	float3 backAmbient = AmbientLight(-input.bentNormal, input.translucency * input.opacity, input.occlusion);
 	
 	float3 irradiance, backIrradiance;
 	
@@ -318,7 +301,7 @@ float3 GetLighting(float4 positionCS, float3 N, float3 T, PbrInput input, out fl
 		float3 lightColor = DirectionalLightColor(i, positionWS, true, jitter);
 		float3 L = DiscLightApprox(lightData.AngularDiameter, R, lightData.Direction);
 		float3 illum;
-		luminance += EvaluateLight(input, T, B, N, L, V, input.bentNormal, illum) * lightColor;
+		luminance += EvaluateLight(input, T, B, N, L, V, input.bentNormal, illum, NdotV) * lightColor;
 		illuminance += illum * lightColor;
 	}
 	
@@ -348,12 +331,12 @@ float3 GetLighting(float4 positionCS, float3 N, float3 T, PbrInput input, out fl
 				case 3: // Pyramid
 				case 4: // Box
 				{
-						luminance += EvaluateLight(input, T, B, N, light.direction, V, input.bentNormal, illum) * light.color;
+						luminance += EvaluateLight(input, T, B, N, light.direction, V, input.bentNormal, illum, NdotV) * light.color;
 						break;
 					}
 				case 5: // Tube
 				case 6: // Rectangle
-					luminance += LtcLight(input, positionWS, lightData, lightData.lightType == 5, N) * light.color;
+					luminance += LtcLight(input, positionWS, lightData, lightData.lightType == 5, N, NdotV) * light.color;
 					break;
 			}
 		

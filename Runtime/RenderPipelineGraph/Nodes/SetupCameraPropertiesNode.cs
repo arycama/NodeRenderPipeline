@@ -34,9 +34,15 @@ public partial class SetupCameraPropertiesNode : RenderPipelineNode
         camera.depthTextureMode = DepthTextureMode.Depth | DepthTextureMode.MotionVectors;
 
         // Setup Matrices and Jitter
+        var jitterX = HaltonSequence.Get(FrameCount % temporalSamples, 2);
+        var jitterY = HaltonSequence.Get(FrameCount % temporalSamples, 3);
+
+        var jitterOffsetX = jitterX < 0.5f ? 1 : 0;
+        var jitterOffsetY = jitterY < 0.5f ? 1 : 0;
+
         Vector2 jitter;
-        jitter.x = (HaltonSequence.Get(FrameCount % temporalSamples, 2) - 0.5f) / camera.pixelWidth;
-        jitter.y = (HaltonSequence.Get(FrameCount % temporalSamples, 3) - 0.5f) / camera.pixelHeight;
+        jitter.x = (jitterX - 0.5f) / camera.pixelWidth;
+        jitter.y = (jitterY - 0.5f) / camera.pixelHeight;
         jitter *= jitterSpread;
 
         if (jitterDebug)
@@ -80,6 +86,9 @@ public partial class SetupCameraPropertiesNode : RenderPipelineNode
         scope.Command.SetGlobalMatrix("_PrevInvProjMatrix", nonJitteredProjectionMatrix.inverse);
         scope.Command.SetGlobalMatrix("_NonJitteredViewProjMatrix", nonJitteredViewProjectionMatrix);
         scope.Command.SetGlobalVector("_Jitter", jitter);
+        scope.Command.SetGlobalVector("_JitterRaw", new Vector2(jitterX, jitterY));
+        scope.Command.SetGlobalInt("_JitterOffsetX", jitterOffsetX);
+        scope.Command.SetGlobalInt("_JitterOffsetY", jitterOffsetY);
         GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution(), staticCullingPlanes, out viewProjectionMatrix);
 
         cullingPlanes = new Vector4Array(staticCullingPlanes);

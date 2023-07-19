@@ -18,6 +18,8 @@ float3 Fragment(float4 positionCS : SV_Position) : SV_Target
 	SurfaceData surface = SurfaceDataFromGBuffer(positionCS.xy);
 	float linearEyeDepth = LinearEyeDepth(depth);
 	
+	//return surface.Occlusion;
+	
 	PbrInput input = SurfaceDataToPbrInput(surface);
 	float3x3 frame = GetLocalFrame(surface.Normal);
 	float3 tangentWS = frame[0] * dot(surface.tangentWS, frame[0]) + frame[1] * dot(surface.tangentWS, frame[1]);

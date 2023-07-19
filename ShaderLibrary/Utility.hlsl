@@ -595,4 +595,25 @@ float FastSign(float s, bool ignoreNegZero = true)
 	return CopySign(1.0, s, ignoreNegZero);
 }
 
+// Important: call Orthonormalize() on the tangent and recompute the bitangent afterwards.
+float3 GetViewReflectedNormal(float3 N, float3 V, out float NdotV)
+{
+	NdotV = dot(N, V);
+
+    // N = (NdotV >= 0.0) ? N : (N - 2.0 * NdotV * V);
+	N += (2.0 * saturate(-NdotV)) * V;
+	NdotV = abs(NdotV);
+
+	return N;
+}
+
+// Orthonormalizes the tangent frame using the Gram-Schmidt process.
+// We assume that the normal is normalized and that the two vectors
+// aren't collinear.
+// Returns the new tangent (the normal is unaffected).
+float3 Orthonormalize(float3 tangent, float3 normal)
+{
+	return normalize(tangent - dot(tangent, normal) * normal);
+}
+
 #endif

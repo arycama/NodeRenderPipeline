@@ -11,7 +11,6 @@
 #endif
 
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Atmosphere.hlsl"
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/CloudCommon.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Color.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/MotionVectors.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Packing.hlsl"
@@ -30,6 +29,7 @@ Texture2D<uint> _Previous;
 
 float4x4 _PixelCoordToViewDirWS;
 float4 _ScaleOffset;
+float3 _LightDirection0, _LightColor0, _LightDirection1, _LightColor1;
 float _SampleCount, _ViewHeight;
 
 uint _AtmosphereCdfWidth, _AtmosphereCdfHeight, _AtmosphereCdfDepth;

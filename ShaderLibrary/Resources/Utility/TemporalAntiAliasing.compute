@@ -18,7 +18,7 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 	float maxVelLenSqr = 0.0;
 	float minDepth = 0.0;
 	int2 minVelocityUv = id;
-	
+		
 	float3 minValue = FloatMax, maxValue = FloatMin, mean = 0.0, stdDev = 0.0, result = 0.0;
 	for (int y = -1; y <= 1; y++)
 	{
@@ -32,7 +32,7 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 			mean += sample;
 			stdDev += sample * sample;
 			
-			float2 delta = abs(id - (id + float2(x, y) + _Jitter * _ScreenSize.xy));
+			float2 delta = abs(_Jitter * _ScreenSize.xy + float2(x, y));
 			float weight = saturate(1.0 - delta.x) * saturate(1.0 - delta.y);
 			result += sample * weight;
 			
@@ -57,11 +57,11 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 	stdDev = sqrt(abs(stdDev / 9.0 - Sq(mean)));
 	
 	// Clamp mean/stdDev to min/Max
-	minValue = max(minValue, mean - stdDev);
-	maxValue = min(maxValue, mean + stdDev);
-	
-	mean = 0.5 * (maxValue + minValue);
-	stdDev = 0.5 * (maxValue - minValue);
+	//minValue = max(minValue, mean - stdDev);
+	//maxValue = min(maxValue, mean + stdDev);
+	// TODO: This cancels out the above?
+	//mean = 0.5 * (maxValue + minValue);
+	//stdDev = 0.5 * (maxValue - minValue);
 	
 	motion = _MotionVectors[minVelocityUv];
 	float2 previousUv = uv - motion;
