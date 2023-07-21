@@ -27,7 +27,7 @@ void KERNEL_NAME(uint2 dispatchThreadId : SV_DispatchThreadID, uint2 groupThread
 	RWTexture2D<float> results[8] = { _Result0, _Result1, _Result2, _Result3, _Result4, _Result5, _Result6, _Result7 };
 	
 	bool outOfBounds = dispatchThreadId.x >= _Width || dispatchThreadId.y >= _Height;
-	bool4 result0;
+	bool4 result0 = false;
 	
 	if (!outOfBounds)
 	{

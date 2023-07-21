@@ -44,9 +44,11 @@ struct FragmentInput
 Buffer<uint> _PatchData;
 float4 _PatchScaleOffset;
 float2 _SpacingScale;
-float _RcpVerticesPerEdge, _RcpVerticesPerEdgeMinusOne, _UvScale, _UvOffset;
+float _RcpVerticesPerEdge, _RcpVerticesPerEdgeMinusOne, _UvScale, _UvOffset, TERRAIN_AO_ON;
 uint _VerticesPerEdge, _VerticesPerEdgeMinusOne;
 SamplerState _TrilinearClampSamplerAniso4;
+
+Texture2D<float4> _TerrainAmbientOcclusion;
 
 cbuffer UnityPerMaterial
 {
@@ -246,6 +248,17 @@ GBufferOut Fragment(FragmentInput input)
 	surface.Normal.xz = normalMetalOcclusion.ag * 2 - 1;
 	surface.Normal.y = sqrt(1 - saturate(dot(surface.Normal.xz, surface.Normal.xz)));
 	surface.bentNormal = surface.Normal;
+	
+	float4 aoBentNormal = _TerrainAmbientOcclusion.Sample(_LinearClampSampler, input.uv);
+	aoBentNormal.xyz = normalize(2.0 * aoBentNormal.xyz - 1.0);
+	
+	if (TERRAIN_AO_ON)
+	{
+		float4 visibilityCone = BlendVisibiltyCones(float4(surface.bentNormal, surface.Occlusion), aoBentNormal);
+		surface.bentNormal = visibilityCone.xyz;
+		surface.Occlusion = visibilityCone.a;
+	}
+	
 	return SurfaceToGBuffer(surface, input.positionCS.xy);
 }
 

@@ -58,7 +58,7 @@ void HiZ(uint2 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId : SV_
 	{
 		GroupMemoryBarrierWithGroupSync();
 		
-		float maxDepth;
+		float maxDepth = 0.0;
 		
 		uint2 maxThread = (_GroupSize >> (i - 1)) - 1;
 		uint2 maxGroupThread = _GroupSize >> i;

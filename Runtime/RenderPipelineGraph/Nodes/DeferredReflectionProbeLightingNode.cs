@@ -12,25 +12,18 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
 
     [Input] private float previousExposure;
     [Input] private GraphicsBuffer ambient;
+    [Input] private GraphicsBuffer skyVisibility;
     [Input] private RenderTargetIdentifier atmosphereTransmittance;
     [Input] private RenderTargetIdentifier skyReflection;
     [Input] private int resolution;
 
     [Header("Camera")]
     [Input] private Vector3 cameraPosition;
-    [Input] private Matrix4x4 viewProjectionMatrix;
 
-    [Input] private ComputeBuffer lightList;
-    [Input] private SmartComputeBuffer<LightData> lightDataBuffer;
     [Input] private SmartComputeBuffer<DirectionalLightData> directionalLightBuffer;
-    [Input] private RenderTargetIdentifier lightClusterId;
     [Input] private ComputeBuffer reflectionProbeDataBuffer;
     [Input] private RenderTargetIdentifier reflectionProbeArray;
     [Input] private int reflectionProbeDataBufferCount;
-
-    [Input] private float clusterScale;
-    [Input] private float clusterBias;
-    [Input] private int tileSize;
 
     // Lighting
     [Input] private int cascadeCount;
@@ -73,6 +66,7 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
         scope.Command.SetComputeFloatParam(deferredComputeShader, "_CascadeCount", cascadeCount);
 
         scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_ReflectionProbeData", reflectionProbeDataBuffer);
+        scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_SkyVisibilitySh", skyVisibility);
         scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_ReflectionProbes", reflectionProbeArray);
         scope.Command.SetComputeIntParam(deferredComputeShader, "_ReflectionProbeCount", reflectionProbeDataBufferCount);
         scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_DirectionalShadows", directionalShadows);

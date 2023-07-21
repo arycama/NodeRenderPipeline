@@ -6,8 +6,9 @@ public class EnvironmentProbe : MonoBehaviour
 {
     private static Material previewMaterial;
     private static Mesh previewMesh;
+    private static MaterialPropertyBlock propertyBlock;
 
-    public static List<EnvironmentProbe> reflectionProbes = new();
+    public static Dictionary<EnvironmentProbe, int> reflectionProbes = new();
 
     [SerializeField, Min(0)]
     private float blendDistance = 1f;
@@ -28,7 +29,7 @@ public class EnvironmentProbe : MonoBehaviour
 
     private void OnEnable()
     {
-        reflectionProbes.Add(this);
+        reflectionProbes.Add(this, reflectionProbes.Count);
     }
 
     private void OnDisable()
@@ -36,14 +37,32 @@ public class EnvironmentProbe : MonoBehaviour
         reflectionProbes.Remove(this);
     }
 
-    private void OnDrawGizmosSelected()
+    private void Update()
     {
+        //if (Application.isPlaying)
+        //    return;
+
         if (previewMaterial == null)
-            previewMaterial = Resources.Load<Material>("Reflection Probe Material");
+        {
+            var shader = Shader.Find("Hidden/Reflection Probe Preview");
+            previewMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+        }
 
         if (previewMesh == null)
             previewMesh = Resources.GetBuiltinResource<Mesh>("Sphere.fbx");
 
-        Graphics.DrawMesh(previewMesh, Matrix4x4.TRS(transform.position, transform.rotation, new Vector3(0.5f, 0.5f, 0.5f)), previewMaterial, gameObject.layer);
+        if (propertyBlock == null)
+            propertyBlock = new MaterialPropertyBlock();
+
+        propertyBlock.SetFloat("_Layer", reflectionProbes[this]);
+
+        var rp = new RenderParams(previewMaterial) { matProps = propertyBlock };
+        var objectToWorld = Matrix4x4.TRS(transform.position, Quaternion.identity, new Vector3(0.5f, 0.5f, 0.5f));
+        Graphics.RenderMesh(rp, previewMesh, 0, objectToWorld);
+    }
+
+    private void OnDrawGizmos()
+    {
+
     }
 }

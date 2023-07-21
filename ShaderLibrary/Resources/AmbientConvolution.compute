@@ -5,21 +5,20 @@
 
 #pragma kernel AmbientProbeConvolution
 #pragma kernel AmbientProbeConvolution PROBE
-
-#ifdef __INTELLISENSE__
-    //#define PROBE
-#endif
+#pragma kernel SkyVisibilityConvolution
 
 RWBuffer<float4> _AmbientProbeOutputBuffer;
 TextureCube<float3> _AmbientProbeInputCubemap;
 
 static const uint _SampleCount = 256;
-static const uint _ShCoeffCount = 7;
 
-// Allocate space for parallel reduction (so half the number of samples.
-groupshared float4 OutputSHCoeffs[_SampleCount][_ShCoeffCount];
+groupshared float3 OutputSHCoeffs[_SampleCount][9];
 
-uint _DstOffset;
+#ifdef PROBE
+	uint _DstOffset;
+#else
+	static const uint _DstOffset = 0;
+#endif
 
 [numthreads(_SampleCount, 1, 1)]
 void AmbientProbeConvolution(uint groupIndex : SV_GroupIndex)
@@ -44,55 +43,36 @@ void AmbientProbeConvolution(uint groupIndex : SV_GroupIndex)
 
     // Sample once per thread
     float weight = 4.0 * Pi / _SampleCount;
-    float3 value = _AmbientProbeInputCubemap.SampleLevel(_LinearClampSampler, n, mipLevel) * weight;
-
-    // Sum the values
-	float3 outputSHCoeffs[9];
-	outputSHCoeffs[0] = value;
-	outputSHCoeffs[1] = value * n.y;
-	outputSHCoeffs[2] = value * n.z;
-	outputSHCoeffs[3] = value * n.x;
-	outputSHCoeffs[4] = value * n.y * n.x;
-	outputSHCoeffs[5] = value * n.y * n.z;
-	outputSHCoeffs[6] = value * (3.0 * n.z * n.z - 1.0);
-	outputSHCoeffs[7] = value * n.x * n.z;
-	outputSHCoeffs[8] = value * (n.x * n.x - n.y * n.y);
-    
-    // Clamped cosine convolution coefs
+	float3 value = _AmbientProbeInputCubemap.SampleLevel(_LinearClampSampler, n, mipLevel) * weight;
+	
+	  // Clamped cosine convolution coefs
 	float A0 = sqrt(FourPi / 1.0) * sqrt(1.0 * Pi) / 2.0;
 	float A1 = sqrt(FourPi / 3.0) * sqrt(3.0 * Pi) / 3.0;
-	float A2 = sqrt(FourPi / 5.0) * sqrt(5.0 * Pi) / 16.0;
+	float A2 = sqrt(FourPi / 5.0) * sqrt(5.0 * Pi) / 16.0 * 2.0;
     
 	float Y[9] =
 	{
 		1.0 / (2.0 * SqrtPi), // 0  0
-        -sqrt(3.0) / (2.0 * SqrtPi), // 1 -1
+        sqrt(3.0) / (2.0 * SqrtPi), // 1 -1
         sqrt(3.0) / (2.0 * SqrtPi), // 1  0
-        -sqrt(3.0) / (2.0 * SqrtPi), // 1  1
+        sqrt(3.0) / (2.0 * SqrtPi), // 1  1
         sqrt(15.0) / (2.0 * SqrtPi), // 2 -2
-        -sqrt(15.0) / (2.0 * SqrtPi), // 2 -1
+        sqrt(15.0) / (2.0 * SqrtPi), // 2 -1
         sqrt(5.0) / (4.0 * SqrtPi), // 2  0
-        -sqrt(15.0) / (2.0 * SqrtPi), // 2  1
+        sqrt(15.0) / (2.0 * SqrtPi), // 2  1
         sqrt(15.0) / (4.0 * SqrtPi) // 2  2
 	};
-    
-	outputSHCoeffs[0] *= Y[0] * (Y[0] * A0) * RcpPi;
-	outputSHCoeffs[1] *= Y[1] * (Y[1] * A1) * RcpPi;
-	outputSHCoeffs[2] *= Y[2] * (Y[2] * A1) * RcpPi;
-	outputSHCoeffs[3] *= Y[3] * (Y[3] * A1) * RcpPi;
-	outputSHCoeffs[4] *= Y[4] * (Y[4] * A2) * RcpPi;
-	outputSHCoeffs[5] *= Y[5] * (Y[5] * A2) * RcpPi;
-	outputSHCoeffs[6] *= Y[6] * (Y[6] * A2) * RcpPi;
-	outputSHCoeffs[7] *= Y[7] * (Y[7] * A2) * RcpPi;
-	outputSHCoeffs[8] *= Y[8] * (Y[8] * A2) * RcpPi;
 	
-	OutputSHCoeffs[groupIndex][0] = float4(outputSHCoeffs[3].r, outputSHCoeffs[1].r, outputSHCoeffs[2].r, outputSHCoeffs[0].r - outputSHCoeffs[6].r);
-	OutputSHCoeffs[groupIndex][1] = float4(outputSHCoeffs[3].g, outputSHCoeffs[1].g, outputSHCoeffs[2].g, outputSHCoeffs[0].g - outputSHCoeffs[6].g);
-	OutputSHCoeffs[groupIndex][2] = float4(outputSHCoeffs[3].b, outputSHCoeffs[1].b, outputSHCoeffs[2].b, outputSHCoeffs[0].b - outputSHCoeffs[6].b);
-	OutputSHCoeffs[groupIndex][3] = float4(outputSHCoeffs[4].r, outputSHCoeffs[5].r, outputSHCoeffs[6].r * 3.0, outputSHCoeffs[7].r);
-	OutputSHCoeffs[groupIndex][4] = float4(outputSHCoeffs[4].g, outputSHCoeffs[5].g, outputSHCoeffs[6].g * 3.0, outputSHCoeffs[7].g);
-	OutputSHCoeffs[groupIndex][5] = float4(outputSHCoeffs[4].b, outputSHCoeffs[5].b, outputSHCoeffs[6].b * 3.0, outputSHCoeffs[7].b);
-	OutputSHCoeffs[groupIndex][6] = float4(outputSHCoeffs[8].r, outputSHCoeffs[8].g, outputSHCoeffs[8].b, 1.0);
+    // Sum the values
+	OutputSHCoeffs[groupIndex][0] = Y[0] * Y[0] * A0 * RcpPi * value;
+	OutputSHCoeffs[groupIndex][1] = Y[1] * Y[1] * A1 * RcpPi * value * n.y;
+	OutputSHCoeffs[groupIndex][2] = Y[2] * Y[2] * A1 * RcpPi * value * n.z;
+	OutputSHCoeffs[groupIndex][3] = Y[3] * Y[3] * A1 * RcpPi * value * n.x;
+	OutputSHCoeffs[groupIndex][4] = Y[4] * Y[4] * A2 * RcpPi * value * n.y * n.x;
+	OutputSHCoeffs[groupIndex][5] = Y[5] * Y[5] * A2 * RcpPi * value * n.y * n.z;
+	OutputSHCoeffs[groupIndex][6] = Y[6] * Y[6] * A2 * RcpPi * value * (3.0 * n.z * n.z - 1.0);
+	OutputSHCoeffs[groupIndex][7] = Y[7] * Y[7] * A2 * RcpPi * value * n.x * n.z;
+	OutputSHCoeffs[groupIndex][8] = Y[8] * Y[8] * A2 * RcpPi * value * (n.x * n.x - n.y * n.y);
 	
 	for (uint s = _SampleCount >> 1; s > 0; s >>= 1)
 	{
@@ -100,8 +80,8 @@ void AmbientProbeConvolution(uint groupIndex : SV_GroupIndex)
 		
 		if (groupIndex < s)
 		{
-			[unroll]
-			for (uint i = 0; i < _ShCoeffCount; i++)
+		[unroll]
+			for (uint i = 0; i < 9; i++)
 			{
 				OutputSHCoeffs[groupIndex][i] += OutputSHCoeffs[groupIndex + s][i];
 			}
@@ -109,19 +89,90 @@ void AmbientProbeConvolution(uint groupIndex : SV_GroupIndex)
 	}
 
     // Write to memory
-	if (groupIndex < 7)
+	if (groupIndex == 0)
 	{
-		#ifdef PROBE
-			float3 l0 = outputSHCoeffs[0];
-			float3 l1 = outputSHCoeffs[1];
-			float3 l2 = outputSHCoeffs[2];
-			float3 l3 = outputSHCoeffs[3];
-        
-			_AmbientProbeOutputBuffer[_DstOffset + 0] = float4(l0.r, l1.r, l2.r, l3.r);
-			_AmbientProbeOutputBuffer[_DstOffset + 1] = float4(l0.g, l1.g, l2.g, l3.g);
-			_AmbientProbeOutputBuffer[_DstOffset + 2] = float4(l0.b, l1.b, l2.b, l3.b);
-		#else
-			_AmbientProbeOutputBuffer[groupIndex] = OutputSHCoeffs[0][groupIndex];
-		#endif
+		_AmbientProbeOutputBuffer[_DstOffset + 0] = float4(OutputSHCoeffs[0][3].r, OutputSHCoeffs[0][1].r, OutputSHCoeffs[0][2].r, OutputSHCoeffs[0][0].r - OutputSHCoeffs[0][6].r);
+		_AmbientProbeOutputBuffer[_DstOffset + 1] = float4(OutputSHCoeffs[0][3].g, OutputSHCoeffs[0][1].g, OutputSHCoeffs[0][2].g, OutputSHCoeffs[0][0].g - OutputSHCoeffs[0][6].g);
+		_AmbientProbeOutputBuffer[_DstOffset + 2] = float4(OutputSHCoeffs[0][3].b, OutputSHCoeffs[0][1].b, OutputSHCoeffs[0][2].b, OutputSHCoeffs[0][0].b - OutputSHCoeffs[0][6].b);
+		_AmbientProbeOutputBuffer[_DstOffset + 3] = float4(OutputSHCoeffs[0][4].r, OutputSHCoeffs[0][5].r, OutputSHCoeffs[0][6].r * 3.0, OutputSHCoeffs[0][7].r);
+		_AmbientProbeOutputBuffer[_DstOffset + 4] = float4(OutputSHCoeffs[0][4].g, OutputSHCoeffs[0][5].g, OutputSHCoeffs[0][6].g * 3.0, OutputSHCoeffs[0][7].g);
+		_AmbientProbeOutputBuffer[_DstOffset + 5] = float4(OutputSHCoeffs[0][4].b, OutputSHCoeffs[0][5].b, OutputSHCoeffs[0][6].b * 3.0, OutputSHCoeffs[0][7].b);
+		_AmbientProbeOutputBuffer[_DstOffset + 6] = float4(OutputSHCoeffs[0][8].r, OutputSHCoeffs[0][8].g, OutputSHCoeffs[0][8].b, 1.0);
+	}
+}
+
+static const uint _SkySampleCount = 512;
+TextureCube<float> _SkyVisibilityInput;
+groupshared float SkySHCoeffs[_SkySampleCount][9];
+RWBuffer<float> _SkyVisibilityResult;
+
+[numthreads(_SkySampleCount, 1, 1)]
+void SkyVisibilityConvolution(uint groupIndex : SV_GroupIndex)
+{
+	float2 cubeSize;
+	_SkyVisibilityInput.GetDimensions(cubeSize.x, cubeSize.y);
+
+    // Prefiltered importance sampling
+    // Use lower MIP-map levels for fetching samples with low probabilities
+    // in order to reduce the variance.
+    // Ref: http://http.developer.nvidia.com/GPUGems3/gpugems3_ch20.html
+    //
+    // - OmegaS: Solid angle associated with the sample
+    // - OmegaP: Solid angle associated with the texel of the cubemap
+	float invOmegaP = (6.0 * cubeSize.x * cubeSize.y) / FourPi;
+	float pdf = 1.0 / FourPi; // Solid angle of the sphere is 4*PI
+	float omegaS = rcp(_SkySampleCount) * rcp(pdf);
+
+	float2 u = Hammersley2dSeq(groupIndex, _SkySampleCount);
+	float3 n = SampleSphereUniform(u.x, u.y);
+
+    // Sample once per thread
+	float weight = 4.0 * Pi / _SkySampleCount;
+	
+	float value = (_SkyVisibilityInput.SampleLevel(_LinearClampSampler, n, 0.0) == _FarClipValue) * weight;
+	float outputSHCoeffs[9];
+	
+	float Y[9] =
+	{
+		1.0 / (2.0 * SqrtPi), // 0  0
+        sqrt(3.0) / (2.0 * SqrtPi), // 1 -1
+        sqrt(3.0) / (2.0 * SqrtPi), // 1  0
+        sqrt(3.0) / (2.0 * SqrtPi), // 1  1
+        sqrt(15.0) / (2.0 * SqrtPi), // 2 -2
+        sqrt(15.0) / (2.0 * SqrtPi), // 2 -1
+        sqrt(5.0) / (4.0 * SqrtPi), // 2  0
+        sqrt(15.0) / (2.0 * SqrtPi), // 2  1
+        sqrt(15.0) / (4.0 * SqrtPi) // 2  2
+	};
+	
+    // Sum the values
+	SkySHCoeffs[groupIndex][0] = Y[0] * Y[0] * value;
+	SkySHCoeffs[groupIndex][1] = Y[1] * Y[1] * value * n.y;
+	SkySHCoeffs[groupIndex][2] = Y[2] * Y[2] * value * n.z;
+	SkySHCoeffs[groupIndex][3] = Y[3] * Y[3] * value * n.x;
+	SkySHCoeffs[groupIndex][4] = Y[4] * Y[4] * value * n.y * n.x;
+	SkySHCoeffs[groupIndex][5] = Y[5] * Y[5] * value * n.y * n.z;
+	SkySHCoeffs[groupIndex][6] = Y[6] * Y[6] * value * (3.0 * n.z * n.z - 1.0);
+	SkySHCoeffs[groupIndex][7] = Y[7] * Y[7] * value * n.x * n.z;
+	SkySHCoeffs[groupIndex][8] = Y[8] * Y[8] * value * (n.x * n.x - n.y * n.y);
+	
+	for (uint s = _SkySampleCount >> 1; s > 0; s >>= 1)
+	{
+		GroupMemoryBarrierWithGroupSync();
+		
+		if (groupIndex < s)
+		{
+			[unroll]
+			for (uint i = 0; i < 9; i++)
+			{
+				SkySHCoeffs[groupIndex][i] += SkySHCoeffs[groupIndex + s][i];
+			}
+		}
+	}
+
+    // Write to memory
+	if (groupIndex < 9)
+	{
+		_SkyVisibilityResult[groupIndex] = SkySHCoeffs[0][groupIndex];
 	}
 }

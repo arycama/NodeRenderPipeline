@@ -151,43 +151,50 @@ Texture2D<float4> _CloudCoverage;
 
 cbuffer AmbientSh
 {
-	float4 _AmbientSh[9];
+	float4 _AmbientSh[7];
 };
 
-float3 AmbientLight(float3 N, float3 albedo, float occlusion)
+float3 EvaluateSH(float3 N, float3 albedo, float occlusion, float4 sh[7])
 {
-   	// Calculate the zonal harmonics expansion for V(x, ωi)*(n.l)
+	// Calculate the zonal harmonics expansion for V(x, ωi)*(n.l)
 	float3 t = FastACosPos(sqrt(saturate(1.0 - GTAOMultiBounce(occlusion, albedo))));
 	float3 a = sin(t);
 	float3 b = cos(t);
 	
 	// Calculate the zonal harmonics expansion for V(x, ωi)*(n.l)
 	float3 A0 = a * a;
-	float3 A1 = (1.0 - b * b * b);
-	float3 A2 = a * a * (2.0 + 6.0 * b * b);
+	float3 A1 = 1.0 - b * b * b;
+	float3 A2 = a * a * (1.0 + 3.0 * b * b);
+	 
+	float4 shAr = sh[0];
+	float4 shAg = sh[1];
+	float4 shAb = sh[2];
+	float4 shBr = sh[3];
+	float4 shBg = sh[4];
+	float4 shBb = sh[5];
+	float4 shC = sh[6];
 	
-	float4 cAr = _AmbientSh[0];
-	float4 cAg = _AmbientSh[1];
-	float4 cAb = _AmbientSh[2];
-	float4 cBr = _AmbientSh[3];
-	float4 cBg = _AmbientSh[4];
-	float4 cBb = _AmbientSh[5];
-	
-	// Linear + constant polynomial terms
 	float3 irradiance = 0.0;
-	irradiance.r = dot(cAr.xyz * A1.r, N) + cAr.w * A0.r;
-	irradiance.g = dot(cAg.xyz * A1.g, N) + cAg.w * A0.g;
-	irradiance.b = dot(cAb.xyz * A1.b, N) + cAb.w * A0.b;
- 
-	// 4 of the quadratic polynomials
+	irradiance.r = dot(shAr.xyz * A1.r, N) + shAr.w * A0.r;
+	irradiance.g = dot(shAg.xyz * A1.g, N) + shAg.w * A0.g;
+	irradiance.b = dot(shAb.xyz * A1.b, N) + shAb.w * A0.b;
+	
+    // 4 of the quadratic (L2) polynomials
 	float4 vB = N.xyzz * N.yzzx;
-	irradiance.r += dot(cBr * A2.r, vB) + cBr.z / 3.0 * (A0.r - A2.r);
-	irradiance.g += dot(cBg * A2.g, vB) + cBg.z / 3.0 * (A0.g - A2.b);
-	irradiance.b += dot(cBb * A2.b, vB) + cBb.z / 3.0 * (A0.b - A2.b);
- 
-	// Final quadratic polynomial
-	float vC = Sq(N.x) - Sq(N.y);
-	return irradiance + _AmbientSh[6].xyz * A2 * vC;
+	irradiance.r += dot(shBr * A2.r, vB) + shBr.z / 3.0 * (A0.r - A2.r);
+	irradiance.g += dot(shBg * A2.g, vB) + shBg.z / 3.0 * (A0.g - A2.g);
+	irradiance.b += dot(shBb * A2.b, vB) + shBb.z / 3.0 * (A0.b - A2.b);
+
+    // Final (5th) quadratic (L2) polynomial
+	float vC = N.x * N.x - N.y * N.y;
+	irradiance += shC.rgb * A2 * vC;
+	
+	return irradiance;
+}
+
+float3 AmbientLight(float3 N, float3 albedo, float occlusion)
+{
+	return EvaluateSH(N, albedo, occlusion, _AmbientSh);
 }
 
 float CloudTransmittanceLevelZero(float3 positionWS)
