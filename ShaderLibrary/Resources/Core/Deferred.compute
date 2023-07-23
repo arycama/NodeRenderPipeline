@@ -1,18 +1,6 @@
 ﻿#pragma kernel Deferred
 
-#pragma multi_compile _ SCREENSPACE_REFLECTIONS_ON
-#pragma multi_compile _ VOXEL_GI_ON
-#pragma multi_compile _ REFLECTION_PROBE_RENDERING
-
-#ifdef REFLECTION_PROBE_RENDERING
-	#undef VOXEL_GI_ON
-	#undef SCREENSPACE_REFLECTIONS_ON
-	//#define NO_SHADOWS
-#endif
-
-#ifdef __INTELLISENSE__
-	#define REFLECTION_PROBE_RENDERING
-#endif
+#define REFLECTION_PROBE_RENDERING
 
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Brdf.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Packing.hlsl"
@@ -67,7 +55,7 @@ float3 GetLighting1(float4 positionCS, float3 N, float3 T, PbrInput input)
 	skyVisibility += _SkyVisibilitySh[7] * N.x * N.z;
 	skyVisibility += _SkyVisibilitySh[8] * (N.x * N.x - N.y * N.y);
 	
-	float3 luminance = input.albedo * AmbientLightSimple(N) * skyVisibility;
+	float3 luminance = input.albedo * AmbientLight(N, 1.0, 1.0) * skyVisibility;
 	
 	for (uint i = 0; i < _DirectionalLightCount; i++)
 	{

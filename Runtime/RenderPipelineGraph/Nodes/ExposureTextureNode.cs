@@ -30,7 +30,7 @@ public partial class ExposureTextureNode : RenderPipelineNode
         {
             using var scope = context.ScopedCommandBuffer();
             scope.Command.SetRenderTarget(new RenderTargetIdentifier[] { texture0, texture1 }, texture0);
-            scope.Command.ClearRenderTarget(false, true, new Color(Mathf.PI * 4, Mathf.PI * 4, Mathf.PI * 4, 1f));
+            scope.Command.ClearRenderTarget(false, true, Color.white);
         }
 
         currentFrame = texture0;
