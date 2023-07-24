@@ -1,20 +1,21 @@
-﻿using UnityEngine;
+﻿using System;
+using UnityEngine;
 using UnityEngine.Rendering;
 
 public static class ReflectionConvolution
 {
     private static readonly Matrix4x4[] matrices = new Matrix4x4[6];
 
-    public static void Convolve(CommandBuffer command, RenderTargetIdentifier source, RenderTargetIdentifier destination, int resolution, int dstOffset = 0)
+    public static void Convolve(CommandBuffer command, RenderTargetIdentifier input, RenderTargetIdentifier destination, int resolution, int dstOffset = 0)
     {
+        var computeShader = Resources.Load<ComputeShader>("Utility/GGXConvolve");
+
         // Solid angle associated with a texel of the cubemap.
         var invOmegaP = 6.0f * resolution * resolution / (4.0f * Mathf.PI);
 
-        var ggxConvolve = Resources.Load<ComputeShader>("Utility/GGXConvolve");
-        command.SetComputeFloatParam(ggxConvolve, "InvOmegaP", invOmegaP);
-        command.SetComputeTextureParam(ggxConvolve, 0, "Input", source);
+        command.SetComputeFloatParam(computeShader, "InvOmegaP", invOmegaP);
+        command.SetComputeTextureParam(computeShader, 0, "Input", input);
 
-        var tempId = Shader.PropertyToID("ConvolveTemp");
         var desc = new RenderTextureDescriptor(resolution, resolution, RenderTextureFormat.RGB111110Float)
         {
             autoGenerateMips = false,
@@ -23,12 +24,36 @@ public static class ReflectionConvolution
             enableRandomWrite = true,
             useMipMap = true
         };
+
+        var tempId = Shader.PropertyToID("_SpecConvTemp");
         command.GetTemporaryRT(tempId, desc);
+
+        const int mipLevels = 6;
 
         for (var i = 1; i < 7; i++)
         {
-            command.SetComputeTextureParam(ggxConvolve, 0, "Result", tempId, i);
-            command.SetComputeFloatParam(ggxConvolve, "Level", i);
+            command.SetComputeTextureParam(computeShader, 0, "Result", tempId, i);
+            command.SetComputeFloatParam(computeShader, "Level", i);
+
+            // Different sample counts depending on mip level
+            var sampleCount = i switch
+            {
+                1 => 21,
+                2 => 34,
+                3 => 55,
+                4 => 89,
+                5 => 89,
+                6 => 89,
+                _ => throw new InvalidOperationException(),
+            };
+
+            command.SetComputeIntParam(computeShader, "SampleCount", sampleCount);
+            command.SetComputeFloatParam(computeShader, "RcpSampleCount", 1.0f / sampleCount);
+
+            var perceptualRoughness = Mathf.Clamp01(i / (float)mipLevels);
+            var mipPerceptualRoughness = Mathf.Clamp01(1.7f / 1.4f - Mathf.Sqrt(2.89f / 1.96f - (2.8f / 1.96f) * perceptualRoughness));
+            var mipRoughness = mipPerceptualRoughness * mipPerceptualRoughness;
+            command.SetComputeFloatParam(computeShader, "Roughness", mipRoughness);
 
             for (var j = 0; j < 6; j++)
             {
@@ -37,13 +62,20 @@ public static class ReflectionConvolution
                 matrices[j] = Matrix4x4Extensions.ComputePixelCoordToWorldSpaceViewDirectionMatrix(res, Vector2.zero, 90f, 1f, viewToWorld, true);
             }
 
-            command.SetComputeMatrixArrayParam(ggxConvolve, "_PixelCoordToViewDirWS", matrices);
-            command.DispatchNormalized(ggxConvolve, 0, resolution >> i, resolution >> i, 6);
+            command.SetComputeMatrixArrayParam(computeShader, "_PixelCoordToViewDirWS", matrices);
+            command.DispatchNormalized(computeShader, 0, resolution >> i, resolution >> i, 6);
         }
+
+        var resultDesc = new RenderTextureDescriptor(resolution, resolution, RenderTextureFormat.RGB111110Float)
+        {
+            autoGenerateMips = false,
+            dimension = TextureDimension.Cube,
+            useMipMap = true
+        };
 
         for (var i = 0; i < 6; i++)
         {
-            command.CopyTexture(source, i, 0, tempId, i, 0);
+            command.CopyTexture(input, i, 0, tempId, i, 0);
             command.CopyTexture(tempId, i, destination, i + dstOffset);
         }
 

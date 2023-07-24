@@ -110,13 +110,8 @@ void LuminanceHistogram(uint2 dispatchThreadId : SV_DispatchThreadID, uint group
 	if (all(dispatchThreadId < dim))
 	{
 		// Undo the pre-exposure
-		float exposure = _Exposure[uint2(0, 0)];
-	
 		float3 input = _Input[dispatchThreadId];
-		if (exposure != 0.0)
-			input /= exposure;
-		
-		float luminance = Luminance(input);
+		float luminance = Luminance(input) * rcp(_Exposure[uint2(0, 0)]);
 
 		// Center-weighted
 		float screenDiagonal = 0.5f * (_ScreenSize.x + _ScreenSize.y);
@@ -195,7 +190,6 @@ void AverageLuminance(uint threadID : SV_GroupIndex)
 			ProcessBin(i, extremesSums, evProcessedSum, w);
 		}
 
-		w = max(w, 1e-4f);
 		float avgEV = evProcessedSum * rcp(w);
 		
 		_DebugExposure[0] = avgEV;

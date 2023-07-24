@@ -36,6 +36,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 
     [Output] private SmartComputeBuffer<ReflectionProbeData> reflectionProbeDataBuffer;
     [Output] private ComputeBuffer ambientBuffer;
+    [Output] private GraphicsBuffer skyOcclusionBuffer;
     [Output] private RenderTargetIdentifier reflectionProbeOutput;
 
     [Input, Output] private NodeConnection connection;
@@ -80,6 +81,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
         reflectionProbeDataBuffer.EnsureCapcity(1);
 
         ambientBuffer = new ComputeBuffer(maxActiveProbes * 7, sizeof(float) * 4);
+        skyOcclusionBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, maxActiveProbes * 9, sizeof(float));
 
         exposureReadback = OnExposureReadback;
 
@@ -103,6 +105,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
         DestroyImmediate(exposureTemp);
 
         ambientBuffer.Release();
+        skyOcclusionBuffer.Release();
 
         readyProbes.Clear();
 
@@ -204,8 +207,6 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             // Set position
             camera.transform.position = newProbe.transform.position;
 
-
-
             using (var scope = context.ScopedCommandBuffer())
                 scope.Command.EnableShaderKeyword("REFLECTION_PROBE_RENDERING");
 
@@ -254,16 +255,16 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
                 }
             }
 
-            var skyVisibilitySh = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 9, 4);
-
+            var index = readyProbes.Count;
             if (processSubGraph != null)
             {
                 processSubGraph.AddRelayInput("Sky Visibility Input", (RenderTargetIdentifier)depth);
-                processSubGraph.AddRelayInput("Sky Visibility Sh", skyVisibilitySh);
+                processSubGraph.AddRelayInput("Sky Visibility Buffer", skyOcclusionBuffer);
+                processSubGraph.AddRelayInput("Sky Visibility Offset", index * 9);
                 processSubGraph.Render(context, camera, 0);
             }
 
-            var item = new ReadyProbeData(newProbe, depth, albedo, normal, emission, camera, previousExposure, skyVisibilitySh);
+            var item = new ReadyProbeData(newProbe, depth, albedo, normal, emission, camera, previousExposure);
 
             using (var scope = context.ScopedCommandBuffer())
             {
@@ -271,7 +272,6 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
                 scope.Command.DisableShaderKeyword("REFLECTION_PROBE_RENDERING");
             }
 
-            var index = readyProbes.Count;
             readyProbes.Add(item);
             RelightProbe(index, context);
         }
@@ -307,6 +307,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             scope.Command.SetBufferData(reflectionProbeDataBuffer, scopedList);
             scope.Command.SetGlobalBuffer("_ReflectionProbeData", reflectionProbeDataBuffer);
             scope.Command.SetGlobalBuffer("_AmbientData", ambientBuffer);
+            scope.Command.SetGlobalBuffer("_SkyOcclusion", skyOcclusionBuffer);
             scope.Command.SetGlobalTexture("_ReflectionProbes", reflectionProbeArray);
             scope.Command.SetGlobalInt("_ReflectionProbeCount", reflectionProbeDataBuffer.Count);
         }
@@ -339,7 +340,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             var up = CoreUtils.upVectorList[i];
             camera.transform.rotation = Quaternion.LookRotation(fwd, up);
 
-            RelightProbeFace(context, relightData, camera, tempId, i, fwd, up);
+            RelightProbeFace(context, relightData, camera, tempId, i, index);
         }
 
         // Convolve
@@ -359,7 +360,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
         }
     }
 
-    private void RelightProbeFace(ScriptableRenderContext context, ReadyProbeData relightData, Camera camera, int tempId, int i, Vector3 fwd, Vector3 up)
+    private void RelightProbeFace(ScriptableRenderContext context, ReadyProbeData relightData, Camera camera, int tempId, int face, int index)
     {
         // Evaluate
         if (lightingSubGraph != null)
@@ -369,8 +370,9 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             lightingSubGraph.AddRelayInput("_GBuffer1", new RenderTargetIdentifier(relightData.Normal));
             lightingSubGraph.AddRelayInput("_GBuffer2", new RenderTargetIdentifier(relightData.Emission));
             lightingSubGraph.AddRelayInput("Result", new RenderTargetIdentifier(tempId));
-            lightingSubGraph.AddRelayInput("_ExposureValue", previousExposure);
-            lightingSubGraph.AddRelayInput("_ExposureValueRcp", 1f / previousExposure);
+            lightingSubGraph.AddRelayInput("Exposure", exposure);
+            lightingSubGraph.AddRelayInput("_ExposureValue", relightData.exposure);
+            lightingSubGraph.AddRelayInput("_ExposureValueRcp", 1f / relightData.exposure);
             lightingSubGraph.AddRelayInput("_AmbientSh", ambient);
             lightingSubGraph.AddRelayInput("_AtmosphereTransmittance", atmosphereTransmittance);
             lightingSubGraph.AddRelayInput("_SkyReflection", skyReflection);
@@ -389,7 +391,8 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             lightingSubGraph.AddRelayInput("DirectionalLightDataBuffer", directionalLightDataBuffer);
             lightingSubGraph.AddRelayInput("DirectionalShadowMatrices", directionalShadowMatrices);
             lightingSubGraph.AddRelayInput("DirectionalShadows", directionalShadows);
-            lightingSubGraph.AddRelayInput("Sky Visibility Sh", relightData.skyVisibilitySh);
+            lightingSubGraph.AddRelayInput("Sky Visibility Sh", skyOcclusionBuffer);
+            lightingSubGraph.AddRelayInput("Sky Visibility Offset", index * 9);
 
             using (var scope = context.ScopedCommandBuffer("Reflection Probe Relight", true))
             {
@@ -402,7 +405,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             // Copy to temp probe
             using (var scope = context.ScopedCommandBuffer("Reflection Probe Relight", true))
             {
-                scope.Command.CopyTexture(tempId, 0, 0, tempConvolveProbe, i, 0);
+                scope.Command.CopyTexture(tempId, 0, 0, tempConvolveProbe, face, 0);
                 scope.Command.SetInvertCulling(false);
             }
         }
@@ -415,11 +418,10 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
         public RenderTexture Albedo;
         public RenderTexture Normal;
         public RenderTexture Emission;
-        public GraphicsBuffer skyVisibilitySh;
         public Camera Camera;
         public float exposure;
 
-        public ReadyProbeData(EnvironmentProbe item1, RenderTexture depth, RenderTexture albedo, RenderTexture normal, RenderTexture emission, Camera camera, float exposure, GraphicsBuffer skyVisibilitySh)
+        public ReadyProbeData(EnvironmentProbe item1, RenderTexture depth, RenderTexture albedo, RenderTexture normal, RenderTexture emission, Camera camera, float exposure)
         {
             Depth = depth ?? throw new ArgumentNullException(nameof(depth));
             Probe = item1 ?? throw new ArgumentNullException(nameof(item1));
@@ -428,14 +430,11 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             Emission = emission ?? throw new ArgumentNullException(nameof(emission));
             Camera = camera ?? throw new ArgumentException(nameof(camera));
             this.exposure = exposure;
-            this.skyVisibilitySh = skyVisibilitySh;
         }
 
         public void Cleanup()
         {
             DestroyImmediate(Camera.gameObject);
-            skyVisibilitySh.Release();
-
             DestroyImmediate(Depth);
             DestroyImmediate(Albedo);
             DestroyImmediate(Normal);

@@ -49,8 +49,7 @@ float4 SampleReflectionProbeAmbient(float3 positionWS, float3 N, float3 albedo, 
 	for (i = 0; i < 7; i++)
 		sh[i] /= weightSum;
 	
-	
-	return float4(EvaluateSH(N, albedo, occlusion, sh), min(1.0, weightSum));
+	return float4(AmbientLight(N, occlusion, albedo, sh), min(1.0, weightSum));
 }
 
 float3 Fragment(float4 positionCS : SV_Position) : SV_Target
@@ -64,7 +63,7 @@ float3 Fragment(float4 positionCS : SV_Position) : SV_Target
 	//float3 positionWS = PixelToWorld(positionCS.xy, depth);
 	//float4 ambient = SampleReflectionProbeAmbient(positionWS, surface.bentNormal, surface.Albedo, surface.Occlusion);
 	//if(ambient.a < 1.0)
-	//	ambient.rgb = lerp(AmbientLight(surface.Normal, surface.Albedo, surface.Occlusion), ambient.rgb, ambient.a);
+	//	ambient.rgb = lerp(AmbientLight(surface.Normal, surface.Occlusion, surface.Albedo), ambient.rgb, ambient.a);
 	//return ambient.rgb;
 	
 	PbrInput input = SurfaceDataToPbrInput(surface);

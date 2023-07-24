@@ -3,9 +3,9 @@
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Random.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Sampling.hlsl"
 
-#pragma kernel AmbientProbeConvolution
+#pragma kernel AmbientProbeConvolution AMBIENT
 #pragma kernel AmbientProbeConvolution PROBE
-#pragma kernel SkyVisibilityConvolution
+#pragma kernel SkyVisibilityConvolution SKY
 
 RWBuffer<float4> _AmbientProbeOutputBuffer;
 TextureCube<float3> _AmbientProbeInputCubemap;
@@ -14,10 +14,10 @@ static const uint _SampleCount = 256;
 
 groupshared float3 OutputSHCoeffs[_SampleCount][9];
 
-#ifdef PROBE
-	uint _DstOffset;
-#else
+#ifdef AMBIENT
 	static const uint _DstOffset = 0;
+#else
+	uint _DstOffset;
 #endif
 
 [numthreads(_SampleCount, 1, 1)]
@@ -173,6 +173,6 @@ void SkyVisibilityConvolution(uint groupIndex : SV_GroupIndex)
     // Write to memory
 	if (groupIndex < 9)
 	{
-		_SkyVisibilityResult[groupIndex] = SkySHCoeffs[0][groupIndex];
+		_SkyVisibilityResult[_DstOffset + groupIndex] = SkySHCoeffs[0][groupIndex];
 	}
 }

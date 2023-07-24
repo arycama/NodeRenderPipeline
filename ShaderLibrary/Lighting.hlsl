@@ -154,10 +154,10 @@ cbuffer AmbientSh
 	float4 _AmbientSh[7];
 };
 
-float3 EvaluateSH(float3 N, float3 albedo, float occlusion, float4 sh[7])
+float3 EvaluateSH(float3 N, float3 occlusion, float4 sh[7])
 {
 	// Calculate the zonal harmonics expansion for V(x, ωi)*(n.l)
-	float3 t = FastACosPos(sqrt(saturate(1.0 - GTAOMultiBounce(occlusion, albedo))));
+	float3 t = FastACosPos(sqrt(saturate(1.0 - occlusion)));
 	float3 a = sin(t);
 	float3 b = cos(t);
 	
@@ -192,9 +192,14 @@ float3 EvaluateSH(float3 N, float3 albedo, float occlusion, float4 sh[7])
 	return irradiance;
 }
 
-float3 AmbientLight(float3 N, float3 albedo, float occlusion)
+float3 AmbientLight(float3 N, float occlusion, float3 albedo, float4 sh[7])
 {
-	return EvaluateSH(N, albedo, occlusion, _AmbientSh);
+	return EvaluateSH(N, GTAOMultiBounce(occlusion, albedo), sh);
+}
+
+float3 AmbientLight(float3 N, float occlusion = 1.0, float3 albedo = 1.0)
+{
+	return AmbientLight(N, occlusion, albedo, _AmbientSh);
 }
 
 float CloudTransmittanceLevelZero(float3 positionWS)

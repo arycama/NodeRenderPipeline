@@ -117,7 +117,7 @@ GBufferOut Fragment(float4 positionCS : SV_Position)
 	
 	// Ambient 
 	float3 finalTransmittance = exp(-underwaterDistance * _Extinction);
-	luminance += AmbientLight(float3(0.0, 1.0, 0.0), 1.0, 1.0) * (1.0 - finalTransmittance);
+	luminance += AmbientLight(float3(0.0, 1.0, 0.0)) * (1.0 - finalTransmittance);
 	luminance *= _Color;
 	
 	luminance = IsInfOrNaN(luminance) ? 0.0 : luminance;

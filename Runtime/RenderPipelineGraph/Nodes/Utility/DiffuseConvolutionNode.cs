@@ -8,6 +8,7 @@ public partial class DiffuseConvolutionNode : RenderPipelineNode
     [SerializeField] private bool isSky;
 
     [Input] private RenderTargetIdentifier input;
+    [Input] private int offset;
     [Input, Output] private GraphicsBuffer result;
     [Input, Output] private NodeConnection connection;
 
@@ -33,6 +34,7 @@ public partial class DiffuseConvolutionNode : RenderPipelineNode
         {
             scope.Command.SetComputeTextureParam(computeShader, 2, "_SkyVisibilityInput", input);
             scope.Command.SetComputeBufferParam(computeShader, 2, "_SkyVisibilityResult", result);
+            scope.Command.SetComputeIntParam(computeShader, "_DstOffset", offset);
             scope.Command.DispatchCompute(computeShader, 2, 1, 1, 1);
         }
         else

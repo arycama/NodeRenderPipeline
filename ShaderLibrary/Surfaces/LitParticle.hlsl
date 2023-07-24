@@ -47,7 +47,7 @@ float4 Fragment(FragmentInput input) : SV_Target
 	float4 color = _MainTex.Sample(_TrilinearRepeatSampler, uv) * input.color * _Color;
 	
     float3 N = normalize(input.normal);
-    float3 illuminance = AmbientLight(N, 1.0, 1.0);
+    float3 illuminance = AmbientLight(N);
 
 	// Treating the particle as a sphere, get an offset posiion for sampling lighting
 	float thickness = 1.0 - saturate(distance(input.uv.xy, 0.5) * 2.0);

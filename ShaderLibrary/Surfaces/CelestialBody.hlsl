@@ -123,7 +123,7 @@ float3 Fragment(FragmentInput input) : SV_Target
  //       // Earthshine
 	//}
 
-    //illuminance += _EarthAlbedo * AmbientLight(_Direction, 1.0, 1.0) * albedo * INV_PI;
+    //illuminance += _EarthAlbedo * AmbientLight(_Direction) * albedo;
 
     return illuminance;
 }

@@ -29,7 +29,9 @@ public partial class ExposureTextureNode : RenderPipelineNode
         if (wasCreated)
         {
             using var scope = context.ScopedCommandBuffer();
-            scope.Command.SetRenderTarget(new RenderTargetIdentifier[] { texture0, texture1 }, texture0);
+            scope.Command.SetRenderTarget(texture0);
+            scope.Command.ClearRenderTarget(false, true, Color.white);
+            scope.Command.SetRenderTarget(texture1);
             scope.Command.ClearRenderTarget(false, true, Color.white);
         }
 

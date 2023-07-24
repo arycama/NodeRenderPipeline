@@ -5,6 +5,7 @@ using UnityEngine.Rendering;
 [NodeMenuItem("Rendering/Deferred Reflection Probe Lighting")]
 public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
 {
+    [Input] private RenderTargetIdentifier exposure;
     [Input] private RenderTargetIdentifier depth;
     [Input] private RenderTargetIdentifier gbuffer0;
     [Input] private RenderTargetIdentifier gbuffer1;
@@ -30,6 +31,8 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
     [Input] private SmartComputeBuffer<Matrix3x4> directionalShadowMatrices;
     [Input] private RenderTargetIdentifier directionalShadows;
 
+    [Input] private int offset;
+
     [Input, Output] private RenderTargetIdentifier result;
 
     [Input, Output] private NodeConnection connection;
@@ -47,6 +50,7 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
         scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_GBuffer1", gbuffer1, 0, RenderTextureSubElement.Color);
         scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_GBuffer2", gbuffer2, 0, RenderTextureSubElement.Color);
         scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "Result", result);
+        scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_Exposure", exposure);
         scope.Command.SetComputeFloatParam(deferredComputeShader, "_ExposureValue", previousExposure);
         scope.Command.SetComputeFloatParam(deferredComputeShader, "_ExposureValueRcp", 1f / previousExposure);
         scope.Command.SetComputeConstantBufferParam(deferredComputeShader, "AmbientSh", ambient, 0, ambient.count * ambient.stride);
@@ -54,6 +58,7 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
         scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_SkyReflection", skyReflection);
 
         scope.Command.SetComputeIntParam(deferredComputeShader, "_Resolution", resolution);
+        scope.Command.SetComputeIntParam(deferredComputeShader, "_Offset", offset);
 
         //scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_LightClusterList", lightList);
        // scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_LightData", lightDataBuffer);

@@ -313,12 +313,14 @@ void PhysicalSky(uint2 id : SV_DispatchThreadID)
 		
 		float3 weight = tr / dot(rcp(3.0), tr * extinction / (1.0 - transmittance));
 		
+		float skyVisibility = GetSkyVisibilityL0(t * V);
+		
 		#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
 			float LdotV = dot(V, _LightDirection0);
 			float sunAngle = CosAngleAtDistance(_ViewHeight, _LightDirection0.y, t * LdotV, radius);
 		
 			float2 uv = ApplyScaleOffset(float2(0.5 * sunAngle + 0.5, (radius - _PlanetRadius) / _AtmosphereHeight), _AtmosphereMultiScatterRemap);
-			float3 ms = _MultipleScatter.SampleLevel(_LinearClampSampler, uv, 0.0);
+			float3 ms = _MultipleScatter.SampleLevel(_LinearClampSampler, uv, 0.0) * skyVisibility;
 			float3 lighting = ms * (scatter.xyz + scatter.w);
 		
 			if (!RayIntersectsGround(radius, sunAngle))
@@ -349,7 +351,7 @@ void PhysicalSky(uint2 id : SV_DispatchThreadID)
 			float LdotV1 = dot(V, _LightDirection1);
 			float sunAngle1 = CosAngleAtDistance(_ViewHeight, _LightDirection1.y, t * LdotV1, radius);
 			float2 uv1 = ApplyScaleOffset(float2(0.5 * sunAngle1 + 0.5, (radius - _PlanetRadius) / _AtmosphereHeight), _AtmosphereMultiScatterRemap);
-			float3 ms1 = _MultipleScatter.SampleLevel(_LinearClampSampler, uv1, 0.0);
+			float3 ms1 = _MultipleScatter.SampleLevel(_LinearClampSampler, uv1, 0.0) * skyVisibility;
 			luminance += ApplyExposure(_LightColor1) * ms1 * (scatter.xyz + scatter.w) * weight;
 		
 			if (!RayIntersectsGround(radius, sunAngle1))
