@@ -1,4 +1,5 @@
 ﻿#pragma kernel Deferred
+#pragma enable_d3d11_debug_symbols
 
 #define REFLECTION_PROBE_RENDERING
 
@@ -59,7 +60,7 @@ void Deferred (uint2 id : SV_DispatchThreadID)
 		if (IntersectRaySphere(positionWS + _PlanetOffset, lightData.Direction, _PlanetRadius, intersections) && intersections.x >= 0.0)
 			continue;
     
-		float3 lightColor = TransmittanceToAtmosphere(positionWS + _PlanetOffset, lightData.Direction) * (lightData.Color * (_ExposureValue * rcp(_Exposure[uint2(0, 0)])));
+		float3 lightColor = TransmittanceToAtmosphere(positionWS + _PlanetOffset, lightData.Direction) * (lightData.Color * _ExposureValue);
 		luminance += albedo * saturate(dot(N, lightData.Direction)) * RcpPi * lightColor;
 	}
 	

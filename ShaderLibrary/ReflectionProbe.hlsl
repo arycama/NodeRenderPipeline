@@ -57,7 +57,7 @@ float4 SampleReflectionProbe(float3 positionWS, float3 R, float mip, float3 N, f
 			R = MultiplyVector(probe.localToWorld, R, false);
 		}
 			
-		float3 probeSample = _ReflectionProbes.SampleLevel(_TrilinearClampSampler, float4(R, i), mip);
+		float3 probeSample = _ReflectionProbes.SampleLevel(_TrilinearClampSampler, float4(R, probe.index), mip);
 		
 		// Remove the exposure the probe was baked with, before applying the current exposure
 		float exposureFactor = ApplyExposure(rcp(probe.exposure));
@@ -66,7 +66,7 @@ float4 SampleReflectionProbe(float3 positionWS, float3 R, float mip, float3 N, f
 		
 		[unroll]
 		for (uint j = 0; j < 7; j++)
-			sh[j] = _AmbientData[i * 7 + j] * weight * exposureFactor;
+			sh[j] = _AmbientData[probe.index * 7 + j] * weight * exposureFactor;
 	}
 	
 	if(result.a <= 0.0)
@@ -117,15 +117,16 @@ float GetSkyVisibility(float3 positionWS, float3 N)
 		if (weight <= 0.0)
 			continue;
 
-		float skyVisibility = _SkyOcclusion[i * 9 + 0];
-		skyVisibility += _SkyOcclusion[i * 9 + 1] * N.y;
-		skyVisibility += _SkyOcclusion[i * 9 + 2] * N.z;
-		skyVisibility += _SkyOcclusion[i * 9 + 3] * N.x;
-		skyVisibility += _SkyOcclusion[i * 9 + 4] * N.y * N.x;
-		skyVisibility += _SkyOcclusion[i * 9 + 5] * N.y * N.z;
-		skyVisibility += _SkyOcclusion[i * 9 + 6] * (3.0 * N.z * N.z - 1.0);
-		skyVisibility += _SkyOcclusion[i * 9 + 7] * N.x * N.z;
-		skyVisibility += _SkyOcclusion[i * 9 + 8] * (N.x * N.x - N.y * N.y);
+		uint index = probe.index * 9;
+		float skyVisibility = _SkyOcclusion[index + 0];
+		skyVisibility += _SkyOcclusion[index + 1] * N.y;
+		skyVisibility += _SkyOcclusion[index + 2] * N.z;
+		skyVisibility += _SkyOcclusion[index + 3] * N.x;
+		skyVisibility += _SkyOcclusion[index + 4] * N.y * N.x;
+		skyVisibility += _SkyOcclusion[index + 5] * N.y * N.z;
+		skyVisibility += _SkyOcclusion[index + 6] * (3.0 * N.z * N.z - 1.0);
+		skyVisibility += _SkyOcclusion[index + 7] * N.x * N.z;
+		skyVisibility += _SkyOcclusion[index + 8] * (N.x * N.x - N.y * N.y);
 		
 		result += skyVisibility * weight;
 		weightSum += weight;
@@ -154,7 +155,7 @@ float GetSkyVisibilityL0(float3 positionWS)
 		if (weight <= 0.0)
 			continue;
 
-		result += _SkyOcclusion[i * 9] * weight;
+		result += _SkyOcclusion[probe.index * 9] * weight;
 		weightSum += weight;
 	}
 	

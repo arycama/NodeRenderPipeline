@@ -42,16 +42,18 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 
     [Input, Output] private NodeConnection connection;
 
-    private readonly List<ReadyProbeData> readyProbes = new();
+    private ReadyProbeData[] readyProbes;
 
     private RenderTexture reflectionProbeArray, tempConvolveProbe, gbufferDepth, gbufferAlbedo, gbufferNormal, gbufferEmission;
 
     // Needed to copy exposure, as its currently a RenderTargetIdentifier
     private RenderTexture exposureTemp;
 
-    private float previousExposure;
+    private float previousExposure = 1f;
     private int relightIndex;
     private Action<AsyncGPUReadbackRequest> exposureReadback;
+    private Queue<int> availableProbeIndices = new();
+    private HashSet<EnvironmentProbe> probeCache = new();
 
     public override void Initialize()
     {
@@ -122,6 +124,31 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 
         if (processSubGraph != null)
             processSubGraph.Initialize();
+
+        readyProbes = new ReadyProbeData[maxActiveProbes];
+
+        // Pre-fill the probe array
+        for (var i = 0; i < maxActiveProbes; i++)
+            availableProbeIndices.Enqueue(i);
+
+        // Create a camera for each probe
+        for (var i = 0; i < maxActiveProbes; i++)
+        {
+            // Each probe gets it's own camera. This seems to be neccessary for now
+            // TODO: Try removing this after we convert the logic to use matrices instead of transforms, and see if we can just use one camera. 
+            var cameraGameObject = new GameObject("Reflection Camera");
+            cameraGameObject.hideFlags = HideFlags.HideAndDontSave;
+
+            var reflectionCamera = cameraGameObject.AddComponent<Camera>();
+            reflectionCamera.enabled = false;
+            reflectionCamera.fieldOfView = 90f;
+            reflectionCamera.aspect = 1f;
+            reflectionCamera.nearClipPlane = nearClip;
+            reflectionCamera.farClipPlane = farClip;
+            reflectionCamera.cameraType = CameraType.Reflection;
+
+            readyProbes[i].camera = reflectionCamera;
+        }
     }
 
     public override void Cleanup()
@@ -139,8 +166,6 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 
         ambientBuffer.Release();
         skyOcclusionBuffer.Release();
-
-        readyProbes.Clear();
 
         if (lightingSubGraph != null)
             lightingSubGraph.Cleanup();
@@ -188,7 +213,16 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
     public override void Execute(ScriptableRenderContext context, Camera camera)
     {
         // Remove any ready probes that have been destroyed
-        readyProbes.RemoveAll(probe => probe.Probe == null || !probe.Probe.isActiveAndEnabled);
+        for (var i = 0; i < readyProbes.Length; i++)
+        {
+            if (readyProbes[i].isValid && (readyProbes[i].probe == null || !readyProbes[i].probe.isActiveAndEnabled))
+            {
+                // Set the probe as invalid and release it's index to be available for future probes
+                readyProbes[i].isValid = false;
+                availableProbeIndices.Enqueue(i);
+                probeCache.Remove(readyProbes[i].probe);
+            }
+        }
 
         AddNewProbes(context);
         RelightNextProbe(context);
@@ -217,28 +251,18 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
     {
         foreach (var newProbe in EnvironmentProbe.reflectionProbes.Keys)
         {
-            // Skip if we have max probe
-            if (readyProbes.Count == maxActiveProbes)
-                return;
-
             // Skip existing probes
-            if (readyProbes.Find(probe => probe.Probe == newProbe) != null)
+            if (probeCache.Contains(newProbe))
                 continue;
 
-            var index = readyProbes.Count;
+            //Skip if there are no more indices
+            if (!availableProbeIndices.TryDequeue(out var index))
+                break;
 
-            // Each probe gets it's own camera. This seems to be neccessary for now
-            // TODO: Try removing this after we convert the logic to use matrices instead of transforms, and see if we can just use one camera. 
-            var cameraGameObject = new GameObject("Reflection Camera");
-            cameraGameObject.hideFlags = HideFlags.HideAndDontSave;
+            probeCache.Add(newProbe);
 
-            var reflectionCamera = cameraGameObject.AddComponent<Camera>();
-            reflectionCamera.enabled = false;
-            reflectionCamera.fieldOfView = 90f;
-            reflectionCamera.aspect = 1f;
-            reflectionCamera.nearClipPlane = nearClip;
-            reflectionCamera.farClipPlane = farClip;
-            reflectionCamera.cameraType = CameraType.Reflection;
+            var probeData = readyProbes[index];
+            var reflectionCamera = probeData.camera;
 
             // Do all faces at once for now, worry about culling later
             // Set position
@@ -301,7 +325,9 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
                 processSubGraph.Render(context, reflectionCamera, 0);
             }
 
-            var item = new ReadyProbeData(newProbe, reflectionCamera, previousExposure);
+            readyProbes[index].isValid = true;
+            readyProbes[index].probe = newProbe;
+            readyProbes[index].exposure = previousExposure;
 
             using (var scope = context.ScopedCommandBuffer())
             {
@@ -314,7 +340,6 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 #endif
             }
 
-            readyProbes.Add(item);
             RelightProbe(index, context);
         }
     }
@@ -323,20 +348,32 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
     {
         using var profilerScope = context.ScopedCommandBuffer("ReflectionProbe Relight", true);
 
-        if (readyProbes.Count > 0)
+        // Find next probe that has not been relit
+        for(var i = 0; i < maxActiveProbes; i++)
         {
-            // Incase any have been removed
-            relightIndex = relightIndex % readyProbes.Count;
-            RelightProbe(relightIndex, context);
-            relightIndex = (relightIndex + 1) % readyProbes.Count;
+            var index = (i + relightIndex) % maxActiveProbes;
+            if (readyProbes[index].isValid)
+            {
+                // Found a probe, relight
+                RelightProbe(index, context);
+
+                // Increment index for next iteration
+                relightIndex = (index + 1) % maxActiveProbes;
+
+                // Break, as we only relight 1 per frame
+                break;
+            }
         }
 
         // Done?
         using var scopedList = ScopedPooledList<ReflectionProbeData>.Get();
 
-        for (var i = 0; i < readyProbes.Count; i++)
+        for (var i = 0; i < maxActiveProbes; i++)
         {
-            var current = readyProbes[i].Probe;
+            if (!readyProbes[i].isValid)
+                continue;
+
+            var current = readyProbes[i].probe;
             var min = current.transform.position - current.Size * 0.5f;
             var max = current.transform.position + current.Size * 0.5f;
 
@@ -357,17 +394,14 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 
     private void RelightProbe(int index, ScriptableRenderContext context)
     {
-        var relightData = readyProbes[index];
-        var probe = relightData.Probe;
-
         // Update saved exposure (This value will be used for relighting)
-        relightData.exposure = previousExposure;
+        readyProbes[index].exposure = previousExposure;
 
         // Setup camera matrix based on position
         // Do all faces at once for now, worry about culling later
         // Set position
-        var camera = relightData.Camera;
-        camera.transform.position = probe.transform.position;
+        var camera = readyProbes[index].camera;
+        camera.transform.position = readyProbes[index].probe.transform.position;
 
         // Shared temp texture for all passes
         var tempId = Shader.PropertyToID("_ReflectionProbeTemp");
@@ -382,7 +416,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             var up = CoreUtils.upVectorList[i];
             camera.transform.rotation = Quaternion.LookRotation(fwd, up);
 
-            RelightProbeFace(context, relightData, camera, tempId, i, index);
+            RelightProbeFace(context, camera, tempId, i, index, readyProbes[index].exposure);
         }
 
         // Convolve
@@ -402,7 +436,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
         }
     }
 
-    private void RelightProbeFace(ScriptableRenderContext context, ReadyProbeData relightData, Camera camera, int tempId, int face, int index)
+    private void RelightProbeFace(ScriptableRenderContext context, Camera camera, int tempId, int face, int index, float exposureValue)
     {
         // Evaluate
         if (lightingSubGraph != null)
@@ -414,8 +448,8 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             lightingSubGraph.AddRelayInput("_GBuffer2", (RenderTargetIdentifier)gbufferEmission);
             lightingSubGraph.AddRelayInput("Result", new RenderTargetIdentifier(tempId));
             lightingSubGraph.AddRelayInput("Exposure", exposure);
-            lightingSubGraph.AddRelayInput("_ExposureValue", relightData.exposure);
-            lightingSubGraph.AddRelayInput("_ExposureValueRcp", 1f / relightData.exposure);
+            lightingSubGraph.AddRelayInput("_ExposureValue", exposureValue);
+            lightingSubGraph.AddRelayInput("_ExposureValueRcp", 1f / exposureValue);
             lightingSubGraph.AddRelayInput("_AmbientSh", ambient);
             lightingSubGraph.AddRelayInput("_AtmosphereTransmittance", atmosphereTransmittance);
             lightingSubGraph.AddRelayInput("_SkyReflection", skyReflection);
@@ -454,22 +488,21 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
         }
     }
 
-    public class ReadyProbeData
+    public struct ReadyProbeData
     {
-        public EnvironmentProbe Probe;
-        public Camera Camera;
+        public bool isValid;
+        public EnvironmentProbe probe;
+        public Camera camera;
         public float exposure;
 
-        public ReadyProbeData(EnvironmentProbe item1, Camera camera, float exposure)
+        public override string ToString()
         {
-            Probe = item1 ?? throw new ArgumentNullException(nameof(item1));
-            Camera = camera ?? throw new ArgumentException(nameof(camera));
-            this.exposure = exposure;
+            return $"IsValid: {isValid}, Probe: {probe}, Exposure: {exposure}, Camera: {camera}";
         }
 
         public void Cleanup()
         {
-            DestroyImmediate(Camera.gameObject);
+            DestroyImmediate(camera.gameObject);
         }
     }
 }
