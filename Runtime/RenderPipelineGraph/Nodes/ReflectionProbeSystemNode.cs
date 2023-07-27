@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using NodeGraph;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -78,7 +79,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
         exposureTemp = new RenderTexture(1, 1, 0, RenderTextureFormat.RFloat) { hideFlags = HideFlags.HideAndDontSave };
 
         reflectionProbeDataBuffer = new();
-        reflectionProbeDataBuffer.EnsureCapcity(1);
+        reflectionProbeDataBuffer.EnsureCapcity(maxActiveProbes);
 
         ambientBuffer = new ComputeBuffer(maxActiveProbes * 7, sizeof(float) * 4);
         skyOcclusionBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, maxActiveProbes * 9, sizeof(float));
@@ -192,23 +193,35 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             if (readyProbes.Find(probe => probe.Probe == newProbe) != null)
                 continue;
 
+            // Each probe gets it's own camera. This seems to be neccessary for now
+            // TODO: Try removing this after we convert the logic to use matrices instead of transforms, and see if we can just use one camera. 
             var cameraGameObject = new GameObject("Reflection Camera");
             cameraGameObject.hideFlags = HideFlags.HideAndDontSave;
 
-            var camera = cameraGameObject.AddComponent<Camera>();
-            camera.enabled = false;
-            camera.fieldOfView = 90f;
-            camera.aspect = 1f;
-            camera.nearClipPlane = nearClip;
-            camera.farClipPlane = farClip;
-            camera.cameraType = CameraType.Reflection;
+            var reflectionCamera = cameraGameObject.AddComponent<Camera>();
+            reflectionCamera.enabled = false;
+            reflectionCamera.fieldOfView = 90f;
+            reflectionCamera.aspect = 1f;
+            reflectionCamera.nearClipPlane = nearClip;
+            reflectionCamera.farClipPlane = farClip;
+            reflectionCamera.cameraType = CameraType.Reflection;
 
             // Do all faces at once for now, worry about culling later
             // Set position
-            camera.transform.position = newProbe.transform.position;
+            reflectionCamera.transform.position = newProbe.transform.position;
 
             using (var scope = context.ScopedCommandBuffer())
+            {
                 scope.Command.EnableShaderKeyword("REFLECTION_PROBE_RENDERING");
+                scope.Command.SetGlobalFloat("_ExposureValue", 1f);
+                scope.Command.SetGlobalFloat("_ExposureValueRcp", 1f);
+                scope.Command.SetInvertCulling(true);
+
+#if UNITY_EDITOR
+                // Also need to temporarily disable async shader compilation or we end up with holes in our reflection probes, or empty probes
+                ShaderUtil.SetAsyncCompilation(scope.Command, false);
+#endif
+            }
 
             var depth = new RenderTexture(resolution, resolution, 16, RenderTextureFormat.Depth) { dimension = TextureDimension.Cube }.Created();
             var albedo = new RenderTexture(resolution, resolution, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB) { dimension = TextureDimension.Cube }.Created();
@@ -219,29 +232,24 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             {
                 var fwd = CoreUtils.lookAtList[i];
                 var up = CoreUtils.upVectorList[i];
-                camera.transform.rotation = Quaternion.LookRotation(fwd, up);
+
+                // TODO: Set camera matrices instead of transform?
+                reflectionCamera.transform.rotation = Quaternion.LookRotation(fwd, up);
 
                 Matrix4x4 viewProjectionMatrix;
                 using (var scope = context.ScopedCommandBuffer("Reflection Probe", true))
                 {
-                    //scope.Command.SetRenderTarget(renderTargetBinding);
-                    //scope.Command.ClearRenderTarget(true, true, Color.clear);
-                    GraphicsUtilities.SetupCameraProperties(scope.Command, 0, camera, context, Vector2Int.one * resolution, out viewProjectionMatrix, true);
-                    scope.Command.SetInvertCulling(true);
-
-                    scope.Command.SetGlobalFloat("_ExposureValue", 1f);
-                    scope.Command.SetGlobalFloat("_ExposureValueRcp", 1f);
-
-                    GeometryUtilities.CalculateFrustumPlanes(camera, cullingPlanes);
+                    GraphicsUtilities.SetupCameraProperties(scope.Command, 0, reflectionCamera, context, Vector2Int.one * resolution, out viewProjectionMatrix, true);
+                    GeometryUtilities.CalculateFrustumPlanes(reflectionCamera, cullingPlanes);
                 }
 
                 if (gbufferSubGraph != null)
                 {
-                    var worldToView = Matrix4x4.Rotate(Quaternion.Inverse(camera.transform.rotation));
+                    var worldToView = Matrix4x4.Rotate(Quaternion.Inverse(reflectionCamera.transform.rotation));
 
                     gbufferSubGraph.AddRelayInput("View Matrix", worldToView);
                     gbufferSubGraph.AddRelayInput("View Projection Matrix", viewProjectionMatrix);
-                    gbufferSubGraph.AddRelayInput("Inverse View Matrix", Matrix4x4.Rotate(camera.transform.rotation));
+                    gbufferSubGraph.AddRelayInput("Inverse View Matrix", Matrix4x4.Rotate(reflectionCamera.transform.rotation));
                     gbufferSubGraph.AddRelayInput("Culling Planes", new Vector4Array(cullingPlanes));
                     gbufferSubGraph.AddRelayInput("Culling Planes Count", cullingPlanes.Length);
                     gbufferSubGraph.AddRelayInput("Gpu Instance Buffers", gpuInstanceBuffers);
@@ -251,7 +259,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
                     gbufferSubGraph.AddRelayInput("Albedo Target", new RenderTargetIdentifier(albedo, 0, (CubemapFace)i));
                     gbufferSubGraph.AddRelayInput("Normal Target", new RenderTargetIdentifier(normal, 0, (CubemapFace)i));
                     gbufferSubGraph.AddRelayInput("Emission Target", new RenderTargetIdentifier(emission, 0, (CubemapFace)i));
-                    gbufferSubGraph.Render(context, camera, 0);
+                    gbufferSubGraph.Render(context, reflectionCamera, 0);
                 }
             }
 
@@ -261,15 +269,20 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
                 processSubGraph.AddRelayInput("Sky Visibility Input", (RenderTargetIdentifier)depth);
                 processSubGraph.AddRelayInput("Sky Visibility Buffer", skyOcclusionBuffer);
                 processSubGraph.AddRelayInput("Sky Visibility Offset", index * 9);
-                processSubGraph.Render(context, camera, 0);
+                processSubGraph.Render(context, reflectionCamera, 0);
             }
 
-            var item = new ReadyProbeData(newProbe, depth, albedo, normal, emission, camera, previousExposure);
+            var item = new ReadyProbeData(newProbe, depth, albedo, normal, emission, reflectionCamera, previousExposure);
 
             using (var scope = context.ScopedCommandBuffer())
             {
                 scope.Command.SetInvertCulling(false);
                 scope.Command.DisableShaderKeyword("REFLECTION_PROBE_RENDERING");
+
+#if UNITY_EDITOR
+                // Re-enable async shader compilation
+                ShaderUtil.SetAsyncCompilation(scope.Command, true);
+#endif
             }
 
             readyProbes.Add(item);

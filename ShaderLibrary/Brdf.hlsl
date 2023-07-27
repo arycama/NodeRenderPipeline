@@ -275,14 +275,7 @@ float3 GetLighting(float4 positionCS, float3 N, float3 T, PbrInput input, out fl
 	{
 		backIrradiance = irradiance;
 	}
-	
-	// Test
-	//radiance = _SkyReflection.SampleLevel(_TrilinearClampSampler, iblR, iblMipLevel);
-	//irradiance = backIrradiance = ambient;
-	//float skyVisibility = GetSkyVisibility(positionWS, input.bentNormal);
-	//radiance *= skyVisibility;
-	//irradiance *= skyVisibility;
-	
+
 	float specularOcclusion = SpecularOcclusion(dot(N, R), perceptualRoughness, input.occlusion, dot(input.bentNormal, R));
 	radiance *= specularOcclusion;
 	
@@ -293,8 +286,7 @@ float3 GetLighting(float4 positionCS, float3 N, float3 T, PbrInput input, out fl
 	
 	// Ambient
 	illuminance = irradiance;
-	float3 luminance = FssEss * radiance * 0 + Fms * Ems * irradiance + (kD * irradiance + bkD * backIrradiance);
-	return irradiance * input.albedo;
+	float3 luminance = FssEss * radiance + Fms * Ems * irradiance + (kD * irradiance + bkD * backIrradiance);
 	
 	#ifdef REFLECTION_PROBE_RENDERING
 		luminance = kD * irradiance;

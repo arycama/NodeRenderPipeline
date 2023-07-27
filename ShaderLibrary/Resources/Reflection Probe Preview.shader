@@ -7,14 +7,18 @@ Shader"Hidden/Reflection Probe Preview"
 
     SubShader
     {
+        Tags
+        {
+            "Queue" = "Transparent"
+        }
+
         Pass
         {
             Name "Forward"
 
             Tags
             {
-                //"LightMode" = "Forward"
-                "Queue" = "Transparent"
+                "LightMode" = "Forward"
             }
 
             HLSLPROGRAM

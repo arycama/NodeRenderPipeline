@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using UnityEditor;
 using UnityEngine;
 
 [ExecuteAlways]
@@ -27,6 +28,12 @@ public class EnvironmentProbe : MonoBehaviour
     public Vector3 Size { get => size; set => size = value; }
     public Vector3 Offset { get => offset; set => offset = value; }
 
+    [InitializeOnLoadMethod]
+    private static void Initialize()
+    {
+        SceneView.beforeSceneGui += OnPreSceneGUICallback;
+    }
+
     private void OnEnable()
     {
         reflectionProbes.Add(this, reflectionProbes.Count);
@@ -37,11 +44,8 @@ public class EnvironmentProbe : MonoBehaviour
         reflectionProbes.Remove(this);
     }
 
-    private void Update()
+    private static void OnPreSceneGUICallback(SceneView sceneView)
     {
-        //if (Application.isPlaying)
-        //    return;
-
         if (previewMaterial == null)
         {
             var shader = Shader.Find("Hidden/Reflection Probe Preview");
@@ -54,15 +58,15 @@ public class EnvironmentProbe : MonoBehaviour
         if (propertyBlock == null)
             propertyBlock = new MaterialPropertyBlock();
 
-        propertyBlock.SetFloat("_Layer", reflectionProbes[this]);
+        foreach (var probe in reflectionProbes)
+        {
+            propertyBlock.SetFloat("_Layer", probe.Value);
 
-        var rp = new RenderParams(previewMaterial) { matProps = propertyBlock };
-        var objectToWorld = Matrix4x4.TRS(transform.position, Quaternion.identity, new Vector3(0.5f, 0.5f, 0.5f));
-        Graphics.RenderMesh(rp, previewMesh, 0, objectToWorld);
-    }
+            // draw a preview sphere that scales with overall GO scale, but always uniformly
+            var scale = probe.Key.transform.lossyScale.magnitude * 0.5f;
 
-    private void OnDrawGizmos()
-    {
-
+            var objectToWorld = Matrix4x4.TRS(probe.Key.transform.position, Quaternion.identity, Vector3.one * scale);
+            Graphics.DrawMesh(previewMesh, objectToWorld, previewMaterial, 0, SceneView.currentDrawingSceneView.camera, 0, propertyBlock);
+        }
     }
 }
