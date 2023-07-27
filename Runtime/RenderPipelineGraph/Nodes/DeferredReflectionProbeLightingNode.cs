@@ -32,6 +32,7 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
     [Input] private RenderTargetIdentifier directionalShadows;
 
     [Input] private int offset;
+    [Input] private int index;
 
     [Input, Output] private RenderTargetIdentifier result;
 
@@ -59,9 +60,10 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
 
         scope.Command.SetComputeIntParam(deferredComputeShader, "_Resolution", resolution);
         scope.Command.SetComputeIntParam(deferredComputeShader, "_Offset", offset);
+        scope.Command.SetComputeFloatParam(deferredComputeShader, "_Index", index);
 
         //scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_LightClusterList", lightList);
-       // scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_LightData", lightDataBuffer);
+        // scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_LightData", lightDataBuffer);
         scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_DirectionalLightData", directionalLightBuffer);
         //scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_LightClusterIndices", lightClusterId);
         scope.Command.SetComputeIntParam(deferredComputeShader, "_DirectionalLightCount", directionalLightBuffer.Count);

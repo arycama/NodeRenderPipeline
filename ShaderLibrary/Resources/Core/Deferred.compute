@@ -7,18 +7,19 @@
 
 Buffer<float> _SkyVisibilitySh;
 RWTexture2D<float3> Result;
-TextureCube<float4> _GBuffer0, _GBuffer1;
-TextureCube<float3> _GBuffer2;
-TextureCube<float> Depth;
+TextureCubeArray<float4> _GBuffer0, _GBuffer1;
+TextureCubeArray<float3> _GBuffer2;
+TextureCubeArray<float> Depth;
 float4x4 _PixelCoordToViewDirWS;
 uint _Offset;
+float _Index;
 
 [numthreads(8, 8, 1)]
 void Deferred (uint2 id : SV_DispatchThreadID)
 {	
 	float3 V = -MultiplyVector(_PixelCoordToViewDirWS, float3(id + 0.5, 1.0), false);
 	
-	float depth = Depth.SampleLevel(_PointClampSampler, V, 0.0);
+	float depth = Depth.SampleLevel(_PointClampSampler, float4(V, _Index), 0.0);
 	if(depth == _FarClipValue)
 	{
 		// If depth is empty, just render the sky. 
@@ -27,9 +28,9 @@ void Deferred (uint2 id : SV_DispatchThreadID)
 	}
 	
 	// Load surface data from gbuffer
-	float3 albedo = _GBuffer0.SampleLevel(_PointClampSampler, V, 0.0).rgb;
-	float3 gbuffer1 = _GBuffer1.SampleLevel(_PointClampSampler, V, 0.0).rgb;
-	float3 emission = _GBuffer2.SampleLevel(_PointClampSampler, V, 0.0);
+	float3 albedo = _GBuffer0.SampleLevel(_PointClampSampler, float4(V, _Index), 0.0).rgb;
+	float3 gbuffer1 = _GBuffer1.SampleLevel(_PointClampSampler, float4(V, _Index), 0.0).rgb;
+	float3 emission = _GBuffer2.SampleLevel(_PointClampSampler, float4(V, _Index), 0.0);
 
 	float3 N = UnpackNormalOctQuadEncode(2.0 * Unpack888ToFloat2(gbuffer1) - 1.0);
 	
@@ -59,7 +60,7 @@ void Deferred (uint2 id : SV_DispatchThreadID)
 			continue;
     
 		float3 lightColor = TransmittanceToAtmosphere(positionWS + _PlanetOffset, lightData.Direction) * (lightData.Color * (_ExposureValue * rcp(_Exposure[uint2(0, 0)])));
-		//luminance += input.albedo * saturate(dot(N, lightData.Direction)) * RcpPi * lightColor;
+		luminance += albedo * saturate(dot(N, lightData.Direction)) * RcpPi * lightColor;
 	}
 	
 	// Apply exposure for reflection emission, as we don't apply exposure when it is captured

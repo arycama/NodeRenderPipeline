@@ -102,15 +102,18 @@ void AmbientProbeConvolution(uint groupIndex : SV_GroupIndex)
 }
 
 static const uint _SkySampleCount = 512;
-TextureCube<float> _SkyVisibilityInput;
+TextureCubeArray<float> _SkyVisibilityInput;
 groupshared float SkySHCoeffs[_SkySampleCount][9];
 RWBuffer<float> _SkyVisibilityResult;
+float _Index;
 
 [numthreads(_SkySampleCount, 1, 1)]
 void SkyVisibilityConvolution(uint groupIndex : SV_GroupIndex)
 {
+	// TODO: Pass in as const
+	float elements;
 	float2 cubeSize;
-	_SkyVisibilityInput.GetDimensions(cubeSize.x, cubeSize.y);
+	_SkyVisibilityInput.GetDimensions(cubeSize.x, cubeSize.y, elements);
 
     // Prefiltered importance sampling
     // Use lower MIP-map levels for fetching samples with low probabilities
@@ -129,7 +132,7 @@ void SkyVisibilityConvolution(uint groupIndex : SV_GroupIndex)
     // Sample once per thread
 	float weight = 4.0 * Pi / _SkySampleCount;
 	
-	float value = (_SkyVisibilityInput.SampleLevel(_LinearClampSampler, n, 0.0) == _FarClipValue) * weight;
+	float value = (_SkyVisibilityInput.SampleLevel(_LinearClampSampler, float4(n, _Index), 0.0) == _FarClipValue) * weight;
 	float outputSHCoeffs[9];
 	
 	float Y[9] =

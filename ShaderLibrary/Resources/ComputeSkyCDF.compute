@@ -87,9 +87,9 @@ void CSMain(uint3 id : SV_DispatchThreadID)
 	float dx = maxDist / float(sampleCount);
 		
 	transmittance = 1.0;
-	for (float i = 0.5; i < sampleCount; i++)
+	for (uint i = 0; i < sampleCount; i++)
 	{
-		float distance = float(i) * dx;
+		float distance = (float(i) + 0.5) * dx;
 		
 		// Distance between the current sample point and the planet center.
 		float radius = HeightAtDistance(viewHeight, cosAngle, distance);

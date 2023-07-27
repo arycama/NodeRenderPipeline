@@ -24,9 +24,9 @@ void Transmittance(uint2 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, u
 	UvToSkyParams(uv, viewHeight, viewCosAngle, rayLength);
 	
 	float3 opticalDepth = 0.0;
-	for (float i = 0.5; i < _SampleCount; i++)
+	for (uint i = 0; i < _SampleCount; i++)
 	{
-		float distance = float(i) / _SampleCount * rayLength;
+		float distance = (float(i) + 0.5) / _SampleCount * rayLength;
 		float radius = HeightAtDistance(viewHeight, viewCosAngle, distance);
 		opticalDepth += AtmosphereExtinction(radius);
 	}
