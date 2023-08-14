@@ -133,17 +133,15 @@ void surf(inout FragmentData input, inout SurfaceData surface)
 		if (Terrain_Blending)
 		{
 			// Calculate blending factors
-			float terrainHeight = GetTerrainHeight(input.positionWS);
-			float heightBlend = saturate(1.0 - abs(input.positionWS.y - terrainHeight) * _HeightBlend);
+
 
 			// Normal blending factor
 			float3 terrainNormalWS = GetTerrainNormal(input.positionWS);
 
-			// Dot product between world normal and terrain normal
-			//float normalBlend = saturate(1.0 - Angle(input.normal, terrainNormalWS) * INV_HALF_PI * _NormalBlend);
-			float finalBlend = heightBlend;// * normalBlend;
-
-			if (finalBlend > 0)
+			// Use angle between world normal and terrain normal to blend a height factor. TODO: Optimize
+			float terrainHeight = GetTerrainHeight(input.positionWS);
+			float blend = saturate(1.0 - (abs(input.positionWS.y - terrainHeight) / lerp(_HeightBlend, 0.0, (1.0 - saturate(dot(input.normal, terrainNormalWS)) * _NormalBlend))));
+			if (blend > 0)
 			{
 				float2 terrainUv = WorldToTerrainPosition(input.positionWS);
 				float3 virtualUv = CalculateVirtualUv(terrainUv);
@@ -158,13 +156,13 @@ void surf(inout FragmentData input, inout SurfaceData surface)
 				float3x3 tangentToWorld = float3x3(input.tangent, input.binormal, input.normal);
 				float3 normalWS = mul(surface.Normal, tangentToWorld);
 
-				input.normal = normalize(lerp(normalWS, virtualNormalMap.xzy, finalBlend));
+				input.normal = normalize(lerp(normalWS, virtualNormalMap.xzy, blend));
 				surface.Normal = float3(0, 0, 1);
 
-				surface.Albedo = lerp(surface.Albedo, albedoSmoothness.rgb, finalBlend);
-				surface.PerceptualRoughness = lerp(surface.PerceptualRoughness, PerceptualSmoothnessToPerceptualRoughness(albedoSmoothness.a), finalBlend);
-				surface.Metallic = lerp(surface.Metallic, normalMetalOcclusion.r, finalBlend);
-				surface.Occlusion = lerp(surface.Occlusion, normalMetalOcclusion.b, finalBlend);
+				surface.Albedo = lerp(surface.Albedo, albedoSmoothness.rgb, blend);
+				surface.PerceptualRoughness = lerp(surface.PerceptualRoughness, PerceptualSmoothnessToPerceptualRoughness(albedoSmoothness.a), blend);
+				surface.Metallic = lerp(surface.Metallic, normalMetalOcclusion.r, blend);
+				surface.Occlusion = lerp(surface.Occlusion, normalMetalOcclusion.b, blend);
 			}
 		}
 

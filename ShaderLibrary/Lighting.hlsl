@@ -749,11 +749,10 @@ float4 BlendVisibiltyCones(float4 coneA, float4 coneB)
 	return float4(normal, 1.0 - Sq(1.0 - area));
 }
 
-float3 PlanetCurve(float3 positionRWS)
+float3 PlanetCurve(float3 positionWS)
 {
-	float dst = length(positionRWS.xz) / _PlanetRadius;
-	positionRWS.y += _PlanetRadius * (sqrt(1 - dst * dst) - 1.0);
-	return positionRWS;
+	positionWS.y += sqrt(Sq(_PlanetRadius) - SqrLength(positionWS.xz)) - _PlanetRadius;
+	return positionWS;
 }
 
 float3 PlanetCurvePrevious(float3 positionRWS)

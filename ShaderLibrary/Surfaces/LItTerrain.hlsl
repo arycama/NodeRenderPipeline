@@ -44,7 +44,7 @@ struct FragmentInput
 Buffer<uint> _PatchData;
 float4 _PatchScaleOffset;
 float2 _SpacingScale;
-float _RcpVerticesPerEdge, _RcpVerticesPerEdgeMinusOne, _UvScale, _UvOffset, TERRAIN_AO_ON;
+float _RcpVerticesPerEdge, _RcpVerticesPerEdgeMinusOne, _PatchUvScale, _HeightUvScale, _HeightUvOffset, TERRAIN_AO_ON;
 uint _VerticesPerEdge, _VerticesPerEdgeMinusOne;
 SamplerState _TrilinearClampSamplerAniso4;
 
@@ -85,14 +85,14 @@ HullInput Vertex(VertexInput input)
 	if (row == 0)
 		x = (floor(column * exp2(-diffs.w)) + (frac(column * exp2(-diffs.w)) > 0.5)) * exp2(diffs.w);
 	
-	float2 vertex = ((uint2(x, y) << lod) * _RcpVerticesPerEdgeMinusOne + (uint2(dataColumn, dataRow) << lod));
+	float2 vertex = (uint2(x, y) << lod) * _RcpVerticesPerEdgeMinusOne + (uint2(dataColumn, dataRow) << lod);
 	
 	HullInput output;
 	output.patchData = uint4(column, row, lod, cellData);
-	output.uv = vertex * _UvScale + _UvOffset;
+	output.uv = vertex;
 	
 	output.position.xz = vertex * _PatchScaleOffset.xy + _PatchScaleOffset.zw;
-	output.position.y = GetTerrainHeight(output.uv);
+	output.position.y = GetTerrainHeight(output.uv * _HeightUvScale + _HeightUvOffset);
 	return output;
 }
 
@@ -203,22 +203,22 @@ FragmentInput Domain(HullConstantOutput tessFactors, OutputPatch<DomainInput, 4>
 	float2 dy = float2(0.0, Bilerp(tessFactors.dy, weights));
     
 #ifndef UNITY_PASS_SHADOWCASTER
-	uint feedbackPosition = CalculateFeedbackBufferPosition(uv, dx, dy);
+	uint feedbackPosition = CalculateFeedbackBufferPosition(uv * _PatchUvScale, dx, dy);
 	_VirtualFeedbackTexture[feedbackPosition] = 1;
 #endif
 	
 	// Displacement
-	float3 virtualUv = CalculateVirtualUv(uv, dx, dy);
+	float3 virtualUv = CalculateVirtualUv(uv * _PatchUvScale, dx, dy);
 	float displacement = _VirtualHeightTexture.SampleGrad(sampler_VirtualHeightTexture, virtualUv, dx, dy) - 0.5;
-	float height = GetTerrainHeight(uv) + displacement * _Displacement;
+	float height = GetTerrainHeight(uv * _HeightUvScale + _HeightUvOffset) + displacement * _Displacement;
 	
 	float3 position = float3(data.xy, height).xzy;
 	position = PlanetCurve(position);
 	
 	FragmentInput output;
-	output.uv = uv;
+	output.uv = uv * _PatchUvScale;
 	
-	bool isNotHole = _TerrainHolesTexture.SampleLevel(_PointClampSampler, uv, 0.0);
+	bool isNotHole = _TerrainHolesTexture.SampleLevel(_PointClampSampler, uv * _HeightUvScale + _HeightUvOffset, 0.0);
 	output.positionCS = isNotHole ? WorldToClip(position) : asfloat(0x7fc00000);
 	
 	return output;
@@ -252,6 +252,7 @@ GBufferOut Fragment(FragmentInput input)
 	float4 aoBentNormal = _TerrainAmbientOcclusion.Sample(_LinearClampSampler, input.uv);
 	aoBentNormal.xyz = normalize(2.0 * aoBentNormal.xyz - 1.0);
 	
+	// TODO: This needs some improvement.. blending bent normals with world normals doesn't quite work well
 	if (TERRAIN_AO_ON)
 	{
 		float4 visibilityCone = BlendVisibiltyCones(float4(surface.bentNormal, surface.Occlusion), aoBentNormal);
