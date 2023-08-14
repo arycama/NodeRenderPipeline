@@ -34,6 +34,9 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
     [Input] private int offset;
     [Input] private int index;
 
+    [Input] private Matrix4x4 probeWorldToLocal;
+    [Input] private Vector3 probeCenter;
+
     [Input, Output] private RenderTargetIdentifier result;
 
     [Input, Output] private NodeConnection connection;
@@ -81,6 +84,10 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
         scope.Command.SetComputeMatrixParam(deferredComputeShader, "_CameraViewProjectionMatrix", viewProjectionMatrix);
         scope.Command.SetComputeVectorParam(deferredComputeShader, "_OriginalCameraPosition", cameraPosition);
         scope.Command.SetComputeVectorParam(deferredComputeShader, "_ReflectionCameraPosition", camera.transform.position);
+
+        scope.Command.SetComputeMatrixParam(deferredComputeShader, "_ProbeWorldToLocal", probeWorldToLocal);
+        scope.Command.SetComputeVectorParam(deferredComputeShader, "_ProbeCenter", probeCenter);
+
 
         // scope.Command.SetComputeFloatParam(deferredComputeShader, "_ClusterScale", clusterScale);
         //scope.Command.SetComputeFloatParam(deferredComputeShader, "_ClusterBias", clusterBias);

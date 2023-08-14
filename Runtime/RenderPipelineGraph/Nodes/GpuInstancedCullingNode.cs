@@ -10,8 +10,7 @@ public partial class GpuInstancedCullingNode : RenderPipelineNode
     [SerializeField] private bool isShadow;
 
     [Input] private RenderTargetIdentifier hiZTexture;
-    [Input] private Vector4Array cullingPlanes;
-    [Input] private int cullingPlanesCount;
+    [Input] private CullingPlanes cullingPlanes;
     [Input] private GpuInstanceBuffers gpuInstanceBuffers;
 
     [Input, Output] private NodeConnection connection;
@@ -80,10 +79,10 @@ public partial class GpuInstancedCullingNode : RenderPipelineNode
             scope.Command.SetComputeTextureParam(cullingShader, 0, "_CameraMaxZTexture", hiZTexture);
 
             scope.Command.SetComputeMatrixParam(cullingShader, "_ScreenMatrix", screenMatrix);
-            scope.Command.SetComputeVectorArrayParam(cullingShader, "_CullingPlanes", cullingPlanes.value);
+            scope.Command.SetComputeVectorArrayParam(cullingShader, "_CullingPlanes", cullingPlanes);
             scope.Command.SetComputeVectorParam(cullingShader, "_Resolution", new Vector4(1f / camera.Resolution().x, 1f / camera.Resolution().y, camera.Resolution().x, camera.Resolution().y));
             scope.Command.SetComputeIntParam(cullingShader, "_MaxHiZMip", Texture2DExtensions.MipCount(camera.Resolution().x, camera.Resolution().y) - 1);
-            scope.Command.SetComputeIntParam(cullingShader, "_CullingPlanesCount", cullingPlanesCount);
+            scope.Command.SetComputeIntParam(cullingShader, "_CullingPlanesCount", cullingPlanes.Count);
             scope.Command.SetComputeIntParam(cullingShader, "_InstanceCount", gpuInstanceBuffers.positionsBuffer.count);
 
             using var hiZScope = scope.Command.KeywordScope("HIZ_ON", !isShadow);

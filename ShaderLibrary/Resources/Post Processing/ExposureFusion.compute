@@ -14,14 +14,84 @@ float4 _MipPixelSize, _ScaleOffset;
 float _Shadows, _Highlights, _Mip, _SigmaSq, _BoostLocalContrast, _Compensation;
 uint _MaxWidth, _MaxHeight;
 
+
+// Neutral tonemapping (Hable/Hejl/Frostbite)
+// Input is linear RGB
+// More accuracy to avoid NaN on extremely high values.
+float3 NeutralCurve(float3 x, float a, float b, float c, float d, float e, float f)
+{
+	return ((x * (a * x + c * b) + d * e) / (x * (a * x + b) + d * f)) - e / f;
+}
+
+float3 NeutralTonemap(float3 x)
+{
+    // Tonemap
+	const float a = 0.2;
+	const float b = 0.29;
+	const float c = 0.24;
+	const float d = 0.272;
+	const float e = 0.02;
+	const float f = 0.3;
+	const float whiteLevel = 5.3;
+	const float whiteClip = 1.0;
+
+	float3 whiteScale = (1.0).xxx / NeutralCurve(whiteLevel, a, b, c, d, e, f);
+	x = NeutralCurve(x * whiteScale, a, b, c, d, e, f);
+	x *= whiteScale;
+
+    // Post-curve white point adjustment
+	x /= whiteClip.xxx;
+
+	return x;
+}
+
+
+float3 RRTAndODTFit(float3 v)
+{
+
+	float3 a = v * (v + 0.0245786) - 0.000090537;
+	float3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
+	return a / b;
+}
+
+float3 ACESFilmicToneMapping(float3 color)
+{
+	//return NeutralTonemap(color);
+
+	// sRGB => XYZ => D65_2_D60 => AP1 => RRT_SAT
+	const float3x3 ACESInputMat = float3x3(
+				float3(0.59719, 0.07600, 0.02840), // transposed from source
+				float3(0.35458, 0.90834, 0.13383),
+				float3(0.04823, 0.01566, 0.83777)
+			);
+
+	// ODT_SAT => XYZ => D60_2_D65 => sRGB
+	const float3x3 ACESOutputMat = float3x3(
+				float3(1.60475, -0.10208, -0.00327), // transposed from source
+				float3(-0.53108, 1.10813, -0.07276),
+				float3(-0.07367, -0.00605, 1.07602)
+			);
+
+	color = mul(color, ACESInputMat);
+
+	// Apply RRT and ODT
+	color = RRTAndODTFit(color);
+
+	color = mul(color, ACESOutputMat);
+
+	// Clamp to [0, 1]
+	return saturate(color);
+
+}
+
 [numthreads(8, 8, 1)]
 void Luminance(uint2 id : SV_DispatchThreadID)
 {
 	 // Tonemap three syntetic exposures and produce their luminances.
-	float3 color = _Original[id] * _Compensation;
-	float highlights = Luminance(AcesTonemap(unity_to_ACES(color * _Highlights)));
-	float midtones = Luminance(AcesTonemap(unity_to_ACES(color)));
-	float shadows = Luminance(AcesTonemap(unity_to_ACES(color * _Shadows)));
+	float3 inpColor = _Original[id] * _Compensation;
+	float highlights = Luminance(ACESFilmicToneMapping(inpColor * _Highlights));
+	float midtones = Luminance(ACESFilmicToneMapping(inpColor));
+	float shadows = Luminance(ACESFilmicToneMapping(inpColor * _Shadows));
 	_LuminanceResult[id] = float3(highlights, midtones, shadows);
 	
 	float3 diff = float3(highlights, midtones, shadows) - 0.5;
@@ -59,6 +129,7 @@ void BlendLaplacian(uint2 id : SV_DispatchThreadID)
 void FinalCombinePass(uint2 id : SV_DispatchThreadID)
 {
 	float2 uv = id * _ScaleOffset.xy + _ScaleOffset.zw;
+	float3 input = _Result[id];
 	
 	// Guided upsampling.
     // See https://bartwronski.com/2019/09/22/local-linear-models-guided-filter/
@@ -68,11 +139,13 @@ void FinalCombinePass(uint2 id : SV_DispatchThreadID)
 	float momentXY = 0.0;
 	float ws = 0.0;
 	
+	int radius = 1;
+	
 	[unroll]
-	for (int dy = -1; dy <= 1; dy += 1)
+	for (int dy = -radius; dy <= radius; dy++)
 	{
 		[unroll]
-		for (int dx = -1; dx <= 1; dx += 1)
+		for (int dx = -radius; dx <= radius; dx++)
 		{
 			float x = _OriginalMip.SampleLevel(_LinearClampSampler, uv + float2(dx, dy) * _MipPixelSize.zw, _Mip).y;
 			float y = _Diffuse.SampleLevel(_LinearClampSampler, uv + float2(dx, dy) * _MipPixelSize.zw, 0.0).x;
@@ -93,8 +166,17 @@ void FinalCombinePass(uint2 id : SV_DispatchThreadID)
 	float A = (momentXY - momentX * momentY) / (max(momentX2 - momentX * momentX, 0.0) + 0.00001);
 	float B = momentY - A * momentX;
 	
-    // Apply local exposure adjustment as a crude multiplier on all RGB channels.
-	float3 input = unity_to_ACES(_Result[id] * _Compensation);
-	float3 tonemappedInput = AcesTonemap(input);
-	_Result[id] = max(0.0, _Diffuse.SampleLevel(_LinearClampSampler, uv, 0.0).x) / (Luminance(tonemappedInput) + 0.0001) * tonemappedInput;
+	//float A = 1, B = 0;
+	//A = _Diffuse.SampleLevel(_LinearClampSampler, uv, 0.0).x;
+	//B = 0;
+	
+	float3 texelOriginal = ACESFilmicToneMapping(_Result[id] * _Compensation);
+	float luminance = Luminance(texelOriginal.xyz) + 0.00001;
+	float finalMultiplier = max(A * luminance + B, 0.0) / luminance;
+    // This is a hack to prevent super dark pixels getting boosted by a lot and showing compression artifacts.
+	float lerpToUnityThreshold = 0.007;
+	
+	finalMultiplier = luminance > lerpToUnityThreshold ? finalMultiplier : lerp(1.0, finalMultiplier, (luminance / lerpToUnityThreshold) * (luminance / lerpToUnityThreshold));
+	float3 result = ACESFilmicToneMapping(_Result[id] * _Compensation * finalMultiplier);
+	_Result[id] = result;
 }

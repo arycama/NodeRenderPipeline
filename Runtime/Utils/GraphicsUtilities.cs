@@ -3,7 +3,8 @@ using UnityEngine.Rendering;
 
 public static class GraphicsUtilities
 {
-    private static readonly Vector4[] cullingPlanes = new Vector4[6];
+    private static readonly Vector4[] cullingPlaneArray = new Vector4[6];
+    private static readonly Plane[] cullingPlaneArrayTemp = new Plane[6];
 
     public static void SafeDestroy(ref ComputeBuffer buffer)
     {
@@ -128,106 +129,6 @@ public static class GraphicsUtilities
         return result;
     }
 
-    public static void GenerateMaxHiZ(CommandBuffer command, Vector2Int resolution, RenderTargetIdentifier source, RenderTargetIdentifier dest, float scale = 1f, float offset = 0f)
-    {
-        var computeShader = Resources.Load<ComputeShader>("Utility/GenerateHiZ");
-
-        command.EnableShaderKeyword("MAX_ONLY");
-        command.SetComputeTextureParam(computeShader, 1, "Input", source);
-        command.SetComputeFloatParam(computeShader, "_InputScale", scale);
-        command.SetComputeFloatParam(computeShader, "_InputOffset", offset);
-
-        command.SetComputeTextureParam(computeShader, 1, "_MaxResult", dest);
-
-        var width = resolution.x;
-        var height = resolution.y;
-
-        command.DispatchNormalized(computeShader, 1, width, height, 1);
-
-        var mipCount = Texture2DExtensions.MipCount(width, height);
-        for (var i = 1; i < mipCount; i++)
-        {
-            // For some resolutions, we can end up with a 1x2, followed by a 1x1.
-            var xSize = Mathf.Max(1, width >> i);
-            var ySize = Mathf.Max(1, height >> i);
-
-            var prevWidth = Mathf.Max(1, width >> (i - 1));
-            var prevHeight = Mathf.Max(1, height >> (i - 1));
-
-            command.SetComputeIntParam(computeShader, "_Width", prevWidth);
-            command.SetComputeIntParam(computeShader, "_Height", prevHeight);
-
-            command.SetComputeTextureParam(computeShader, 5, "_MaxSource", dest, i - 1);
-            command.SetComputeTextureParam(computeShader, 5, "_MaxResult", dest, i);
-
-            command.DispatchNormalized(computeShader, 5, xSize, ySize, 1);
-        }
-
-        command.DisableShaderKeyword("MAX_ONLY");
-    }
-
-    public static void GenerateMinMaxHiZ(CommandBuffer command, int width, int height, RenderTargetIdentifier source, RenderTargetIdentifier minZTexture, RenderTargetIdentifier maxZTexture, bool combined, float scale = 1f, float offset = 0f)
-    {
-        var computeShader = Resources.Load<ComputeShader>("Utility/GenerateHiZ");
-
-        var firstIndex = combined ? 3 : 2;
-        command.SetComputeTextureParam(computeShader, firstIndex, "Input", source);
-        command.SetComputeFloatParam(computeShader, "_InputScale", scale);
-        command.SetComputeFloatParam(computeShader, "_InputOffset", offset);
-
-        if (combined)
-        {
-            command.EnableShaderKeyword("MIN_MAX_COMBINED");
-            command.SetComputeTextureParam(computeShader, firstIndex, "_Result", minZTexture);
-            //command.ConvertTexture(source, minZTexture);
-        }
-        else
-        {
-            command.EnableShaderKeyword("MIN_MAX_SEPERATE");
-            command.SetComputeTextureParam(computeShader, firstIndex, "_MinResult", minZTexture);
-            command.SetComputeTextureParam(computeShader, firstIndex, "_MaxResult", maxZTexture);
-            //command.ConvertTexture(source, minZTexture);
-            //command.ConvertTexture(source, maxZTexture);
-        }
-
-        command.DispatchNormalized(computeShader, firstIndex, width, height, 1);
-
-        var secondIndex = combined ? 7 : 6;
-        var mipCount = Texture2DExtensions.MipCount(width, height);
-        for (var i = 1; i < mipCount; i++)
-        {
-            // For some resolutions, we can end up with a 1x2, followed by a 1x1.
-            var xSize = Mathf.Max(1, width >> i);
-            var ySize = Mathf.Max(1, height >> i);
-
-            var prevWidth = Mathf.Max(1, width >> (i - 1));
-            var prevHeight = Mathf.Max(1, height >> (i - 1));
-
-            command.SetComputeIntParam(computeShader, "_Width", prevWidth);
-            command.SetComputeIntParam(computeShader, "_Height", prevHeight);
-
-            if (combined)
-            {
-                command.SetComputeTextureParam(computeShader, secondIndex, "_Source", minZTexture, i - 1);
-                command.SetComputeTextureParam(computeShader, secondIndex, "_Result", minZTexture, i);
-            }
-            else
-            {
-                command.SetComputeTextureParam(computeShader, secondIndex, "_MinSource", minZTexture, i - 1);
-                command.SetComputeTextureParam(computeShader, secondIndex, "_MaxSource", maxZTexture, i - 1);
-                command.SetComputeTextureParam(computeShader, secondIndex, "_MinResult", minZTexture, i);
-                command.SetComputeTextureParam(computeShader, secondIndex, "_MaxResult", maxZTexture, i);
-            }
-
-            command.DispatchNormalized(computeShader, secondIndex, xSize, ySize, 1);
-        }
-
-        if (combined)
-            command.DisableShaderKeyword("MIN_MAX_COMBINED");
-        else
-            command.DisableShaderKeyword("MIN_MAX_SEPERATE");
-    }
-
     public static Vector4 ZBufferParams(double near, double far, bool reverseZ)
     {
         var n = near;
@@ -241,7 +142,27 @@ public static class GraphicsUtilities
         return new Vector4((float)x, (float)y, (float)z, (float)w);
     }
 
-    public static void SetupCameraProperties(CommandBuffer command, int frameCount, Camera camera, ScriptableRenderContext context, Vector2Int resolution, Vector4[] cullingPlanes, out Matrix4x4 viewProjectionMatrix, bool flip = false)
+    public static Matrix4x4 CalculateProjectionMatrix(Camera camera)
+    {
+        var cotangent = 1f / Mathf.Tan(camera.fieldOfView * Mathf.Deg2Rad * 0.5f);
+
+        var jitterX = camera.projectionMatrix[0, 2];
+        var jitterY = camera.projectionMatrix[1, 2];
+        var near = camera.nearClipPlane;
+        var far = camera.farClipPlane;
+
+        var projectionMatrix = new Matrix4x4();
+        projectionMatrix[0, 0] = cotangent / camera.aspect;
+        projectionMatrix[0, 2] = jitterX;
+        projectionMatrix[1, 1] = cotangent;
+        projectionMatrix[1, 2] = jitterY;
+        projectionMatrix[2, 2] = -(far + near) / (near - far);
+        projectionMatrix[2, 3] = 2f * near * far / (near - far);
+        projectionMatrix[3, 2] = 1f;
+        return projectionMatrix;
+    }
+
+    public static void SetupCameraProperties(CommandBuffer command, int frameCount, Camera camera, ScriptableRenderContext context, Vector2Int resolution, out CullingPlanes cullingPlanes, out Matrix4x4 viewProjectionMatrix, bool flip = false)
     {
         context.SetupCameraProperties(camera);
 
@@ -260,14 +181,7 @@ public static class GraphicsUtilities
         var near = camera.nearClipPlane;
         var far = camera.farClipPlane;
 
-        var projectionMatrix = new Matrix4x4();
-        projectionMatrix[0, 0] = cotangent / camera.aspect;
-        projectionMatrix[0, 2] = jitterX;
-        projectionMatrix[1, 1] = cotangent;
-        projectionMatrix[1, 2] = jitterY;
-        projectionMatrix[2, 2] = -(far + near) / (near - far);
-        projectionMatrix[2, 3] = 2f * near * far / (near - far);
-        projectionMatrix[3, 2] = 1f;
+        var projectionMatrix = CalculateProjectionMatrix(camera);
 
         var gpuProjectionMatrix = new Matrix4x4();
         gpuProjectionMatrix[0, 0] = cotangent / camera.aspect;
@@ -278,9 +192,10 @@ public static class GraphicsUtilities
         gpuProjectionMatrix[2, 3] = far * near / (far - near);
         gpuProjectionMatrix[3, 2] = 1f;
 
-        GeometryUtilities.CalculateFrustumPlanes(projectionMatrix * worldToView, cullingPlanes);
+        cullingPlanes = GeometryUtilities.CalculateFrustumPlanes(projectionMatrix * worldToView);
 
         command.SetGlobalVectorArray("_CullingPlanes", cullingPlanes);
+        command.SetGlobalInt("_CullingPlanesCount", cullingPlanes.Count);
 
         command.SetGlobalMatrix("_ViewMatrix", worldToView);
         command.SetGlobalMatrix("_InvViewMatrix", viewToWorld);
@@ -300,6 +215,6 @@ public static class GraphicsUtilities
 
     public static void SetupCameraProperties(CommandBuffer command, int frameCount, Camera camera, ScriptableRenderContext context, Vector2Int resolution, out Matrix4x4 viewProjectionMatrix, bool flip = false)
     {
-        SetupCameraProperties(command, frameCount, camera, context, resolution, cullingPlanes, out viewProjectionMatrix, flip);
+        SetupCameraProperties(command, frameCount, camera, context, resolution, out _, out viewProjectionMatrix, flip);
     }
 }

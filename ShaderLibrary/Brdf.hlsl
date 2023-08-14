@@ -299,6 +299,9 @@ float3 GetLighting(float4 positionCS, float3 N, float3 T, PbrInput input, out fl
 	{
 		DirectionalLightData lightData = _DirectionalLightData[i];
 		float3 lightColor = DirectionalLightColor(i, positionWS, true, jitter);
+		if (all(lightColor) == 0.0)
+			continue;
+		
 		float3 L = DiscLightApprox(lightData.AngularDiameter, R, lightData.Direction);
 		float3 illum;
 		luminance += EvaluateLight(input, T, B, N, L, V, input.bentNormal, illum, NdotV) * lightColor;

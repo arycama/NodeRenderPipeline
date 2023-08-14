@@ -92,7 +92,7 @@ float IntersectRayAABBSimple(float3 start, float3 dir, float3 boxMin, float3 box
 // Positive -> in front (above), negative -> behind (below).
 float DistanceFromPlane(float3 p, float4 plane)
 {
-	return dot(float4(p, 1.0), plane);
+	return dot(p, plane.xyz) + plane.w;
 }
 
 // Solves the quadratic equation of the form: a*t^2 + b*t + c = 0.

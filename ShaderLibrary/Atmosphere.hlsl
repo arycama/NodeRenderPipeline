@@ -88,7 +88,6 @@ void UvToSkyParams(float2 uv, out float height, out float cosAngle, out float d)
 	float d_max = rho + H;
 	d = Remap(uv.x, 0.0, 1.0, d_min, d_max);
 	cosAngle = d == 0.0 ? 1.0 : (Sq(H) - Sq(rho) - Sq(d)) / (2.0 * height * d);
-	cosAngle = clamp(cosAngle, -1.0, 1.0);
 }
 
 // Calculates the height above the atmosphere based on the current view height, angle and distance

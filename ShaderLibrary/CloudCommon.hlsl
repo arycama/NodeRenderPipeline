@@ -124,7 +124,7 @@ float4 RenderCloud(float3 P, float3 rayDir, uint2 id, float depth, float sceneDe
 	{
 		float2 planetIntersections;
 		bool hasPlanetIntersection = IntersectRaySphere(P + _PlanetOffset, rayDir, _PlanetRadius, planetIntersections) && planetIntersections.x >= 0.0;
-		if (hasPlanetIntersection)
+		if (hasPlanetIntersection || (abs(planetIntersections.y) > abs(planetIntersections.x)))
 		{
 			return float4(0.0, 0.0, 0.0, 1.0);
 		}

@@ -2,29 +2,23 @@
 
 struct ReflectionProbeData
 {
-    public Matrix4x4 worldToLocal;
-    public Matrix4x4 localToWorld;
-    public Vector3 min;
-    public float blendDistance;
-    public Vector3 max;
-    public float index;
+    public Matrix3x4 influenceWorldToLocal;
+    public Matrix3x4 worldToLocal;
     public Vector3 center;
+    public float index;
+    public Vector3 extentsOverBlend;
     public float exposure;
 
-    public ReflectionProbeData(Vector3 position, Quaternion rotation, Vector3 min, float blendDistance, Vector3 max, float index, Vector3 center, bool boxProjection, float exposure)
+    public ReflectionProbeData(EnvironmentProbe probe, int index, float exposure)
     {
-        this.localToWorld = Matrix4x4.TRS(position, rotation, 0.5f * (max - min));
-        this.worldToLocal = localToWorld.inverse;
-        this.min = min;
-        this.blendDistance = blendDistance;
-        this.max = max;
-        this.index = index;
-        this.center = center;
-        this.exposure = exposure;
+        var t = probe.transform;
 
-        if (boxProjection)
-        {
-            this.blendDistance = -Mathf.Max(1e-6f, this.blendDistance);
-        }
+        influenceWorldToLocal = Matrix4x4.TRS(t.position + t.rotation * probe.InfluenceOffset, t.rotation, 0.5f * probe.InfluenceSize).inverse;
+        this.extentsOverBlend = 0.5f * probe.InfluenceSize / probe.BlendDistance;
+
+        worldToLocal = Matrix4x4.TRS(t.position + t.rotation * probe.ProjectionOffset, t.rotation, 0.5f * probe.ProjectionSize).inverse;
+        center = t.position;
+        this.index = index;
+        this.exposure = exposure;
     }
 }

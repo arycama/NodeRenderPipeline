@@ -86,44 +86,16 @@ float3 Fragment(FragmentInput input) : SV_Target
     float3 V = normalize(-positionWS);
 	V = -_Direction;
 
-	//illuminance = 0;
-	//for (uint i = 0; i < _CelestialBodyCount; i++)
- //   {
-	//	float3 C = ApplyExposure(_CelestialBodyColors[i].rgb);
-	//	float3 L = _CelestialBodyDirections[i].xyz;
-	//	//illuminance += saturate(dot(N, L)) * C * INV_PI * albedo;
+	illuminance = 0;
+	for (uint i = 0; i < _CelestialBodyCount; i++)
+	{
+		float3 C = ApplyExposure(_CelestialBodyColors[i].rgb);
+		float3 L = _CelestialBodyDirections[i].xyz;
         
-	//	float LdotV = dot(L, V);
-	//	float NdotV = dot(N, V);
-	//	float NdotL = dot(N, L);
-        
-	//	float p = acos(LdotV);
-	//	float3 c = albedo;
-	//	float r = 1737.4;
-	//	float d = 384400;
-	//	float3 es = C;
-        
-	//	float ea = -p;
- //       float ee = 0.19 * 0.5f * (1.0 - sin((PI - ea) / 2.0) * tan((PI - ea) / 2.0) * log(1.0 / tan((PI - ea) / 4.0)));
-        
-	//	float3 em = 2.0 / 3.0 * c * (r * r / (d * d)) * (es + ee) * (1.0 - sin(p / 2.0) * tan(p / 2.0) * log(rcp(tan(p / 4.0))));
-	//	//illuminance += em;
-        
-	//	float g = 0.6;
-	//	//float f = NdotL > 0.0 ? 2.0 / (3.0 * PI) * B(p, g) * S(p) * (1.0 / (1.0 + saturate(NdotV) / (NdotL))) : 0.0;
-	//	float f = NdotL > 0.0 ? 2.0 / 3.0 * INV_PI * (1.0 / (1.0 + saturate(NdotV) / (NdotL))) : 0.0;
-	//	f += ee  * 2.0 / 3.0 * INV_PI;
-        
- //       //earthshine
-        
-        
-        
-	//	illuminance += f * C * albedo;
-        
- //       // Earthshine
-	//}
+		illuminance += saturate(dot(N, L)) * albedo / Pi * C;
+	}
 
-    //illuminance += _EarthAlbedo * AmbientLight(_Direction) * albedo;
+	//illuminance += _EarthAlbedo * AmbientLight(_Direction) * albedo;
 
     return illuminance;
 }

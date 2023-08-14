@@ -16,13 +16,14 @@ struct InstanceData
 
 int _MaxHiZMip;
 
+// http://www.lighthouse3d.com/tutorials/view-frustum-culling/geometric-approach-testing-boxes-ii/
 bool FrustumCull(float3 center, float3 extents)
 {
 	for (uint i = 0; i < _CullingPlanesCount; i++)
 	{
 		float4 plane = _CullingPlanes[i];
-		float3 p = center + (plane.xyz >= 0 ? extents : -extents);
-		if (DistanceFromPlane(p, plane) < 0)
+		float3 p = center + (plane.xyz >= 0.0 ? extents : -extents);
+		if (DistanceFromPlane(p, plane) < 0.0)
 			return false;
 	}
 	

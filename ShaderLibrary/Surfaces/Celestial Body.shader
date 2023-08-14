@@ -3,7 +3,7 @@
     Properties
     {
         [Toggle] Limb_Darkening("Limb Darkening", Float) = 0
-        [HDR]_Color("Color", Color) = (1, 1, 1, 1)
+        _Color("Color", Color) = (1, 1, 1, 1)
         _Emission("Emission", Color) = (1, 1, 1, 1)
         _Smoothness("Smoothness", Range(0, 1)) = 0.2
         _Luminance("Luminance", Vector) = (0, 0, 0, 1)

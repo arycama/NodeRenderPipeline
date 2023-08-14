@@ -315,7 +315,7 @@ float3 DirectionalLightColor(uint index, float3 positionWS, bool softShadows = f
     
     // Earth shadow 
 	float2 intersections;
-	if (IntersectRaySphere(positionWS + _PlanetOffset, lightData.Direction, _PlanetRadius, intersections) && intersections.x >= 0.0)
+	if (IntersectRaySphere(positionWS + _PlanetOffset, lightData.Direction, _PlanetRadius, intersections) && (intersections.x >= 0.0 || (abs(intersections.y) > abs(intersections.x))))
 		return 0.0;
     
 	float attenuation = 1.0;

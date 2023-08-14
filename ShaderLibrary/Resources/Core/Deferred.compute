@@ -15,6 +15,9 @@ float4x4 _PixelCoordToViewDirWS;
 uint _Offset;
 float _Index;
 
+float4x4 _ProbeWorldToLocal;
+float3 _ProbeCenter;
+
 [numthreads(8, 8, 1)]
 void Deferred (uint2 id : SV_DispatchThreadID)
 {	
@@ -37,7 +40,7 @@ void Deferred (uint2 id : SV_DispatchThreadID)
 	
 	float linearEyeDepth = LinearEyeDepth(depth);
 	float4 positionCS = float4(id + 0.5, depth, linearEyeDepth);
-	float3 positionWS = PixelToWorld(positionCS.xyz);
+	float3 positionWS = PixelToWorld(positionCS.xyz) + _ReflectionCameraPosition - _WorldSpaceCameraPos;
 
 	float skyVisibility = _SkyVisibilitySh[_Offset + 0];
 	skyVisibility += _SkyVisibilitySh[_Offset + 1] * N.y;
@@ -60,7 +63,15 @@ void Deferred (uint2 id : SV_DispatchThreadID)
 		if (IntersectRaySphere(positionWS + _PlanetOffset, lightData.Direction, _PlanetRadius, intersections) && intersections.x >= 0.0)
 			continue;
     
-		float3 lightColor = TransmittanceToAtmosphere(positionWS + _PlanetOffset, lightData.Direction) * (lightData.Color * _ExposureValue);
+		// Intersect with probe bounds
+		float3 lightingVector = GetReflectionVector(lightData.Direction, (float3x4) _ProbeWorldToLocal, positionWS + _WorldSpaceCameraPos, _ProbeCenter);
+		float shadowDepth = Depth.SampleLevel(_PointClampSampler, float4(lightingVector, _Index), 0.0);
+		
+		// If not far clip plane, continue
+		if(shadowDepth > 0.0)
+			continue;
+		
+		float3 lightColor = TransmittanceToAtmosphere(positionWS  + _PlanetOffset, lightData.Direction) * (lightData.Color * _ExposureValue);
 		luminance += albedo * saturate(dot(N, lightData.Direction)) * RcpPi * lightColor;
 	}
 	

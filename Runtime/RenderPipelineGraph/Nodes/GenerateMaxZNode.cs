@@ -11,74 +11,81 @@ public partial class GenerateMaxZNode : RenderPipelineNode
     [Input] private RenderTargetIdentifier maxZBuffer;
     [Input, Output] private NodeConnection connection;
 
-    private ComputeShader computeShader;
-    private IndexedShaderPropertyId resultIds = new("_Result");
+    private MaxZProcessor processor;
 
     public override void Initialize()
     {
-        computeShader = Resources.Load<ComputeShader>("Utility/MaxZ");
+        processor = new();
     }
 
     public override void Execute(ScriptableRenderContext context, Camera camera)
     {
         using var scope = context.ScopedCommandBuffer("Generate MaxZ", true);
+        processor.Execute(scope.Command, camera.pixelWidth, camera.pixelHeight, mode, depthBuffer, maxZBuffer);
+    }
+}
 
-        var visiblityDesc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, RenderTextureFormat.RFloat, 0)
-        {
-            autoGenerateMips = false,
-            enableRandomWrite = true,
-            useMipMap = true,
-        };
+public enum HiZMode
+{
+    Min,
+    Max,
+    CheckerMinMax
+}
 
+public class MaxZProcessor
+{
+    private ComputeShader computeShader;
+    private IndexedShaderPropertyId resultIds = new("_Result");
+
+    public MaxZProcessor()
+    {
+        computeShader = Resources.Load<ComputeShader>("Utility/MaxZ");
+    }
+
+    public void Execute(CommandBuffer command, int width, int height, HiZMode mode, RenderTargetIdentifier input, RenderTargetIdentifier result)
+    {
         var kernel = (int)mode * 2;
-        scope.Command.SetComputeTextureParam(computeShader, kernel, "_Input", depthBuffer);
+        command.SetComputeTextureParam(computeShader, kernel, "_Input", input);
 
-        var mipCount = Texture2DExtensions.MipCount(camera.pixelWidth, camera.pixelHeight);
+        var mipCount = Texture2DExtensions.MipCount(width, height);
 
         var maxMipsPerPass = 6;
         var hasSecondPass = mipCount > maxMipsPerPass;
 
         // First pass
         {
-            scope.Command.SetComputeIntParam(computeShader, "_Width", camera.pixelWidth);
-            scope.Command.SetComputeIntParam(computeShader, "_Height", camera.pixelHeight);
-            scope.Command.SetComputeIntParam(computeShader, "_MaxMip", hasSecondPass ? maxMipsPerPass : mipCount);
+            command.SetComputeIntParam(computeShader, "_Width", width);
+            command.SetComputeIntParam(computeShader, "_Height", height);
+            command.SetComputeIntParam(computeShader, "_MaxMip", hasSecondPass ? maxMipsPerPass : mipCount);
 
             for (var i = 0; i < maxMipsPerPass; i++)
             {
-                var texture = i < mipCount ? maxZBuffer : CoreUtils.emptyUAV;
+                var texture = i < mipCount ? result : CoreUtils.emptyUAV;
                 var mip = i < mipCount ? i : 0;
-                scope.Command.SetComputeTextureParam(computeShader, kernel, resultIds.GetProperty(i), texture, mip);
+                command.SetComputeTextureParam(computeShader, kernel, resultIds.GetProperty(i), texture, mip);
             }
 
-            scope.Command.DispatchNormalized(computeShader, kernel, camera.pixelWidth, camera.pixelHeight, 1);
+            command.DispatchNormalized(computeShader, kernel, width, height, 1);
         }
 
         // Second pass if needed
         if (hasSecondPass)
         {
-            scope.Command.SetComputeIntParam(computeShader, "_Width", camera.pixelWidth >> (maxMipsPerPass - 1));
-            scope.Command.SetComputeIntParam(computeShader, "_Height", camera.pixelHeight >> (maxMipsPerPass - 1));
-            scope.Command.SetComputeIntParam(computeShader, "_MaxMip", mipCount - maxMipsPerPass);
+            command.SetComputeIntParam(computeShader, "_Width", width >> (maxMipsPerPass - 1));
+            command.SetComputeIntParam(computeShader, "_Height", height >> (maxMipsPerPass - 1));
+            command.SetComputeIntParam(computeShader, "_MaxMip", mipCount - maxMipsPerPass);
 
             for (var i = 0; i < maxMipsPerPass; i++)
             {
                 var level = i + maxMipsPerPass - 1;
-                var texture = level < mipCount ? maxZBuffer : CoreUtils.emptyUAV;
+                var texture = level < mipCount ? result : CoreUtils.emptyUAV;
                 var mip = level < mipCount ? level : 0;
 
                 // Start from maxMips - 1, as we bind the last mip from the last pass as the first input for this pass
-                scope.Command.SetComputeTextureParam(computeShader, kernel + 1, resultIds.GetProperty(i), texture, mip);
+                command.SetComputeTextureParam(computeShader, kernel + 1, resultIds.GetProperty(i), texture, mip);
             }
 
-            scope.Command.DispatchNormalized(computeShader, kernel + 1, camera.pixelWidth >> (maxMipsPerPass - 1), camera.pixelHeight >> (maxMipsPerPass - 1), 1);
+            command.DispatchNormalized(computeShader, kernel + 1, width >> (maxMipsPerPass - 1), height >> (maxMipsPerPass - 1), 1);
         }
-    }
-
-    private enum HiZMode
-    {
-        Min,
-        Max,
-        CheckerMinMax
     }
 }

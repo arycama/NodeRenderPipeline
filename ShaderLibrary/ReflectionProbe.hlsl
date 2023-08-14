@@ -7,13 +7,11 @@
 
 struct ReflectionProbeData
 {
-	float4x4 worldToLocal;
-	float4x4 localToWorld;
-	float3 min;
-	float blendDistance;
-	float3 max;
-	float index;
+	float3x4 influenceWorldToLocal;
+	float3x4 worldToLocal;
 	float3 center;
+	float index;
+	float3 extentsOverBlend;
 	float exposure;
 };
 
@@ -23,7 +21,29 @@ Buffer<float4> _AmbientData;
 uint _ReflectionProbeCount;
 Buffer<float> _SkyOcclusion;
 
-float4 SampleReflectionProbe(float3 positionWS, float3 R, float mip, float3 N, float3 albedo, float occlusion, out float3 ambient)
+// From Moving Frostbite to PBR document
+// This function fakes the roughness based integration of reflection probes by adjusting the roughness value
+float ComputeDistanceBaseRoughness(float distIntersectionToShadedPoint, float distIntersectionToProbeCenter, float perceptualRoughness)
+{
+	float newPerceptualRoughness = clamp(distIntersectionToShadedPoint / distIntersectionToProbeCenter * perceptualRoughness, 0, perceptualRoughness);
+	return lerp(newPerceptualRoughness, perceptualRoughness, perceptualRoughness);
+}
+
+float3 GetReflectionVector(float3 R, float3x4 worldToLocal, float3 positionWS, float3 probeOrigin)
+{
+	// Intersection with OBB convertto unit box space
+	// Transform in local unit parallax cube space (scaled and rotated)
+	float3 localR = MultiplyVector(worldToLocal, R, false);
+	float3 localP = MultiplyPoint3x4(worldToLocal, positionWS);
+	float3 furthestPlane = ((localR >= 0.0 ? 1.0 : -1.0) - localP) / localR;
+	float intersectDist = Min3(furthestPlane);
+
+	// Use Distance in WS directly to recover intersection
+	float3 intersectPositionWS = R * intersectDist + positionWS;
+	return intersectPositionWS - probeOrigin;
+}
+
+float4 SampleReflectionProbe(float3 positionWS, const float3 R, float mip, float3 N, float3 albedo, float occlusion, out float3 ambient)
 {
 	// todo: camera relative
 	positionWS += _WorldSpaceCameraPos;
@@ -36,31 +56,17 @@ float4 SampleReflectionProbe(float3 positionWS, float3 R, float mip, float3 N, f
 		ReflectionProbeData probe = _ReflectionProbeData[i];
 			
 		// Calculate distance from AABB center
-		float blend = abs(probe.blendDistance);
-		
-		float3 localPosition = MultiplyPoint3x4(probe.worldToLocal, positionWS);
-		
-		float3 dist = max(0, (1 - abs(localPosition)) / (blend / ((probe.max - probe.min) * 0.5)));
+		float3 localPosition = MultiplyPoint3x4(probe.influenceWorldToLocal, positionWS);
+		float3 dist = max(0.0, (1.0 - abs(localPosition)) * probe.extentsOverBlend);
 		float weight = Min3(dist);
-		
 		if (weight <= 0.0)
 			continue;
 			
-		// Box 
-		bool isBox = probe.blendDistance < 0;
-		if (isBox)
-		{
-			float3 localR = MultiplyVector(probe.worldToLocal, R, false);
-			float3 factors = ((localR >= 0.0 ? 1.0 : -1.0) - (localPosition)) / localR;
-			float scalar = Min3(factors);
-			R = localR * scalar + (localPosition - 0.0);
-			R = MultiplyVector(probe.localToWorld, R, false);
-		}
-			
-		float3 probeSample = _ReflectionProbes.SampleLevel(_TrilinearClampSampler, float4(R, probe.index), mip);
+		float3 probeR = GetReflectionVector(R, probe.worldToLocal, positionWS, probe.center);
+		float3 probeSample = _ReflectionProbes.SampleLevel(_TrilinearClampSampler, float4(probeR, probe.index), mip);
 		
 		// Remove the exposure the probe was baked with, before applying the current exposure
-		float exposureFactor = ApplyExposure(rcp(probe.exposure));
+		float exposureFactor = ApplyExposure(rcp(probe.exposure)).r;
 		probeSample *= exposureFactor;
 		result += float4(probeSample, 1.0) * weight;
 		
@@ -105,15 +111,11 @@ float GetSkyVisibility(float3 positionWS, float3 N)
 	for (uint i = 0; i < _ReflectionProbeCount; i++)
 	{
 		ReflectionProbeData probe = _ReflectionProbeData[i];
-			
+		
 		// Calculate distance from AABB center
-		float blend = abs(probe.blendDistance);
-		
 		float3 localPosition = MultiplyPoint3x4(probe.worldToLocal, positionWS);
-		
-		float3 dist = max(0, (1 - abs(localPosition)) / (blend / ((probe.max - probe.min) * 0.5)));
+		float3 dist = max(0.0, (1.0 - abs(localPosition)) * probe.extentsOverBlend);
 		float weight = Min3(dist);
-		
 		if (weight <= 0.0)
 			continue;
 
@@ -144,13 +146,10 @@ float GetSkyVisibilityL0(float3 positionWS)
 	for (uint i = 0; i < _ReflectionProbeCount; i++)
 	{
 		ReflectionProbeData probe = _ReflectionProbeData[i];
-			
+		
 		// Calculate distance from AABB center
-		float blend = abs(probe.blendDistance);
-		
 		float3 localPosition = MultiplyPoint3x4(probe.worldToLocal, positionWS);
-		
-		float3 dist = max(0, (1 - abs(localPosition)) / (blend / ((probe.max - probe.min) * 0.5)));
+		float3 dist = max(0.0, (1.0 - abs(localPosition)) * probe.extentsOverBlend);
 		float weight = Min3(dist);
 		if (weight <= 0.0)
 			continue;

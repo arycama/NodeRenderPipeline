@@ -142,21 +142,16 @@ public static class GeometryUtilities
 
     private static readonly Plane[] cullingPlaneArray = new Plane[6];
 
-    public static void CalculateFrustumPlanes(Matrix4x4 matrix, Vector4[] cullingPlaneList)
+    public static CullingPlanes CalculateFrustumPlanes(Matrix4x4 matrix)
     {
         GeometryUtility.CalculateFrustumPlanes(matrix, cullingPlaneArray);
+
+        var cullingPlanes = new CullingPlanes { Count = 6 };
         for (var i = 0; i < 6; i++)
         {
-            var p = cullingPlaneArray[i];
-            cullingPlaneList[i] = new Vector4(p.normal.x, p.normal.y, p.normal.z, p.distance);
+            cullingPlanes.SetCullingPlane(i, cullingPlaneArray[i]);
         }
-    }
 
-    public static void CalculateFrustumPlanes(Camera camera, Vector4[] cullingPlaneList)
-    {
-        // View projection matrices for Camera-relative rendering
-        var View = camera.worldToCameraMatrix;
-        View.SetColumn(3, new Vector4(0f, 0f, 0f, 1f));
-        CalculateFrustumPlanes(camera.projectionMatrix * View, cullingPlaneList);
+        return cullingPlanes;
     }
 }

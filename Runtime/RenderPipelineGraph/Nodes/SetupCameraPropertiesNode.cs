@@ -6,8 +6,6 @@ using UnityEngine.Rendering;
 [NodeMenuItem("Camera/Setup Camera Properties")]
 public partial class SetupCameraPropertiesNode : RenderPipelineNode
 {
-    private static readonly Vector4[] staticCullingPlanes = new Vector4[6];
-
     [Input, SerializeField, Range(0f, 1f)] private float jitterSpread = 1f;
     [Input, SerializeField, Pow2(64)] private int temporalSamples = 8;
     [SerializeField] private bool jitterDebug = false;
@@ -16,8 +14,8 @@ public partial class SetupCameraPropertiesNode : RenderPipelineNode
     [Output] private int width;
     [Output] private int height;
     [Output] private Vector2 jitter;
-    [Output] private Vector4Array cullingPlanes;
-    [Output] private int cullingPlanesCount = 6;
+    [Output] private CullingPlanes cullingPlanes;
+    [Output] private CullingPlanes absoluteCullingPlanes;
     [Output] private Matrix4x4 viewProjectionMatrix;
     [Output] private Vector3 cameraPosition;
 
@@ -89,9 +87,9 @@ public partial class SetupCameraPropertiesNode : RenderPipelineNode
         scope.Command.SetGlobalVector("_JitterRaw", new Vector2(jitterX, jitterY));
         scope.Command.SetGlobalInt("_JitterOffsetX", jitterOffsetX);
         scope.Command.SetGlobalInt("_JitterOffsetY", jitterOffsetY);
-        GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution(), staticCullingPlanes, out viewProjectionMatrix);
+        GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution(), out cullingPlanes, out viewProjectionMatrix);
 
-        cullingPlanes = new Vector4Array(staticCullingPlanes);
+        absoluteCullingPlanes = GeometryUtilities.CalculateFrustumPlanes(camera.projectionMatrix * camera.worldToCameraMatrix);
         cameraPosition = camera.transform.position;
 
 #if UNITY_EDITOR

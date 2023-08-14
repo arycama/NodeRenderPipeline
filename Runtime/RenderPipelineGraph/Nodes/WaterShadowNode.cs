@@ -63,7 +63,7 @@ public partial class WaterShadowNode : RenderPipelineNode
 
             var localCenter = (localMax + localMin) * 0.5f;
             var worldMatrix = Matrix4x4.Rotate(visibleLight.light.transform.rotation);
-            var position = worldMatrix.MultiplyPoint(new Vector3(localCenter.x, localCenter.y, localMin.z)) - camera.transform.position;
+            var position = worldMatrix.MultiplyPoint(new Vector3(localCenter.x, localCenter.y, localMin.z));
 
             var lookMatrix = Matrix4x4.LookAt(position, position + visibleLight.light.transform.forward, visibleLight.light.transform.up);
 
@@ -83,11 +83,11 @@ public partial class WaterShadowNode : RenderPipelineNode
             scope.Command.SetRenderTarget(waterShadowId);
             scope.Command.ClearRenderTarget(true, false, new Color());
 
-            GeometryUtilities.CalculateFrustumPlanes(projection * viewMatrix, cullingPlanes);
+            var cullingPlanes = GeometryUtilities.CalculateFrustumPlanes(projection * viewMatrix);
 
             foreach (var waterRenderer in WaterRenderer.WaterRenderers)
             {
-                waterRenderer.Cull(scope.Command, camera.transform.position, cullingPlanes, 6);
+                waterRenderer.Cull(scope.Command, camera.transform.position, cullingPlanes);
                 waterRenderer.Render(scope.Command, "WaterShadow", camera.transform.position);
             }
 

@@ -55,7 +55,7 @@ float4 _ScreenSize;
 
 float3 _PreviousCameraPosition;
 float3 _PreviousCameraDelta;
-float4 _CullingPlanes[6];
+float4 _CullingPlanes[10];
 
 float _InPlayMode;
 uint _FrameIndex;

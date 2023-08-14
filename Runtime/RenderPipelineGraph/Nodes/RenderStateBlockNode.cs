@@ -7,6 +7,7 @@ public partial class RenderStateBlockNode : RenderPipelineNode
 {
     [SerializeField] private RenderStateMask renderStateMask = RenderStateMask.Nothing;
     [SerializeField] private int stencilReference = 0;
+    [SerializeField] private bool conservativeRasterisation = false;
 
     [Input] private StencilState stencilState;
     [Output] private RenderStateBlock renderStateBlock;
@@ -16,7 +17,21 @@ public partial class RenderStateBlockNode : RenderPipelineNode
         renderStateBlock = new RenderStateBlock(renderStateMask)
         {
             stencilReference = stencilReference,
-            stencilState = stencilState
+            stencilState = stencilState,
         };
+
+        if(conservativeRasterisation)
+        {
+            var state = new RasterState
+            {
+                conservative = true,
+                cullingMode = CullMode.Off,
+                depthClip = true,
+                offsetFactor = 0,
+                offsetUnits = 0
+            };
+
+            renderStateBlock.rasterState = state;
+        }
     }
 }

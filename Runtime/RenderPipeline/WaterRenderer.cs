@@ -74,7 +74,7 @@ public class WaterRenderer : MonoBehaviour
         indexBuffer.Release();
     }
 
-    public void Cull(CommandBuffer command, Vector3 viewPosition, Vector4[] cullingPlanes, int cullingPlanesCount)
+    public void Cull(CommandBuffer command, Vector3 viewPosition, CullingPlanes cullingPlanes)
     {
         using var indirectArgs = ScopedPooledList<int>.Get();
         indirectArgs.Value.Add(QuadListIndexCount); // index count per instance
@@ -93,13 +93,13 @@ public class WaterRenderer : MonoBehaviour
         // Snap to quad-sized increments on largest cell
         var texelSizeX = size / (float)patchVertices;
         var texelSizeZ = size / (float)patchVertices;
-        var positionX = Mathf.Floor((viewPosition.x - size * 0.5f) / texelSizeX) * texelSizeX - viewPosition.x;
-        var positionZ = Mathf.Floor((viewPosition.z - size * 0.5f) / texelSizeZ) * texelSizeZ - viewPosition.z;
+        var positionX = Mathf.Floor((viewPosition.x - size * 0.5f) / texelSizeX) * texelSizeX ;
+        var positionZ = Mathf.Floor((viewPosition.z - size * 0.5f) / texelSizeZ) * texelSizeZ;
         var positionOffset = new Vector4(size, size, positionX, positionZ);
         command.SetComputeVectorParam(compute, "_TerrainPositionOffset", positionOffset);
 
         command.SetComputeFloatParam(compute, "_EdgeLength", edgeLength * patchVertices);
-        command.SetComputeIntParam(compute, "_CullingPlanesCount", cullingPlanesCount);
+        command.SetComputeIntParam(compute, "_CullingPlanesCount", cullingPlanes.Count);
 
         // We can do 32x32 cells in a single pass, larger counts need to be broken up into several passes
         var maxPassesPerDispatch = 6;

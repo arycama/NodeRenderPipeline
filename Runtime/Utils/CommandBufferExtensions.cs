@@ -81,4 +81,22 @@ public static partial class CommandBufferExtensions
 
         command.SetBufferData(computeBuffer, data);
     }
+
+    private static readonly Vector4[] staticCullingPlanes = new Vector4[10];
+
+    public static void SetComputeVectorArrayParam(this CommandBuffer command, ComputeShader computeShader, string name, CullingPlanes cullingPlanes)
+    {
+        for(var i = 0; i < cullingPlanes.Count; i++)
+            staticCullingPlanes[i] = cullingPlanes.GetCullingPlaneVector4(i);
+
+        command.SetComputeVectorArrayParam(computeShader, name, staticCullingPlanes);
+    }
+
+    public static void SetGlobalVectorArray(this CommandBuffer command, string name, CullingPlanes cullingPlanes)
+    {
+        for (var i = 0; i < cullingPlanes.Count; i++)
+            staticCullingPlanes[i] = cullingPlanes.GetCullingPlaneVector4(i);
+
+        command.SetGlobalVectorArray(name, staticCullingPlanes);
+    }
 }

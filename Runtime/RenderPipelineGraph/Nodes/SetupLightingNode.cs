@@ -8,7 +8,7 @@ using UnityEngine.Rendering;
 public partial class SetupLightingNode : RenderPipelineNode
 {
     private static readonly Plane[] frustumPlanes = new Plane[6];
-    private static readonly Vector4[] cullingPlanes = new Vector4[6];
+    private static readonly IndexedString cascadeIds = new("Cascade ");
 
     private int directionalShadowsId, pointShadowsId, spotlightShadowsId, areaShadowsId;
 
@@ -279,8 +279,7 @@ public partial class SetupLightingNode : RenderPipelineNode
             // Spotlight/area Shadow casting
             if (visibleLight.lightType == LightType.Spot)
             {
-                if (cullingResults.ComputeSpotShadowMatricesAndCullingPrimitives(index, out var viewMatrix,
-                            out var projectionMatrix, out var shadowSplitData))
+                if (cullingResults.ComputeSpotShadowMatricesAndCullingPrimitives(index, out var viewMatrix, out var projectionMatrix, out var shadowSplitData))
                 {
                     // Convert to camera relative
                     var viewMatrix2 = Matrix4x4.TRS(light.transform.position - camera.transform.position, light.transform.rotation, new Vector3(1f, 1f, -1f)).inverse;
@@ -417,17 +416,23 @@ public partial class SetupLightingNode : RenderPipelineNode
         }
     }
 
-    private void RenderShadowSubGraph(ScriptableRenderContext context, Camera camera, int visibleLightIndex, ShadowSplitData shadowSplitData, bool renderShadowCasters, Vector4[] cullingPlanes, int cullingPlanesCount, ShadowRequestData shadowRequestData, RenderTargetIdentifier output, int resolution)
+    private void RenderShadowSubGraph(ScriptableRenderContext context, Camera camera, int visibleLightIndex, ShadowRequestData shadowRequestData, RenderTargetIdentifier output, int resolution)
     {
         if (shadowsSubGraph == null)
             return;
 
+        // Extract culling planes
+        var shadowSplitData = shadowRequestData.ShadowSplitData;
+        var cullingPlanes = new CullingPlanes { Count = shadowSplitData.cullingPlaneCount };
+        for (var i = 0; i < shadowSplitData.cullingPlaneCount; i++)
+            cullingPlanes.SetCullingPlane(i, shadowSplitData.GetCullingPlane(i));
+
         shadowsSubGraph.AddRelayInput("CullingResults", cullingResults);
         shadowsSubGraph.AddRelayInput("VisibleLightIndex", visibleLightIndex);
-        shadowsSubGraph.AddRelayInput("ShadowSplitData", shadowSplitData);
-        shadowsSubGraph.AddRelayInput("RenderShadowCasters", renderShadowCasters);
-        shadowsSubGraph.AddRelayInput("CullingPlanes", new Vector4Array(cullingPlanes));
-        shadowsSubGraph.AddRelayInput("CullingPlanesCount", cullingPlanesCount);
+        shadowsSubGraph.AddRelayInput("ShadowSplitData", shadowRequestData.ShadowSplitData);
+        shadowsSubGraph.AddRelayInput("RenderShadowCasters", shadowRequestData.RenderShadowCasters);
+        shadowsSubGraph.AddRelayInput("CullingPlanes", cullingPlanes);
+        shadowsSubGraph.AddRelayInput("CullingPlanesCount", cullingPlanes.Count);
         shadowsSubGraph.AddRelayInput("GpuInstanceBuffers", gpuInstanceBuffers);
 
         // Matrices
@@ -477,23 +482,24 @@ public partial class SetupLightingNode : RenderPipelineNode
 
                 for (var j = 0; j < directionalCascades; j++)
                 {
+                    scope.Command.BeginSample(cascadeIds.GetString(j));
+                    context.ExecuteCommandBuffer(scope.Command);
+                    scope.Command.Clear();
+
                     var cascadeIndex = i * directionalCascades + j;
 
                     // Shadow split has non-relative planes, as it uses unity's builtin culling. So re-extract the camera-relative planes
                     var shadowRequestData = directionalShadowRequestData[j];
-                    GeometryUtility.CalculateFrustumPlanes(shadowRequestData.ProjectionMatrix * shadowRequestData.ViewMatrix, frustumPlanes);
 
-                    for (var k = 0; k < 5; k++)
-                    {
-                        // Skip near plane
-                        var p = k == 4 ? frustumPlanes[5] : frustumPlanes[k];
-                        cullingPlanes[k] = new Vector4(p.normal.x, p.normal.y, p.normal.z, p.distance);
-                    }
-
+                    // Copy shadow split data to our own culling planes struct
                     var output = new RenderTargetIdentifier(directionalShadowsId, 0, CubemapFace.Unknown, cascadeIndex);
 
-                    RenderShadowSubGraph(context, camera, visibleLightIndex, shadowRequestData.ShadowSplitData, shadowRequestData.RenderShadowCasters, cullingPlanes, 5, shadowRequestData, output, directionalResolution);
+                    RenderShadowSubGraph(context, camera, visibleLightIndex, shadowRequestData, output, directionalResolution);
                     shadowMatrices.Add((shadowRequestData.ProjectionMatrix * shadowRequestData.ViewMatrix).ConvertToAtlasMatrix());
+
+                    scope.Command.EndSample(cascadeIds.GetString(j));
+                    context.ExecuteCommandBuffer(scope.Command);
+                    scope.Command.Clear();
                 }
             }
 
@@ -533,10 +539,7 @@ public partial class SetupLightingNode : RenderPipelineNode
         }
         else
         {
-            var descriptor =
-                new RenderTextureDescriptor(pointResolution, pointResolution, RenderTextureFormat.Shadowmap,
-                        (int)pointDepth)
-                { dimension = TextureDimension.CubeArray, volumeDepth = pointShadowRequests.Count * 6 };
+            var descriptor = new RenderTextureDescriptor(pointResolution, pointResolution, RenderTextureFormat.Shadowmap, (int)pointDepth) { dimension = TextureDimension.CubeArray, volumeDepth = pointShadowRequests.Count * 6 };
             scope.Command.GetTemporaryRT(pointShadowsId, descriptor);
 
             // Clear all slices at once
@@ -567,10 +570,7 @@ public partial class SetupLightingNode : RenderPipelineNode
                     else if (j == 3) index = 2;
 
                     var output = new RenderTargetIdentifier(pointShadowsId, 0, CubemapFace.Unknown, i * 6 + index);
-
-                    GeometryUtilities.CalculateFrustumPlanes(shadowRequestData.ProjectionMatrix * shadowRequestData.ViewMatrix, cullingPlanes);
-
-                    RenderShadowSubGraph(context, camera, visibleLightIndex, shadowRequestData.ShadowSplitData, shadowRequestData.RenderShadowCasters, cullingPlanes, 6, shadowRequestData, output, pointResolution);
+                    RenderShadowSubGraph(context, camera, visibleLightIndex, shadowRequestData, output, pointResolution);
                 }
             }
 
@@ -610,11 +610,8 @@ public partial class SetupLightingNode : RenderPipelineNode
                 context.ExecuteCommandBuffer(scope.Command);
                 scope.Command.Clear();
 
-                GeometryUtilities.CalculateFrustumPlanes(shadowRequestData.ProjectionMatrix * shadowRequestData.ViewMatrix, cullingPlanes);
-
                 var output = new RenderTargetIdentifier(propertyId, 0, CubemapFace.Unknown, i);
-
-                RenderShadowSubGraph(context, camera, spotShadowRequest.VisibleLightIndex, shadowRequestData.ShadowSplitData, shadowRequestData.RenderShadowCasters, cullingPlanes, 6, shadowRequestData, output, spotResolution);
+                RenderShadowSubGraph(context, camera, spotShadowRequest.VisibleLightIndex, shadowRequestData, output, spotResolution);
 
                 // Add to shadow matrices list
                 var viewProjectionMatrix = (shadowRequestData.ProjectionMatrix * shadowRequestData.ViewMatrix).ConvertToAtlasMatrix();

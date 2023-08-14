@@ -27,9 +27,9 @@ public partial class AutoExposureNode : RenderPipelineNode
     [Header("Exposure Fusion")]
     [SerializeField] private bool enableLtm = true;
     [SerializeField] private bool boostLocalContrast = false;
-    [SerializeField, Range(0.0f, 4.0f)] private float exposure = 1.0f;
-    [SerializeField, Range(0.0f, 4.0f)] private float shadows = 1.5f;
-    [SerializeField, Range(0.0f, 4.0f)] private float highlights = 2.0f;
+    [SerializeField] private float exposure = 1.0f;
+    [SerializeField] private float shadows = 1.5f;
+    [SerializeField] private float highlights = 2.0f;
     [SerializeField, Range(0, 12)] private int mip = 4;
     [SerializeField, Range(0, 6)] private int displayMip = 2;
     [SerializeField, Range(0.0f, 20.0f)] private float exposurePreferenceSigma = 5.0f;

@@ -1,8 +1,5 @@
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Geometry.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/IndirectRendering.hlsl"
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Packing.hlsl"
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Terrain.hlsl"
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Tessellation.hlsl"
 
 #pragma kernel InstanceCull
 #pragma kernel IndirectArgs
@@ -18,23 +15,23 @@
 	#define FINAL
 #endif
 
-globallycoherent RWBuffer<uint>_IndirectArgs;
-globallycoherent RWBuffer<uint> _PatchDataWrite;
-globallycoherent RWTexture2D<uint> _LodResult, _TempResultWrite;
-Buffer<uint> _IndirectArgsInput;
+globallycoherent RWBuffer<int>_IndirectArgs;
+globallycoherent RWBuffer<int> _PatchDataWrite;
+globallycoherent RWTexture2D<int> _LodResult, _TempResultWrite;
+Buffer<int> _IndirectArgsInput;
 Texture2D<float2> _TerrainHeights;
-Texture2D<uint> _LodInput, _TempResult;
+Texture2D<int> _LodInput, _TempResult;
 
 float4x4 _WorldToScreen;
 float4 _TerrainPositionOffset;
-float _EdgeLength;
+float _EdgeLength, _InputScale, _InputOffset;
 int _MipCount, _PassCount, _PassOffset, _TotalPassCount, _CellCount;
 
 static const int _ThreadCount = 32;
 
 groupshared int _CellLods[_ThreadCount][_ThreadCount];
 groupshared int _CellData[_ThreadCount * _ThreadCount];
-groupshared uint _CellCounter, _WriteOffset;
+groupshared int _CellCounter, _WriteOffset;
 
 [numthreads(_ThreadCount, _ThreadCount, 1)]
 void InstanceCull(uint2 groupThreadId : SV_GroupThreadID, uint groupIndex : SV_GroupIndex, uint2 dispatchThreadId : SV_DispatchThreadID, uint2 groupId : SV_GroupID)
@@ -48,16 +45,16 @@ void InstanceCull(uint2 groupThreadId : SV_GroupThreadID, uint groupIndex : SV_G
 	for (int i = 0; i < _PassCount; i++)
 	{
 		#ifdef FIRST
-			uint maxThread = 1 << i;
+			int maxThread = 1 << i;
 		#else
-			uint maxThread = 1 << (i + (6 - _PassCount));
+			int maxThread = 1 << (i + (6 - _PassCount));
 		#endif
 		
 		int lod = 0;
 
 		if (all(groupThreadId < maxThread))
 		{
-			uint2 coord = groupId * (1 << (i + (6 - _PassCount))) + groupThreadId;
+			int2 coord = groupId * (1 << (i + (6 - _PassCount))) + groupThreadId;
 			
 			#ifdef FIRST
 				lod = i == 0 ? 0 : _CellLods[groupThreadId.x][groupThreadId.y];
@@ -67,17 +64,16 @@ void InstanceCull(uint2 groupThreadId : SV_GroupThreadID, uint groupIndex : SV_G
 			
 			if (lod == 0)
 			{
-				float2 heightmapUv = (coord + 0.5) * exp2(-(i + _PassOffset));
+				float2 patchSize = _TerrainPositionOffset.xy / (1 << (i + _PassOffset));
 				
 				#ifdef NO_HEIGHTS
-					float2 heights = -_WorldSpaceCameraPos.y;
-				#else
-					float2 heights = _TerrainHeights.SampleLevel(_PointClampSampler, heightmapUv, _MipCount - (i + _PassOffset)).gr - _WorldSpaceCameraPos.y;
+					float3 center = float3((coord + 0.5) * patchSize + _TerrainPositionOffset.zw, 0.0).xzy;
+					float3 extents = float3(patchSize* 0.5, 1).xzy ;
+				#else 
+					float2 heights = _TerrainHeights.mips[_MipCount - (i + _PassOffset)][coord] * _InputScale + _InputOffset;
+					float3 center = float3((coord + 0.5) * patchSize + _TerrainPositionOffset.zw, 0.5 * (heights.y + heights.x)).xzy;
+					float3 extents = float3(patchSize, heights.y - heights.x).xzy * 0.5;
 				#endif
-				
-				float2 patchSize = _TerrainPositionOffset.xy * exp2(-(i + _PassOffset));
-				float3 center = float3((coord + 0.5) * patchSize + _TerrainPositionOffset.zw, 0.5 * (heights.y + heights.x)).xzy;
-				float3 extents = float3(patchSize, heights.y - heights.x).xzy * 0.5;
 				
 				#ifdef HI_Z_CULL
 					if(!HiZCull(center - extents, extents * 2, _ScreenSize.xy, _WorldToScreen))
@@ -86,7 +82,7 @@ void InstanceCull(uint2 groupThreadId : SV_GroupThreadID, uint groupIndex : SV_G
 				
 				if (FrustumCull(center, extents))
 				{
-					float factor = ProjectedSphereRadius(length(extents), center) * _ScreenSize.x * 0.5 / _EdgeLength;
+					float factor = ProjectedSphereRadius(length(extents), center - _WorldSpaceCameraPos) * _ScreenSize.x * 0.5 / _EdgeLength;
 					if (factor <= 1.0 || i + _PassOffset == _TotalPassCount - 1)
 					{
 						// If equal to or smaller than the target size, write the lod data.
@@ -179,7 +175,7 @@ void InstanceCull(uint2 groupThreadId : SV_GroupThreadID, uint groupIndex : SV_G
 void IndirectArgs(uint2 id : SV_DispatchThreadID)
 {
 	// Read input from the indirect args buffer
-	uint threadCount = _IndirectArgsInput[1];
+	int threadCount = _IndirectArgsInput[1];
 	_IndirectArgs[0] = (threadCount + 64 - 1) / 64;
 	_IndirectArgs[1] = 1;
 	_IndirectArgs[2] = 1;
@@ -189,7 +185,7 @@ void IndirectArgs(uint2 id : SV_DispatchThreadID)
 void CalculateLod(uint id : SV_DispatchThreadID)
 {
 	// Ensure we're not out of bounds
-	uint threadCount = _IndirectArgs[1];
+	int threadCount = _IndirectArgs[1];
 	if(id >= threadCount)
 		return;
 	
