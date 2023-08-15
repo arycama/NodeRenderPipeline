@@ -67,11 +67,11 @@ void InstanceCull(uint2 groupThreadId : SV_GroupThreadID, uint groupIndex : SV_G
 				float2 patchSize = _TerrainPositionOffset.xy / (1 << (i + _PassOffset));
 				
 				#ifdef NO_HEIGHTS
-					float3 center = float3((coord + 0.5) * patchSize + _TerrainPositionOffset.zw, 0.0).xzy;
+					float3 center = float3((coord + 0.5) * patchSize + _TerrainPositionOffset.zw, 0.0).xzy - _WorldSpaceCameraPos;
 					float3 extents = float3(patchSize* 0.5, 1).xzy ;
 				#else 
 					float2 heights = _TerrainHeights.mips[_MipCount - (i + _PassOffset)][coord] * _InputScale + _InputOffset;
-					float3 center = float3((coord + 0.5) * patchSize + _TerrainPositionOffset.zw, 0.5 * (heights.y + heights.x)).xzy;
+					float3 center = float3((coord + 0.5) * patchSize + _TerrainPositionOffset.zw, 0.5 * (heights.y + heights.x)).xzy - _WorldSpaceCameraPos;
 					float3 extents = float3(patchSize, heights.y - heights.x).xzy * 0.5;
 				#endif
 				
@@ -82,7 +82,7 @@ void InstanceCull(uint2 groupThreadId : SV_GroupThreadID, uint groupIndex : SV_G
 				
 				if (FrustumCull(center, extents))
 				{
-					float factor = ProjectedSphereRadius(length(extents), center - _WorldSpaceCameraPos) * _ScreenSize.x * 0.5 / _EdgeLength;
+					float factor = ProjectedSphereRadius(length(extents), center) * _ScreenSize.x * 0.5 / _EdgeLength;
 					if (factor <= 1.0 || i + _PassOffset == _TotalPassCount - 1)
 					{
 						// If equal to or smaller than the target size, write the lod data.

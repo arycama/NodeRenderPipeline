@@ -56,7 +56,7 @@ float3 RRTAndODTFit(float3 v)
 
 float3 ACESFilmicToneMapping(float3 color)
 {
-	//return NeutralTonemap(color);
+	return NeutralTonemap(color);
 
 	// sRGB => XYZ => D65_2_D60 => AP1 => RRT_SAT
 	const float3x3 ACESInputMat = float3x3(

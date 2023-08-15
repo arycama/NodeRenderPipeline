@@ -15,7 +15,6 @@ public partial class SetupCameraPropertiesNode : RenderPipelineNode
     [Output] private int height;
     [Output] private Vector2 jitter;
     [Output] private CullingPlanes cullingPlanes;
-    [Output] private CullingPlanes absoluteCullingPlanes;
     [Output] private Matrix4x4 viewProjectionMatrix;
     [Output] private Vector3 cameraPosition;
 
@@ -88,8 +87,6 @@ public partial class SetupCameraPropertiesNode : RenderPipelineNode
         scope.Command.SetGlobalInt("_JitterOffsetX", jitterOffsetX);
         scope.Command.SetGlobalInt("_JitterOffsetY", jitterOffsetY);
         GraphicsUtilities.SetupCameraProperties(scope.Command, FrameCount, camera, context, camera.Resolution(), out cullingPlanes, out viewProjectionMatrix);
-
-        absoluteCullingPlanes = GeometryUtilities.CalculateFrustumPlanes(camera.projectionMatrix * camera.worldToCameraMatrix);
         cameraPosition = camera.transform.position;
 
 #if UNITY_EDITOR

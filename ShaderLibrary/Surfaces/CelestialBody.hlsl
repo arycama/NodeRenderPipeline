@@ -86,7 +86,6 @@ float3 Fragment(FragmentInput input) : SV_Target
     float3 V = normalize(-positionWS);
 	V = -_Direction;
 
-	illuminance = 0;
 	for (uint i = 0; i < _CelestialBodyCount; i++)
 	{
 		float3 C = ApplyExposure(_CelestialBodyColors[i].rgb);

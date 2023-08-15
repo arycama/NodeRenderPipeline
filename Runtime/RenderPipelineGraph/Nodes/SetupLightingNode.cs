@@ -120,7 +120,7 @@ public partial class SetupLightingNode : RenderPipelineNode
         scope.Command.SetBufferData(directionalLightDataBuffer, directionalLightDatas);
 
         RenderPointShadows(context, pointShadowRequests, camera);
-        RenderSpotShadows(context, spotlightShadowRequests, spotlightShadowsId, spotlightShadowMatricesBuffer, (int)spotDepth, spotResolution, spotBias, camera,  "_SpotlightShadows", "_SpotlightShadowMatrices");
+        RenderSpotShadows(context, spotlightShadowRequests, spotlightShadowsId, spotlightShadowMatricesBuffer, (int)spotDepth, spotResolution, spotBias, camera, "_SpotlightShadows", "_SpotlightShadowMatrices");
         RenderSpotShadows(context, areaShadowRequests, areaShadowsId, areaShadowMatricesBuffer, (int)areaDepth, areaResolution, areaBias, camera, "_AreaShadows", "_AreaShadowMatrices");
 
         // Point/spot lights
@@ -145,10 +145,8 @@ public partial class SetupLightingNode : RenderPipelineNode
             var isValid = false;
             var shadowRequestData = new DirectionalShadowRequestData(index);
 
-            var lt = visibleLight.light.transform;
-            var lightRotation = lt.rotation;
-            var invLightRotation = Quaternion.Inverse(lightRotation);
-            var worldToLight = Matrix4x4.Rotate(invLightRotation);
+            var lightToWorld = visibleLight.localToWorldMatrix.NoTranslation();
+            var worldToLight = lightToWorld.inverse;
 
             var projMatrix = camera.projectionMatrix;
             camera.ResetProjectionMatrix();
@@ -160,72 +158,85 @@ public partial class SetupLightingNode : RenderPipelineNode
                 var cascadeEnd = directionalShadowNearPlane * Mathf.Pow(shadowDistance / directionalShadowNearPlane, (float)(i + 1) / directionalCascades);
 
                 // To fade between cascades, slightly decrease the start distance of subsequent cascades
-                if(i > 0)
+                if (i > 0)
                 {
                     var previousEnd = directionalShadowNearPlane * Mathf.Pow(shadowDistance / directionalShadowNearPlane, (float)(i - 1) / directionalCascades);
                     cascadeStart = Mathf.Lerp(cascadeStart, previousEnd, directionalCascadeFade);
                 }
 
                 // Transform camera bounds to light space
-                var viewBounds = new Bounds();
-                for (var j = 0; j < 8; j++)
+                Vector3 minValue = Vector3.positiveInfinity, maxValue = Vector3.negativeInfinity;
+                for (var z = 0; z < 2; z++)
                 {
-                    var x = j & 1;
-                    var y = (j >> 1) & 1;
-                    var z = j < 4 ? cascadeStart : cascadeEnd;
-
-                    var point = worldToLight.MultiplyPoint3x4(camera.ViewportToWorldPoint(new Vector3(x, y, z)));
-
-                    if (j == 0)
+                    for (var y = 0; y < 2; y++)
                     {
-                        viewBounds = new Bounds(point, Vector3.zero);
-                    }
-                    else
-                    {
-                        viewBounds.Encapsulate(point);
+                        for (var x = 0; x < 2; x++)
+                        {
+                            var far = z == 0 ? cascadeStart : cascadeEnd;
+                            var worldPoint = camera.ViewportToWorldPoint(new(x, y, far));
+                            var localPoint = worldToLight.MultiplyPoint3x4(worldPoint);
+                            minValue = Vector3.Min(minValue, localPoint);
+                            maxValue = Vector3.Max(maxValue, localPoint);
+                        }
                     }
                 }
+
+                // Snap to texels to avoid shimmering
+                var worldUnitsPerTexel = (maxValue - minValue).XY() / directionalResolution;
+                var viewBoundsMin = new Vector3(Mathf.Floor(minValue.x / worldUnitsPerTexel.x) * worldUnitsPerTexel.x, Mathf.Floor(minValue.y / worldUnitsPerTexel.y) * worldUnitsPerTexel.y, minValue.z);
+                var viewBoundsMax = new Vector3(Mathf.Floor(maxValue.x / worldUnitsPerTexel.x) * worldUnitsPerTexel.x, Mathf.Floor(maxValue.y / worldUnitsPerTexel.y) * worldUnitsPerTexel.y, maxValue.z);
+
+                var viewCenter = 0.5f * (viewBoundsMax + viewBoundsMin);
+                var viewSize = viewBoundsMax - viewBoundsMin;
+                var viewExtents = 0.5f * viewSize;
+
+                var localView = new Vector3(viewCenter.x, viewCenter.y, viewCenter.z - viewExtents.z);
+                var viewPos = lightToWorld.MultiplyPoint3x4(localView);
+                var viewMatrix = Matrix4x4.TRS(viewPos, lightToWorld.rotation, Vector3.one).inverse;
+                var projectionMatrix = Matrix4x4.Ortho(-viewExtents.x, viewExtents.x, -viewExtents.y, viewExtents.y, 0f, viewSize.z);
+                projectionMatrix.SetColumn(2, -projectionMatrix.GetColumn(2));
+
+                // Calculate culling planes
+                using var cullingPlanes = ScopedPooledList<Plane>.Get();
+
+                // First get the planes from the view projection matrix
+                var viewProjectionMatrix = projectionMatrix * viewMatrix;
+                GeometryUtility.CalculateFrustumPlanes(viewProjectionMatrix, frustumPlanes);
+                for (var j = 0; j < 6; j++)
+                {
+                    // Skip near plane
+                    if (j != 4)
+                        cullingPlanes.Value.Add(frustumPlanes[j]);
+                }
+
+                // Now also add any main camera-frustum planes that are not facing away from the light
+                var lightDirection = -visibleLight.localToWorldMatrix.Forward();
+                GeometryUtility.CalculateFrustumPlanes(camera, frustumPlanes);
+                for (var j = 0; j < 6; j++)
+                {
+                    var plane = frustumPlanes[j];
+                    if (Vector3.Dot(plane.normal, lightDirection) > 0.0f)
+                        cullingPlanes.Value.Add(plane);
+                }
+
+                var shadowSplitData = new ShadowSplitData()
+                {
+                    cullingPlaneCount = cullingPlanes.Value.Count,
+                    shadowCascadeBlendCullingFactor = 1
+                };
+
+                for (var j = 0; j < cullingPlanes.Value.Count; j++)
+                {
+                    shadowSplitData.SetCullingPlane(j, cullingPlanes.Value[j]);
+                }
+
+                // Do final matrix in RWS for rendering
+                var viewMatrixRWS = Matrix4x4Extensions.WorldToLocal(viewPos - camera.transform.position, lightToWorld.rotation);
 
                 // GetShadowCasterBounds may return false if no Unity meshes should cast shadows, but we may have custom meshes (Eg terrain, GPU-driven rendering) that should cast shadows
                 var hasShadows = cullingResults.GetShadowCasterBounds(index, out var casterBounds);
 
-                // Snap to texels to avoid shimmering
-                var worldUnitsPerTexel = viewBounds.size.XY() / directionalResolution;
-                var viewBoundsMin = new Vector3(Mathf.Floor(viewBounds.min.x / worldUnitsPerTexel.x) * worldUnitsPerTexel.x, Mathf.Floor(viewBounds.min.y / worldUnitsPerTexel.y) * worldUnitsPerTexel.y, viewBounds.min.z);
-                var viewBoundsMax = new Vector3(Mathf.Floor(viewBounds.max.x / worldUnitsPerTexel.x) * worldUnitsPerTexel.x, Mathf.Floor(viewBounds.max.y / worldUnitsPerTexel.y) * worldUnitsPerTexel.y, viewBounds.max.z);
-                viewBounds = new Bounds(0.5f * (viewBoundsMax + viewBoundsMin), viewBoundsMax - viewBoundsMin);
-
-                var localView = new Vector3(viewBounds.center.x, viewBounds.center.y, viewBounds.min.z);
-                var viewPos = lightRotation * localView;
-                var viewMatrix = Matrix4x4Extensions.WorldToLocal(viewPos, lightRotation);
-                //var viewMatrix = Matrix4x4.TRS(-localView, invLightRotation, Vector3.one);
-
-                var projectionMatrix = new Matrix4x4();
-                projectionMatrix[0, 0] = 1f / viewBounds.extents.x;
-                projectionMatrix[1, 1] = 1f / viewBounds.extents.y;
-                projectionMatrix[2, 2] = 1f / viewBounds.extents.z;
-                projectionMatrix[2, 3] = -1f;
-                projectionMatrix[3, 3] = 1f;
-
-                var viewProjectionMatrix = projectionMatrix * viewMatrix;
-
-                GeometryUtility.CalculateFrustumPlanes(viewProjectionMatrix, frustumPlanes);
-                var shadowSplitData = new ShadowSplitData()
-                {
-                    cullingPlaneCount = 5,
-                    shadowCascadeBlendCullingFactor = 1
-                };
-
-                // Skip near plane
-                for (var j = 0; j < 5; j++)
-                {
-                    shadowSplitData.SetCullingPlane(j, j == 4 ? frustumPlanes[5] : frustumPlanes[j]);
-                }
-
-                // Do final matrix in RWS for rendering
-                var viewMatrixRWS = Matrix4x4Extensions.WorldToLocal(viewPos - camera.transform.position, lightRotation);
-
-                shadowRequestData[i] = new ShadowRequestData(viewMatrixRWS, projectionMatrix, shadowSplitData, 0f, viewBounds.size.z, hasShadows);
+                shadowRequestData[i] = new ShadowRequestData(viewMatrixRWS, projectionMatrix, shadowSplitData, 0f, viewSize.z, hasShadows);
                 isValid = true;
             }
 
@@ -416,7 +427,7 @@ public partial class SetupLightingNode : RenderPipelineNode
         }
     }
 
-    private void RenderShadowSubGraph(ScriptableRenderContext context, Camera camera, int visibleLightIndex, ShadowRequestData shadowRequestData, RenderTargetIdentifier output, int resolution)
+    private void RenderShadowSubGraph(ScriptableRenderContext context, Camera camera, int visibleLightIndex, ShadowRequestData shadowRequestData, RenderTargetIdentifier output, int resolution, Vector3 viewPosition)
     {
         if (shadowsSubGraph == null)
             return;
@@ -425,7 +436,12 @@ public partial class SetupLightingNode : RenderPipelineNode
         var shadowSplitData = shadowRequestData.ShadowSplitData;
         var cullingPlanes = new CullingPlanes { Count = shadowSplitData.cullingPlaneCount };
         for (var i = 0; i < shadowSplitData.cullingPlaneCount; i++)
-            cullingPlanes.SetCullingPlane(i, shadowSplitData.GetCullingPlane(i));
+        {
+            // Translate planes from world space to camera-relative space
+            var plane = shadowSplitData.GetCullingPlane(i);
+            plane.distance += Vector3.Dot(plane.normal, viewPosition);
+            cullingPlanes.SetCullingPlane(i, plane);
+        }
 
         shadowsSubGraph.AddRelayInput("CullingResults", cullingResults);
         shadowsSubGraph.AddRelayInput("VisibleLightIndex", visibleLightIndex);
@@ -494,7 +510,7 @@ public partial class SetupLightingNode : RenderPipelineNode
                     // Copy shadow split data to our own culling planes struct
                     var output = new RenderTargetIdentifier(directionalShadowsId, 0, CubemapFace.Unknown, cascadeIndex);
 
-                    RenderShadowSubGraph(context, camera, visibleLightIndex, shadowRequestData, output, directionalResolution);
+                    RenderShadowSubGraph(context, camera, visibleLightIndex, shadowRequestData, output, directionalResolution, camera.transform.position);
                     shadowMatrices.Add((shadowRequestData.ProjectionMatrix * shadowRequestData.ViewMatrix).ConvertToAtlasMatrix());
 
                     scope.Command.EndSample(cascadeIds.GetString(j));
@@ -518,7 +534,7 @@ public partial class SetupLightingNode : RenderPipelineNode
         scope.Command.SetGlobalInt("_PcfSamples", pcfSamples);
         scope.Command.SetGlobalFloat("_ShadowPcfRadius", pcfRadius);
         scope.Command.SetGlobalFloat("_DirectionalShadowDistance", shadowDistance);
-        scope.Command.SetGlobalFloat("_DirectionalShadowCascadeScale", directionalCascades / Mathf.Log(shadowDistance / directionalShadowNearPlane) * (1/log2e));
+        scope.Command.SetGlobalFloat("_DirectionalShadowCascadeScale", directionalCascades / Mathf.Log(shadowDistance / directionalShadowNearPlane) * (1 / log2e));
         scope.Command.SetGlobalFloat("_DirectionalShadowCascadeBias", -directionalCascades * Mathf.Log(directionalShadowNearPlane) / Mathf.Log(shadowDistance / directionalShadowNearPlane));
         scope.Command.SetGlobalFloat("_DirectionalShadowCascadeFade", directionalCascadeFade);
         scope.Command.SetGlobalFloat("_DirectionalShadowCascadeFadeScale", 1f / directionalCascadeFade);
@@ -570,7 +586,7 @@ public partial class SetupLightingNode : RenderPipelineNode
                     else if (j == 3) index = 2;
 
                     var output = new RenderTargetIdentifier(pointShadowsId, 0, CubemapFace.Unknown, i * 6 + index);
-                    RenderShadowSubGraph(context, camera, visibleLightIndex, shadowRequestData, output, pointResolution);
+                    RenderShadowSubGraph(context, camera, visibleLightIndex, shadowRequestData, output, pointResolution, camera.transform.position);
                 }
             }
 
@@ -611,7 +627,7 @@ public partial class SetupLightingNode : RenderPipelineNode
                 scope.Command.Clear();
 
                 var output = new RenderTargetIdentifier(propertyId, 0, CubemapFace.Unknown, i);
-                RenderShadowSubGraph(context, camera, spotShadowRequest.VisibleLightIndex, shadowRequestData, output, spotResolution);
+                RenderShadowSubGraph(context, camera, spotShadowRequest.VisibleLightIndex, shadowRequestData, output, spotResolution, camera.transform.position);
 
                 // Add to shadow matrices list
                 var viewProjectionMatrix = (shadowRequestData.ProjectionMatrix * shadowRequestData.ViewMatrix).ConvertToAtlasMatrix();

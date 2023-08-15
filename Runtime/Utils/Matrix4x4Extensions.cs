@@ -102,4 +102,9 @@ public static class Matrix4x4Extensions
     {
         return WorldToLocal(rotation.Right(), rotation.Up(), rotation.Forward(), position);
     }
+
+    public static Matrix4x4 NoTranslation(this Matrix4x4 m)
+    {
+        return new Matrix4x4(m.GetColumn(0), m.GetColumn(1), m.GetColumn(2), new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
+    }
 }

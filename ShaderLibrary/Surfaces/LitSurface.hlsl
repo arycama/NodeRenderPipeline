@@ -140,7 +140,7 @@ void surf(inout FragmentData input, inout SurfaceData surface)
 
 			// Use angle between world normal and terrain normal to blend a height factor. TODO: Optimize
 			float terrainHeight = GetTerrainHeight(input.positionWS);
-			float blend = saturate(1.0 - (abs(input.positionWS.y - terrainHeight) / lerp(_HeightBlend, 0.0, (1.0 - saturate(dot(input.normal, terrainNormalWS)) * _NormalBlend))));
+			float blend = saturate(1.0 - (abs(input.positionWS.y - terrainHeight) * (1.0 - _HeightBlend) / (_HeightBlend * saturate(dot(input.normal, terrainNormalWS)) * _NormalBlend)));
 			if (blend > 0)
 			{
 				float2 terrainUv = WorldToTerrainPosition(input.positionWS);

@@ -43,7 +43,7 @@
 
 		[Header(Terrain Blending)]
         [Toggle] Terrain_Blending("Terrain Blending", Float) = 0
-		_HeightBlend("Height Blend", Range(0, 20)) = 10.0
+		[PowerSlider(0.125)] _HeightBlend("Height Blend", Range(0, 1)) = 0.915
 		_NormalBlend("Normal Blend", Range(0, 1)) = 0.1
 
         [HideInInspector] _SrcBlend("Src Blend", Float) = 1.0
