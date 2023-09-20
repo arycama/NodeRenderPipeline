@@ -1,19 +1,20 @@
+#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Color.hlsl"
+
 #pragma kernel SeedPixels
 #pragma kernel JumpFlood
+#pragma kernel CalculateMinMax
 #pragma kernel Resolve
-
-#include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Color.hlsl"
 
 Texture2DArray<float4> _Texture0, _Texture1, _Texture2, _Texture3, _Texture4, _Texture5, _Texture6;
 RWTexture2DArray<float4> _Texture0Write, _Texture1Write, _Texture2Write, _Texture3Write, _Texture4Write, _Texture5Write, _Texture6Write, _Texture7Write;
 float _Texture0sRGB, _Texture1sRGB, _Texture2sRGB, _Texture3sRGB, _Texture4sRGB, _Texture5sRGB, _Texture6sRGB;
 
-globallycoherent RWTexture2D<float> _CombinedAlpha;
-
 Texture2DArray<float2> _Input;
 RWTexture2DArray<float2> _Result;
 int _CellSize, _Offset, _Resolution, _TextureCount;
 float _InvCellSize, _InvResolution, _MaxDistance;
+
+RWBuffer<int> _MaxDepths;
 
 bool IsOutOfBounds(int2 position, int2 offset)
 {
@@ -44,7 +45,7 @@ void SeedPixels(uint3 id : SV_DispatchThreadID)
 		for (int x = -1; x < 2; x++)
 		{
 			// Don't compare the middle value
-			if(x == 0 && y == 0)
+			if (x == 0 && y == 0)
 				continue;
 				
 			int2 uv = id.xy + int2(x, y);
@@ -60,7 +61,7 @@ void SeedPixels(uint3 id : SV_DispatchThreadID)
 				float2 midpoint = lerp(id.xy, uv, factor);
 				
 				float dist = distance(id.xy * _InvResolution, midpoint * _InvResolution);
-				if(dist < minDist)
+				if (dist < minDist)
 				{
 					minDist = dist;
 					minSeed = midpoint;
@@ -103,6 +104,54 @@ void JumpFlood(uint3 id : SV_DispatchThreadID)
 }
 
 [numthreads(8, 8, 1)]
+void CalculateMinMax(uint3 id : SV_DispatchThreadID)
+{
+	float2 seed = _Input[id];
+	float dist = distance(seed * _InvResolution, id.xy * _InvResolution);
+
+	if (_Texture0[id].a < 0.5)
+	{
+		// There's a chance the seed falls slightly on a non-opaque pixel's edge. Do a 3x3 search to ensure we get a filled pixel
+		float minDist = sqrt(2);
+		int2 minSeed = -1;
+	
+		for (int y = -1; y < 2; y++)
+		{
+			for (int x = -1; x < 2; x++)
+			{
+				if (IsOutOfBounds(seed, int2(x, y)))
+					continue;
+		
+				int2 uv = seed + int2(x, y);
+				float neighborAlpha = _Texture0[int3(uv, id.z)].a;
+				bool isNeighborOpaque = neighborAlpha >= 0.5;
+				if (isNeighborOpaque)
+				{
+					float dist = distance(seed * _InvResolution, uv * _InvResolution);
+					if (dist < minDist)
+					{
+						minDist = dist;
+						minSeed = uv;
+					}
+				}
+			}
+		}
+	
+		if (all(minSeed != -1))
+		{
+			seed = minSeed;
+			minDist = dist;
+		}
+		
+		InterlockedMax(_MaxDepths[0], asint(minDist));
+	}
+	else
+	{
+		InterlockedMax(_MaxDepths[1], asint(dist));
+	}
+}
+
+[numthreads(8, 8, 1)]
 void Resolve(uint3 id : SV_DispatchThreadID)
 {
 	float2 seed = _Input[id];
@@ -142,22 +191,29 @@ void Resolve(uint3 id : SV_DispatchThreadID)
 		if (all(minSeed != -1))
 		{
 			seed = minSeed;
+			minDist = dist;
 		}
+		
+		dist = minDist;
 	}
 	else
 	{
 		seed = id.xy;
 	}
 	
-	_Texture0Write[id] = float4(_Texture0sRGB ? LinearToSrgb(_Texture0[int3(seed, id.z)].rgb) : _Texture0[int3(seed, id.z)].rgb, _Texture0[id].a);
+	float minDist = -asfloat(_MaxDepths[0]);
+	float maxDist = asfloat(_MaxDepths[1]);
 	
-	_CombinedAlpha[id.xy] += _Texture0[id].a;
+	float outDist = (dist - minDist) / (maxDist - minDist);
+	_Texture0Write[id] = float4(_Texture0sRGB ? LinearToSrgb(_Texture0[int3(seed, id.z)].rgb) : _Texture0[int3(seed, id.z)].rgb, outDist);
+	
+	//_Texture0Write[id] = float4(_Texture0sRGB ? LinearToSrgb(_Texture0[int3(seed, id.z)].rgb) : _Texture0[int3(seed, id.z)].rgb, _Texture0[id].a);
 	
 	// Write textures
-	if(_TextureCount > 1)
+	if (_TextureCount > 1)
 		_Texture1Write[id] = _Texture1sRGB ? LinearToSrgb(_Texture1[int3(seed, id.z)]) : _Texture1[int3(seed, id.z)];
 	
-	if(_TextureCount > 2)
+	if (_TextureCount > 2)
 		_Texture2Write[id] = _Texture2sRGB ? LinearToSrgb(_Texture2[int3(seed, id.z)]) : _Texture2[int3(seed, id.z)];
 	
 	if (_TextureCount > 3)

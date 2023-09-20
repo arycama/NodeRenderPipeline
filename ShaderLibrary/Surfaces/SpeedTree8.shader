@@ -73,30 +73,30 @@ Shader "Surface/Nature/SpeedTree 8"
             ENDHLSL
         }
 
-        Pass
-        {
-            Cull [_Cull]
+        //Pass
+        //{
+        //    Cull [_Cull]
             
-            Name "MotionVectors"
-            Tags{ "LightMode" = "MotionVectors" }
+        //    Name "MotionVectors"
+        //    Tags{ "LightMode" = "MotionVectors" }
 
-            Stencil
-            {
-                Ref 3
-                Pass Replace
-                WriteMask 3
-            }
+        //    Stencil
+        //    {
+        //        Ref 3
+        //        Pass Replace
+        //        WriteMask 3
+        //    }
 
-            HLSLPROGRAM
-            #pragma vertex Vertex
-            #pragma fragment Fragment
-            #pragma multi_compile _ REFLECTION_PROBE_RENDERING
+        //    HLSLPROGRAM
+        //    #pragma vertex Vertex
+        //    #pragma fragment Fragment
+        //    #pragma multi_compile _ REFLECTION_PROBE_RENDERING
 
-            #define MOTION_VECTORS_ON
+        //    #define MOTION_VECTORS_ON
 
-            #include "SpeedTree8Common.hlsl"
-            ENDHLSL
-        }
+        //    #include "SpeedTree8Common.hlsl"
+        //    ENDHLSL
+        //}
     }
 
     CustomEditor "SpeedTreeShaderGui"

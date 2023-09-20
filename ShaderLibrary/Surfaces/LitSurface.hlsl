@@ -70,7 +70,7 @@ void surf(inout FragmentData input, inout SurfaceData surface)
 	
 	#ifdef _PARALLAXMAP
 		float height = _ParallaxMap.Sample(sampler_MainTex, ApplyScaleOffset(input.uv0, _MainTex_ST)).b;
-		input.uv0.xy += ParallaxOffset1Step(height, _Parallax, input.uv1);
+		input.uv0.xy += ParallaxOffset(height, input.uv1, _Parallax);
 	#endif
 
 	#if !defined(UNITY_PASS_SHADOWCASTER) || defined(MODE_CUTOUT) || defined(MODE_FADE)|| defined(MODE_TRANSPARENT)

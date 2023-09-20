@@ -2,13 +2,14 @@
 {
     Properties
     {
-        [Toggle] Parallax("Parallax", Float) = 1
-        [Toggle] Pixel_Depth_Offset("Pixel Depth Offset", Float) = 1
 		[Toggle] Octahedron("Octahedron", Float) = 0
         
+        _ImposterFrames("Frame Count", Float) = 8
+		_FramesMinusOne("Frames Minus One", Float) = 7.0
+		_RcpFramesMinusOne("Rcp Frames Minus One", Float) = 1.0
 		_Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
-		_ImposterFrames("Frame Count", Float) = 8
-        _CenterOffset("Center Offset", Vector) = (0, 0, 0, 0)
+		_CenterOffset("Center Offset", Vector) = (0, 0, 0, 0)
+		_Scale("Scale", Vector) = (1, 1, 1, 1)
 
         [NoScaleOffset] _MainTex("RGB: Albedo, A: Transparency", 2DArray) = "" {}
         [NoScaleOffset] _NormalSmoothness("RGB: Object Normal, A: Smoothness", 2DArray) = "" {}
@@ -21,7 +22,6 @@
         Tags 
         { 
             "DisableBatching"="True" 
-            "PreviewType" = "Quad"
             "Queue"="AlphaTest"
         }
 
@@ -31,9 +31,6 @@
 
             #pragma multi_compile _ INDIRECT_RENDERING
             #pragma multi_compile_fragment _ LOD_FADE_CROSSFADE
-            #pragma shader_feature_local_vertex OCTAHEDRON_ON
-            #pragma shader_feature_local PARALLAX_ON
-            #pragma shader_feature_local PIXEL_DEPTH_OFFSET_ON
         ENDHLSL
 
         Pass
@@ -43,9 +40,9 @@
 
             Stencil
             {
-                Ref 3
+                Ref 1
                 Pass Replace
-                WriteMask 3
+                WriteMask 1
             }
 
             HLSLPROGRAM
@@ -72,28 +69,6 @@
 
             #include "SpeedTree8Imposter.hlsl"
 
-            ENDHLSL
-        }
-
-        Pass
-        {
-            Name "MotionVectors"
-            Tags{ "LightMode" = "MotionVectors" }
-
-            Stencil
-            {
-                Ref 3
-                Pass Replace
-                WriteMask 3
-            }
-
-            HLSLPROGRAM
-            #pragma vertex Vertex
-            #pragma fragment Fragment
-            #pragma multi_compile _ REFLECTION_PROBE_RENDERING
-
-            #define MOTION_VECTORS_ON
-            #include "SpeedTree8Imposter.hlsl"
             ENDHLSL
         }
 

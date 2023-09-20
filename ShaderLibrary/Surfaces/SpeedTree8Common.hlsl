@@ -86,7 +86,7 @@ cbuffer SpeedTreeWindPrevious
 #define GEOM_TYPE_LEAF 2
 #define GEOM_TYPE_FACINGLEAF 3
 
-static const float4 _HueVariationColor = float4(1.0, 0.214, 0.0, 0.1);
+static const float4 _HueVariationColor = float4(0.5, 0.3, 0.1, 0.3);
 
 void vert(inout VertexData data)
 {
@@ -226,8 +226,7 @@ void surf(inout FragmentData input, inout SurfaceData surface)
 		return;
 	#else
 	
-	float4 normalData = _BumpMap.Sample(_TrilinearRepeatAniso4Sampler, input.uv0);
-	float3 normalMap = UnpackNormalAG(normalData);
+	float3 normalMap = UnpackNormalAG(_BumpMap.Sample(_TrilinearRepeatAniso4Sampler, input.uv0));
 	float3 extra = _ExtraTex.Sample(_TrilinearRepeatAniso4Sampler, input.uv0);
 
 	surface.Albedo = color.rgb;

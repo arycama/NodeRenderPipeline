@@ -1,5 +1,4 @@
 ﻿#pragma kernel Deferred
-#pragma enable_d3d11_debug_symbols
 
 #define REFLECTION_PROBE_RENDERING
 

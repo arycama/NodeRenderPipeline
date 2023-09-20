@@ -284,8 +284,19 @@ void PhysicalSky(uint2 id : SV_DispatchThreadID)
 	
 	if(depth == 0.0 && RayIntersectsGround(_ViewHeight, V.y))
 	{
+		float3 P = _PlanetOffset + V * baseMaxDist;
+		float3 N = normalize(P);
+		
 		#if defined(LIGHT_COUNT_ONE) || defined(LIGHT_COUNT_TWO)
-		//luminance += _GroundColor 
+			float3 color = ApplyExposure(_LightColor0) * TransmittanceToAtmosphere(P, _LightDirection0);
+			float NdotL = dot(N, _LightDirection0);
+			luminance += color * transmittance * saturate(NdotL) * _GroundColor * RcpPi;
+		#endif
+		
+		#ifdef LIGHT_COUNT_TWO
+			float3 color1 = ApplyExposure(_LightColor1) * TransmittanceToAtmosphere(P, _LightDirection1);
+			float NdotL1 = dot(N, _LightDirection1);
+			luminance += color1 * transmittance * saturate(NdotL1) * _GroundColor * RcpPi;
 		#endif
 	}
 	

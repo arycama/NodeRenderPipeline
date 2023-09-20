@@ -63,8 +63,8 @@ FragmentInput Vertex(VertexInput vertex)
 	#endif
 	
 	data.worldPos = ObjectToWorld(data.positionOS, vertex.instanceID);
-	data.worldNormal = ObjectToWorldNormal(data.normal, vertex.instanceID, false);
-	data.worldTangent = float4(ObjectToWorldDir(data.tangent.xyz, vertex.instanceID, false), data.tangent.w);
+	data.worldNormal = ObjectToWorldNormal(data.normal, vertex.instanceID, true);
+	data.worldTangent = float4(ObjectToWorldDir(data.tangent.xyz, vertex.instanceID, true), data.tangent.w);
 
 	#ifdef HAS_VERTEX_MODIFIER
 		vert(data);
@@ -142,19 +142,19 @@ FRAGMENT_OUTPUT Fragment(FragmentInput input, bool isFrontFace : SV_IsFrontFace)
 	#endif
 
 	#ifdef REQUIRES_FRAGMENT_NORMAL
-		fragmentData.normal = normalize(input.normal);
+		fragmentData.normal = input.normal;
 	#else
 		fragmentData.normal = float3(0, 1, 0);
 	#endif
 
 	#ifdef REQUIRES_FRAGMENT_TANGENT
-		fragmentData.tangent = normalize(input.tangent.xyz);
+		fragmentData.tangent = input.tangent.xyz;
 		fragmentData.binormalSign = input.tangent.w;
-		fragmentData.binormal = normalize(cross(fragmentData.normal, fragmentData.tangent)) * (fragmentData.binormalSign * unity_WorldTransformParams.w);
+		fragmentData.binormal = cross(fragmentData.normal, fragmentData.tangent) * (fragmentData.binormalSign * unity_WorldTransformParams.w);
 	#else
 		// Default frame
 		fragmentData.tangent = normalize(cross(fragmentData.normal, float3(0, 0, 1)));
-		fragmentData.binormal = normalize(cross(fragmentData.tangent, fragmentData.normal));
+		fragmentData.binormal = cross(fragmentData.tangent, fragmentData.normal);
 	#endif
 
 	#ifdef REQUIRES_FRAGMENT_UV0

@@ -151,7 +151,7 @@ float4 PackGBufferAlbedoTranslucency(float3 albedo, float3 translucency, uint2 c
 {
 	float3 albedoYCoCg = RGBToYCoCg(albedo);
 	float3 translucencyYCoCg = RGBToYCoCg(translucency);
-	bool pattern = (coord.x % 2) == (coord.y % 2);
+	bool pattern = (coord.x & 1) == (coord.y & 1);
 	float albedoData = pattern ? albedoYCoCg.b : albedoYCoCg.g;
 	float translucencyData = pattern ? translucencyYCoCg.b : translucencyYCoCg.g;
 	return float4(albedoYCoCg.r, albedoData, translucencyYCoCg.r, translucencyData);

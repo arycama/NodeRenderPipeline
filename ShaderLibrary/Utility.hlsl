@@ -533,12 +533,12 @@ float2 ApplyScaleOffset(float2 x, float4 scaleOffset)
 	return x * scaleOffset.xy + scaleOffset.zw;
 }
 
-float2 ParallaxOffset1Step(float height, float amplitude, float3 viewDirTS)
+float2 ParallaxOffset(float height, float3 viewDirTS, float scale = 1.0, float bias = 0.42)
 {
-	height = height * amplitude - amplitude / 2.0;
+	height = height * scale - scale / 2.0;
 	float3 v = normalize(viewDirTS);
-	v.z += 0.42;
-	return height * (v.xy / v.z);
+	v.z += bias;
+	return height * v.xy * rcp(v.z);
 }
 
 // ref http://blog.selfshadow.com/publications/blending-in-detail/

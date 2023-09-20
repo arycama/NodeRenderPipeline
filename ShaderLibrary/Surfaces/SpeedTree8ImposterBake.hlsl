@@ -4,35 +4,26 @@
 
 Texture2D<float4> _MainTex, _BumpMap;
 Texture2D<float3> _ExtraTex, _SubsurfaceTex;
-SamplerState sampler_MainTex;
-float _WindEnabled;
-uint _RenderArraySliceIndex;
-
-float4x4 _ViewProjectionMatrices[256];
-float4x4 unity_MatrixVP;
+SamplerState _TrilinearRepeatAniso16Sampler;
+float _Subsurface;
+matrix unity_MatrixVP;
 
 struct VertexInput
 {
-	float3 positionOS : POSITION;
+	float3 position : POSITION;
 	float2 uv : TEXCOORD0;
-	float3 normalOS : NORMAL;
-	float4 tangentOS : TANGENT;
+	float3 normal : NORMAL;
+	float4 tangent : TANGENT;
 	float4 color : COLOR;
-	uint instanceID : SV_InstanceID;
 };
 
 struct FragmentInput
 {
-	float4 positionCS : SV_POSITION;
+	float4 position : SV_POSITION;
 	float2 uv : TEXCOORD0;
-	float3 normalWS : NORMAL;
-	float4 tangentWS : TANGENT;
-    float4 color : COLOR;
-	uint instanceID : SV_InstanceID;
-	
-	#ifdef SHADER_STAGE_GEOMETRY
-		uint sliceIndex : SV_RenderTargetArrayIndex;
-	#endif
+	float3 normal : NORMAL;
+	float4 tangent : TANGENT;
+	float4 color : COLOR;
 };
 
 struct FragmentOutput
@@ -46,56 +37,38 @@ struct FragmentOutput
 FragmentInput Vertex(VertexInput input)
 {
 	FragmentInput output;
-	output.positionCS = MultiplyPoint(_ViewProjectionMatrices[input.instanceID], MultiplyPoint3x4(unity_ObjectToWorld, input.positionOS));
+	output.position = MultiplyPoint(unity_MatrixVP, MultiplyPoint3x4(unity_ObjectToWorld, input.position));
 	output.uv = input.uv;
-	output.normalWS = normalize(mul((float3x3) unity_ObjectToWorld, input.normalOS));
-	output.tangentWS = float4(normalize(mul((float3x3) unity_ObjectToWorld, input.tangentOS.xyz)), input.tangentOS.w);
+	output.normal = normalize(mul(input.normal, (float3x3) unity_WorldToObject));
+	output.tangent = float4(normalize(mul((float3x3) unity_ObjectToWorld, input.tangent.xyz)), input.tangent.w);
 	output.color = input.color;
-	output.instanceID = input.instanceID;
 	return output;
-}
-
-[maxvertexcount(3)]
-void Geometry(triangle FragmentInput input[3], inout TriangleStream<FragmentInput> stream)
-{
-	[unroll]
-	for (uint i = 0; i < 3;i ++)
-	{
-		FragmentInput output = input[i];
-		
-		#ifdef SHADER_STAGE_GEOMETRY
-			output.sliceIndex = output.instanceID;
-		#endif
-		
-		stream.Append(output);
-	}
 }
 
 FragmentOutput Fragment(FragmentInput input, bool isFrontFace : SV_IsFrontFace)
 {
-    float4 color = _MainTex.Sample(sampler_MainTex, input.uv);
-	//color.a = (color.a - 1.0 / 3.0) / max(fwidth(color.a), 0.0001) + 0.5;
-	clip(color.a - 1.0 / 3.0);
+	float4 color = _MainTex.Sample(_TrilinearRepeatAniso16Sampler, input.uv);
 	
-	float3 normal = UnpackNormalAG(_BumpMap.Sample(sampler_MainTex, input.uv));
-	float3 extra = _ExtraTex.Sample(sampler_MainTex, input.uv);
-	float3 translucency = _SubsurfaceTex.Sample(sampler_MainTex, input.uv);
+	#ifdef _CUTOUT_ON
+	    clip(color.a - 1.0 / 3.0);
+    #endif
+	
+	float3 normal = UnpackNormalAG(_BumpMap.Sample(_TrilinearRepeatAniso16Sampler, input.uv));
+	float3 extra = _ExtraTex.Sample(_TrilinearRepeatAniso16Sampler, input.uv);
+	float3 translucency = _Subsurface ? _SubsurfaceTex.Sample(_TrilinearRepeatAniso16Sampler, input.uv) : 0.0;
 	
 	// Flip normal on backsides
 	if (!isFrontFace)
 		normal.z = -normal.z;
 	
-	input.normalWS = normalize(input.normalWS);
-	input.tangentWS.xyz = normalize(input.tangentWS.xyz);
-	
-	float3 binormal = normalize(cross(input.normalWS, input.tangentWS.xyz)) * input.tangentWS.w;
-	float3x3 tangentToWorld = float3x3(input.tangentWS.xyz, binormal, input.normalWS);
-	input.normalWS = normalize(mul(normal, tangentToWorld));
+	float3 binormal = cross(input.normal, input.tangent.xyz) * (input.tangent.w * unity_WorldTransformParams.w);
+	float3x3 tangentToWorld = float3x3(input.tangent.xyz, binormal, input.normal);
+	normal = normalize(mul(normal, tangentToWorld));
 	
 	FragmentOutput output;
 	output.colorAlpha = float4(color.rgb, 1.0);
-	output.normalSmoothness = float4(input.normalWS * 0.5 + 0.5, extra.r);
-	output.depth = input.positionCS.z;
+	output.normalSmoothness = float4(normal * 0.5 + 0.5, extra.r);
+	output.depth = input.position.z;
 	output.subsurfaceOcclusion = float4(translucency, extra.b * input.color.r);
 	return output;
 }
