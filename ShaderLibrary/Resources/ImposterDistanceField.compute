@@ -16,22 +16,6 @@ float _InvCellSize, _InvResolution, _MaxDistance;
 
 RWBuffer<int> _MaxDepths;
 
-bool IsOutOfBounds(int2 position, int2 offset)
-{
-	int2 offsetPosition = position + offset;
-	if (any(offsetPosition < 0 || offsetPosition >= _Resolution))
-		return true;
-	
-	return false;
-
-	// Calculate cell of current and offset positions
-	float2 currentCell = floor(position * _InvCellSize);
-	float2 offsetCell = floor(offsetPosition * _InvCellSize);
-	
-	// If the cells are different, then we are out of bounds
-	return any(currentCell != offsetCell);
-}
-
 [numthreads(8, 8, 1)]
 void SeedPixels(uint3 id : SV_DispatchThreadID)
 {
@@ -40,33 +24,31 @@ void SeedPixels(uint3 id : SV_DispatchThreadID)
 	
 	float sourceAlpha = _Texture0[id].a;
 	bool isOpaque = sourceAlpha >= 0.5;
-	for (int y = -1; y < 2; y++)
+	
+	for (int y = -1; y <= 1; y++)
 	{
-		for (int x = -1; x < 2; x++)
+		for (int x = -1; x <= 1; x++)
 		{
 			// Don't compare the middle value
 			if (x == 0 && y == 0)
 				continue;
 				
 			int2 uv = id.xy + int2(x, y);
-			
-			if (IsOutOfBounds(id.xy, int2(x, y)))
+			if (any(uv < 0 || uv >= _Resolution))
 				continue;
 				
 			float neighborAlpha = _Texture0[int3(uv, id.z)].a;
 			bool isNeighborOpaque = neighborAlpha >= 0.5;
-			if (isOpaque != isNeighborOpaque)
-			{
-				float factor = saturate((0.5 - sourceAlpha) / (neighborAlpha - sourceAlpha));
-				float2 midpoint = lerp(id.xy, uv, factor);
-				
-				float dist = distance(id.xy * _InvResolution, midpoint * _InvResolution);
-				if (dist < minDist)
-				{
-					minDist = dist;
-					minSeed = midpoint;
-				}
-			}
+			if (isOpaque == isNeighborOpaque)
+				continue;
+			
+			float2 midpoint = id.xy + 0.5 + 0.5 * int2(x, y);
+			float dist = distance((id.xy + 0.5) * _InvResolution, midpoint * _InvResolution);
+			if (dist >= minDist)
+				continue;
+			
+			minDist = dist;
+			minSeed = midpoint;
 		}
 	}
 
@@ -79,24 +61,24 @@ void JumpFlood(uint3 id : SV_DispatchThreadID)
 	float minDist = sqrt(2);
 	float2 minSeed = -1;
 	
-	for (int y = -1; y < 2; y++)
+	for (int y = -1; y <= 1; y++)
 	{
-		for (int x = -1; x < 2; x++)
+		for (int x = -1; x <= 1; x++)
 		{
-			if (IsOutOfBounds(id.xy, int2(x, y) * _Offset))
+			int2 uv = id.xy + int2(x, y) * _Offset;
+			if (any(uv < 0 || uv >= _Resolution))
 				continue;
 		
-			int2 uv = id.xy + int2(x, y) * _Offset;
 			float2 seed = _Input[int3(uv, id.z)];
-			if (all(seed != -1))
-			{
-				float dist = distance(seed * _InvResolution, id.xy * _InvResolution);
-				if (dist < minDist)
-				{
-					minDist = dist;
-					minSeed = seed;
-				}
-			}
+			if (all(seed == -1))
+				continue;
+			
+			float dist = distance(seed * _InvResolution, (id.xy + 0.5) * _InvResolution);
+			if (dist >= minDist)
+				continue;
+			
+			minDist = dist;
+			minSeed = seed;
 		}
 	}
 
@@ -107,47 +89,15 @@ void JumpFlood(uint3 id : SV_DispatchThreadID)
 void CalculateMinMax(uint3 id : SV_DispatchThreadID)
 {
 	float2 seed = _Input[id];
-	float dist = distance(seed * _InvResolution, id.xy * _InvResolution);
+	float dist = distance(seed * _InvResolution, (id.xy + 0.5) * _InvResolution);
 
-	if (_Texture0[id].a < 0.5)
+	if (_Texture0[id].a >= 0.5)
 	{
-		// There's a chance the seed falls slightly on a non-opaque pixel's edge. Do a 3x3 search to ensure we get a filled pixel
-		float minDist = sqrt(2);
-		int2 minSeed = -1;
-	
-		for (int y = -1; y < 2; y++)
-		{
-			for (int x = -1; x < 2; x++)
-			{
-				if (IsOutOfBounds(seed, int2(x, y)))
-					continue;
-		
-				int2 uv = seed + int2(x, y);
-				float neighborAlpha = _Texture0[int3(uv, id.z)].a;
-				bool isNeighborOpaque = neighborAlpha >= 0.5;
-				if (isNeighborOpaque)
-				{
-					float dist = distance(seed * _InvResolution, uv * _InvResolution);
-					if (dist < minDist)
-					{
-						minDist = dist;
-						minSeed = uv;
-					}
-				}
-			}
-		}
-	
-		if (all(minSeed != -1))
-		{
-			seed = minSeed;
-			minDist = dist;
-		}
-		
-		InterlockedMax(_MaxDepths[0], asint(minDist));
+		InterlockedMax(_MaxDepths[1], asint(dist));
 	}
 	else
 	{
-		InterlockedMax(_MaxDepths[1], asint(dist));
+		InterlockedMax(_MaxDepths[0], asint(dist));
 	}
 }
 
@@ -155,8 +105,9 @@ void CalculateMinMax(uint3 id : SV_DispatchThreadID)
 void Resolve(uint3 id : SV_DispatchThreadID)
 {
 	float2 seed = _Input[id];
-	float dist = distance(seed * _InvResolution, id.xy * _InvResolution);
+	float dist = distance(seed * _InvResolution, (id.xy + 0.5) * _InvResolution);
 
+	int2 coord = id;
 	if (_Texture0[id].a < 0.5)
 	{
 		// Invert the distance
@@ -164,67 +115,53 @@ void Resolve(uint3 id : SV_DispatchThreadID)
 		
 		// There's a chance the seed falls slightly on a non-opaque pixel's edge. Do a 3x3 search to ensure we get a filled pixel
 		float minDist = sqrt(2);
-		int2 minSeed = -1;
 	
-		for (int y = -1; y < 2; y++)
+		for (int y = -1; y <= 1; y++)
 		{
-			for (int x = -1; x < 2; x++)
+			for (int x = -1; x <= 1; x++)
 			{
-				if (IsOutOfBounds(seed, int2(x, y)))
+				int2 uv = int2(seed) + int2(x, y);
+				if (any(uv < 0 || uv >= _Resolution))
 					continue;
 		
-				int2 uv = seed + int2(x, y);
 				float neighborAlpha = _Texture0[int3(uv, id.z)].a;
-				bool isNeighborOpaque = neighborAlpha >= 0.5;
-				if (isNeighborOpaque)
-				{
-					float dist = distance(seed * _InvResolution, uv * _InvResolution);
-					if (dist < minDist)
-					{
-						minDist = dist;
-						minSeed = uv;
-					}
-				}
+				if (neighborAlpha < 0.5)
+					continue;
+				
+				float dist = distance(id.xy * _InvResolution, uv * _InvResolution);
+				if (dist >= minDist)
+					continue;
+				
+				minDist = dist;
+				coord = uv;
 			}
 		}
-	
-		if (all(minSeed != -1))
-		{
-			seed = minSeed;
-			minDist = dist;
-		}
-		
-		dist = minDist;
-	}
-	else
-	{
-		seed = id.xy;
 	}
 	
 	float minDist = -asfloat(_MaxDepths[0]);
 	float maxDist = asfloat(_MaxDepths[1]);
 	
 	float outDist = (dist - minDist) / (maxDist - minDist);
-	_Texture0Write[id] = float4(_Texture0sRGB ? LinearToSrgb(_Texture0[int3(seed, id.z)].rgb) : _Texture0[int3(seed, id.z)].rgb, outDist);
+	_Texture0Write[id] = float4(_Texture0sRGB ? LinearToSrgb(_Texture0[int3(coord, id.z)].rgb) : _Texture0[int3(coord, id.z)].rgb, outDist);
 	
-	//_Texture0Write[id] = float4(_Texture0sRGB ? LinearToSrgb(_Texture0[int3(seed, id.z)].rgb) : _Texture0[int3(seed, id.z)].rgb, _Texture0[id].a);
+	//_Texture0Write[id] = float4(_Texture0sRGB ? LinearToSrgb(_Texture0[int3(coord, id.z)].rgb) : _Texture0[int3(coord, id.z)].rgb, _Texture0[id].a);
 	
 	// Write textures
 	if (_TextureCount > 1)
-		_Texture1Write[id] = _Texture1sRGB ? LinearToSrgb(_Texture1[int3(seed, id.z)]) : _Texture1[int3(seed, id.z)];
+		_Texture1Write[id] = _Texture1sRGB ? LinearToSrgb(_Texture1[int3(coord, id.z)]) : _Texture1[int3(coord, id.z)];
 	
 	if (_TextureCount > 2)
-		_Texture2Write[id] = _Texture2sRGB ? LinearToSrgb(_Texture2[int3(seed, id.z)]) : _Texture2[int3(seed, id.z)];
+		_Texture2Write[id] = _Texture2sRGB ? LinearToSrgb(_Texture2[int3(coord, id.z)]) : _Texture2[int3(coord, id.z)];
 	
 	if (_TextureCount > 3)
-		_Texture3Write[id] = _Texture3sRGB ? LinearToSrgb(_Texture3[int3(seed, id.z)]) : _Texture3[int3(seed, id.z)];
+		_Texture3Write[id] = _Texture3sRGB ? LinearToSrgb(_Texture3[int3(coord, id.z)]) : _Texture3[int3(coord, id.z)];
 	
 	if (_TextureCount > 4)
-		_Texture4Write[id] = _Texture4sRGB ? LinearToSrgb(_Texture4[int3(seed, id.z)]) : _Texture4[int3(seed, id.z)];
+		_Texture4Write[id] = _Texture4sRGB ? LinearToSrgb(_Texture4[int3(coord, id.z)]) : _Texture4[int3(coord, id.z)];
 	
 	if (_TextureCount > 5)
-		_Texture5Write[id] = _Texture5sRGB ? LinearToSrgb(_Texture5[int3(seed, id.z)]) : _Texture5[int3(seed, id.z)];
+		_Texture5Write[id] = _Texture5sRGB ? LinearToSrgb(_Texture5[int3(coord, id.z)]) : _Texture5[int3(coord, id.z)];
 	
 	if (_TextureCount > 6)
-		_Texture6Write[id] = _Texture6sRGB ? LinearToSrgb(_Texture6[int3(seed, id.z)]) : _Texture6[int3(seed, id.z)];
+		_Texture6Write[id] = _Texture6sRGB ? LinearToSrgb(_Texture6[int3(coord, id.z)]) : _Texture6[int3(coord, id.z)];
 }

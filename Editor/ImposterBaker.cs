@@ -351,6 +351,7 @@ public class ImposterBaker : ScriptableWizard
         material.SetFloat("Octahedron", imposterMode == ImposterMode.HemiOctahedron ? 0f : 1f);
         material.SetVector("_CenterOffset", center);
         material.SetVector("_Scale", new Vector4(bounds.Value.size.x, bounds.Value.size.y, bounds.Value.size.z, 2f * radius));
+        material.SetVector("_WorldOffset", -center / (2f * radius));
 
         for (var i = 0; i < textureCount; i++)
         {
@@ -364,10 +365,10 @@ public class ImposterBaker : ScriptableWizard
                     dstFormat = TextureFormat.BC4;
                     break;
                 case GraphicsFormat.R8G8B8A8_UNorm:
-                    dstFormat = TextureFormat.RGBA32;
+                    dstFormat = TextureFormat.BC7;
                     break;
                 case GraphicsFormat.R8G8B8A8_SRGB:
-                    dstFormat = TextureFormat.DXT5;
+                    dstFormat = TextureFormat.BC7;
                     break;
                 default:
                     throw new NotSupportedException(descriptor.graphicsFormat.ToString());

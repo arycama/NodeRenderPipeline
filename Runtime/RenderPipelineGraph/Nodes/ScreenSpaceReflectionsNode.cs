@@ -53,7 +53,7 @@ public partial class ScreenSpaceReflectionsNode : RenderPipelineNode
         ssrComputeShader = Resources.Load<ComputeShader>("Shaders/ScreenSpaceReflections");
 
         intersectKernel = ssrComputeShader.FindKernel("Intersect");
-        temporalKernel = ssrComputeShader.FindKernel("Temporal");
+       // temporalKernel = ssrComputeShader.FindKernel("Temporal");
 
         textureCache = new("Screen Space Reflections");
         frameCountCache = new("SSR Frame Count");
@@ -73,7 +73,8 @@ public partial class ScreenSpaceReflectionsNode : RenderPipelineNode
         if (!isEnabled)
             return;
 
-        var blueNoise2D = Resources.Load<Texture2D>(noiseIds.GetString(FrameCount % 64));
+        //var blueNoise2D = Resources.Load<Texture2D>(noiseIds.GetString(FrameCount % 64));
+        var blueNoise2D = Resources.Load<Texture2D>(noiseIds.GetString(0));
 
         var projMatrix = camera.projectionMatrix;
         var jitterX = projMatrix[0, 2];
@@ -94,16 +95,16 @@ public partial class ScreenSpaceReflectionsNode : RenderPipelineNode
         scope.Command.SetComputeIntParam(ssrComputeShader, "_MaxMip", Texture2DExtensions.MipCount(camera.pixelWidth, camera.pixelHeight));
 
         // Trace into temporary texture, which we can then pass into a temporal pass
-        var hitResultDesc = new RenderTextureDescriptor(camera.pixelWidth >> 1, camera.pixelHeight >> 1, RenderTextureFormat.RHalf) { enableRandomWrite = true };
+        var hitResultDesc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, RenderTextureFormat.RHalf) { enableRandomWrite = true };
         scope.Command.GetTemporaryRT(intersectId, hitResultDesc);
 
-        var ssrDesc = new RenderTextureDescriptor(camera.pixelWidth >> 1, camera.pixelHeight >> 1, RenderTextureFormat.ARGBHalf) { enableRandomWrite = true };
+        var ssrDesc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, RenderTextureFormat.ARGBHalf) { enableRandomWrite = true };
         textureCache.GetTexture(camera, ssrDesc, out var temporalResult, out var temporalHistory, FrameCount);
 
         scope.Command.GetTemporaryRT(tempResultId, ssrDesc);
 
-        var width = camera.pixelWidth >> 1;
-        var height = camera.pixelHeight >> 1;
+        var width = camera.pixelWidth;
+        var height = camera.pixelHeight;
 
         scope.Command.SetComputeVectorParam(ssrComputeShader, "_Resolution", new Vector2(width, height));
         scope.Command.SetComputeVectorParam(ssrComputeShader, "_ResolutionMinusOne", new Vector2(width - 1, height - 1));
@@ -116,41 +117,44 @@ public partial class ScreenSpaceReflectionsNode : RenderPipelineNode
             scope.Command.SetComputeTextureParam(ssrComputeShader, intersectKernel, "_GBuffer2", gBuffer2);
             scope.Command.SetComputeTextureParam(ssrComputeShader, intersectKernel, "_HitResult", intersectId);
             scope.Command.SetComputeTextureParam(ssrComputeShader, intersectKernel, "_Input", previousFrame);
-            scope.Command.SetComputeTextureParam(ssrComputeShader, intersectKernel, "_Result", tempResultId);
+            //scope.Command.SetComputeTextureParam(ssrComputeShader, intersectKernel, "_Result", tempResultId);
+            var upsampleDesc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, RenderTextureFormat.ARGBHalf) { enableRandomWrite = true };
+            scope.Command.GetTemporaryRT(resultId, upsampleDesc);
+            scope.Command.SetComputeTextureParam(ssrComputeShader, intersectKernel, "_Result", resultId);
 
             using (var profilerScope = scope.Command.ProfilerScope("Intersect"))
-                scope.Command.DispatchNormalized(ssrComputeShader, intersectKernel, camera.pixelWidth >> 1, camera.pixelHeight >> 1, 1);
+                scope.Command.DispatchNormalized(ssrComputeShader, intersectKernel, camera.pixelWidth, camera.pixelHeight, 1);
         }
 
         // Temporal pass
-        {
-            var frameDesc = new RenderTextureDescriptor(camera.pixelWidth >> 1, camera.pixelHeight >> 1, RenderTextureFormat.R8) { enableRandomWrite = true };
-            frameCountCache.GetTexture(camera, frameDesc, out var currentCount, out var previousCount, FrameCount);
+        //{
+        //    var frameDesc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, RenderTextureFormat.R8) { enableRandomWrite = true };
+        //    frameCountCache.GetTexture(camera, frameDesc, out var currentCount, out var previousCount, FrameCount);
 
-            scope.Command.SetComputeTextureParam(ssrComputeShader, temporalKernel, "_Depth", cameraMinZTexture);
-            scope.Command.SetComputeTextureParam(ssrComputeShader, temporalKernel, "_PreviousDepth", previousDepth);
-            scope.Command.SetComputeTextureParam(ssrComputeShader, temporalKernel, "_HitInput", intersectId);
-            scope.Command.SetComputeTextureParam(ssrComputeShader, temporalKernel, "_Input", tempResultId);
-            scope.Command.SetComputeTextureParam(ssrComputeShader, temporalKernel, "_History", temporalHistory);
-            scope.Command.SetComputeTextureParam(ssrComputeShader, temporalKernel, "_Result", temporalResult);
-            scope.Command.SetComputeTextureParam(ssrComputeShader, temporalKernel, "_FrameCountResult", currentCount);
-            scope.Command.SetComputeTextureParam(ssrComputeShader, temporalKernel, "_FrameCountPrevious", previousCount);
-            scope.Command.SetComputeTextureParam(ssrComputeShader, temporalKernel, "_MotionVectors", motionVectors);
+        //    scope.Command.SetComputeTextureParam(ssrComputeShader, temporalKernel, "_Depth", cameraMinZTexture);
+        //    scope.Command.SetComputeTextureParam(ssrComputeShader, temporalKernel, "_PreviousDepth", previousDepth);
+        //    scope.Command.SetComputeTextureParam(ssrComputeShader, temporalKernel, "_HitInput", intersectId);
+        //    scope.Command.SetComputeTextureParam(ssrComputeShader, temporalKernel, "_Input", tempResultId);
+        //    scope.Command.SetComputeTextureParam(ssrComputeShader, temporalKernel, "_History", temporalHistory);
+        //    scope.Command.SetComputeTextureParam(ssrComputeShader, temporalKernel, "_Result", temporalResult);
+        //    scope.Command.SetComputeTextureParam(ssrComputeShader, temporalKernel, "_FrameCountResult", currentCount);
+        //    scope.Command.SetComputeTextureParam(ssrComputeShader, temporalKernel, "_FrameCountPrevious", previousCount);
+        //    scope.Command.SetComputeTextureParam(ssrComputeShader, temporalKernel, "_MotionVectors", motionVectors);
 
-            using (var profilerScope = scope.Command.ProfilerScope("Temporal"))
-                scope.Command.DispatchNormalized(ssrComputeShader, temporalKernel, camera.pixelWidth >> 1, camera.pixelHeight >> 1, 1);
-        }
+        //    using (var profilerScope = scope.Command.ProfilerScope("Temporal"))
+        //        scope.Command.DispatchNormalized(ssrComputeShader, temporalKernel, camera.pixelWidth, camera.pixelHeight, 1);
+        //}
 
-        // Upsample
-        {
-            var upsampleDesc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, RenderTextureFormat.ARGBHalf) { enableRandomWrite = true };
-            scope.Command.GetTemporaryRT(resultId, upsampleDesc);
+        //// Upsample
+        //{
+        //    var upsampleDesc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, RenderTextureFormat.ARGBHalf) { enableRandomWrite = true };
+        //    scope.Command.GetTemporaryRT(resultId, upsampleDesc);
 
-            scope.Command.SetComputeTextureParam(ssrComputeShader, 2, "_Input", temporalResult);
-            scope.Command.SetComputeTextureParam(ssrComputeShader, 2, "_Result", resultId);
-            scope.Command.SetComputeTextureParam(ssrComputeShader, 2, "_Depth", cameraMinZTexture);
-            scope.Command.DispatchNormalized(ssrComputeShader, 2, camera.pixelWidth, camera.pixelHeight, 1);
-        }
+        //    scope.Command.SetComputeTextureParam(ssrComputeShader, 2, "_Input", temporalResult);
+        //    scope.Command.SetComputeTextureParam(ssrComputeShader, 2, "_Result", resultId);
+        //    scope.Command.SetComputeTextureParam(ssrComputeShader, 2, "_Depth", cameraMinZTexture);
+        //    scope.Command.DispatchNormalized(ssrComputeShader, 2, camera.pixelWidth, camera.pixelHeight, 1);
+        //}
 
         scope.Command.ReleaseTemporaryRT(intersectId);
         scope.Command.ReleaseTemporaryRT(tempResultId);

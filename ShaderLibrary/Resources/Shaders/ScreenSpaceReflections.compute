@@ -1,6 +1,6 @@
 #pragma kernel Intersect
-#pragma kernel Temporal
-#pragma kernel Upsample
+//#pragma kernel Temporal
+//#pragma kernel Upsample
 
 #pragma multi_compile _ VOXEL_GI_ON
 
@@ -65,13 +65,49 @@ float3 ScreenToWorld(float3 position)
 	return MultiplyPointProj(_InvViewProjMatrix, float3(position.xy * 2.0 - 1.0, position.z)).xyz;
 }
 
+float3 SampleGGXReflection(float3 i, float2 alpha, float2 rand)
+{
+	float3 i_std = normalize(float3(i.xy * alpha, i.z));
+	// Sample a spherical cap
+	float phi = 2.0 * Pi * rand.x;
+	float a = saturate(min(alpha.x, alpha.y)); // Eq. 6
+	float s = 1.0f + length(float2(i.x, i.y)); // Omit sgn for a <=1
+	float a2 = a * a;
+	float s2 = s * s;
+	float k = (1.0 - a2) * s2 / (s2 + a2 * i.z * i.z); // Eq. 5
+	float b = i.z > 0 ? k * i_std.z : i_std.z;
+	float z = mad(1.0 - rand.y, 1.0 + b, -b);
+	float sinTheta = sqrt(saturate(1.0 - z * z));
+	float3 o_std = { sinTheta * cos(phi), sinTheta * sin(phi), z };
+	// Compute the microfacet normal m
+	float3 m_std = i_std + o_std;
+	float3 m = normalize(float3(m_std.xy * alpha, m_std.z));
+	// Return the reflection vector o
+	return 2.0 * dot(i, m) * m - i;
+}
+
+//float GGXReflectionPDF ( float3 i , float3 o , float2 alpha ) {
+//float3 m = normalize ( i + o ) ;
+//float ndf = D (m , alpha ) ;
+//float2 ai = alpha * i . xy ;
+//float len2 = dot( ai , ai ) ;
+//float t = sqrt ( len2 + i . z * i . z ) ;
+//if ( i . z >= 0.0 f ) {
+//float a = saturate (min( alpha .x, alpha .y)); // Eq. 6
+//float s = 1.0f + length ( float2 (i.x, i.y)); // Omit sgn for a <=1
+//float a2 = a * a; float s2 = s * s;
+//float k = (1.0 f - a2) * s2 / (s2 + a2 * i.z * i.z); // Eq. 5
+//return ndf / (2.0 f * (k * i . z + t ) ) ; // Eq. 8 * || dm/do ||
+//}
+//// Numerically stable form of the previous PDF for i.z < 0
+//return ndf * ( t - i . z ) / (2.0 f * len2 ) ; // = Eq. 7 * || dm/do ||
+//}
+
 [numthreads(8, 8, 1)]
 void Intersect(uint2 id : SV_DispatchThreadID)
 {
-	float2 pixel = id * 2 + 0.5;
-	
-	float depth = _Depth.mips[1][id];
-	if(depth == _FarClipValue)
+	float depth = _Depth[id];
+	if (depth == _FarClipValue)
 	{
 		_Result[id] = 0;
 		_HitResult[id] = 0;
@@ -79,20 +115,14 @@ void Intersect(uint2 id : SV_DispatchThreadID)
 	}
 	
 	float2 u = _BlueNoise2D[id % 128];
+	float3 V = MultiplyVector(_PixelCoordToViewDirWS, float3(id + 0.5, 1.0), true);
+	float3 N = GBufferNormal(id);
 	
-	float3 V = MultiplyVector(_PixelCoordToViewDirWS, float3(pixel, 1.0), true);
-	
-	float3 N = GBufferNormal(id << 1);
-	float3x3 localToWorld = GetLocalFrame(N);
-	
-	float roughness = max(1e-3, ConvertAnisotropicPerceptualRoughnessToRoughness(GBufferPerceptualRoughness(id << 1)));
-	
-	float3 localV, localH;
-	float VdotH;
-	SampleGGXVisibleNormal(u, V, localToWorld, roughness, localV, localH, VdotH);
+	float2 roughness = Sq(GBufferPerceptualRoughness(id));
 
     // Compute the reflection direction
-	float3 localR = reflect(-localV, localH);
+	float3x3 localToWorld = GetLocalFrame(N);
+	float3 localR = SampleGGXReflection(mul(localToWorld, V), roughness, u);
 	float3 R = mul(localR, localToWorld);
   
     // We start tracing from the center of the current pixel, and do so up to the far plane.
@@ -106,19 +136,23 @@ void Intersect(uint2 id : SV_DispatchThreadID)
 	float3 rayDir = reflPosSS - rayOrigin;
 
 	bool validHit;
-	float3 hit = FFX_SSSR_HierarchicalRaymarch(rayOrigin, rayDir, true, _ScreenSize.xy, 1, 0, _MaxSteps, validHit);
+	float3 hit = FFX_SSSR_HierarchicalRaymarch(rayOrigin, rayDir, true, _ScreenSize.xy, 0, 0, _MaxSteps, validHit);
 	
 	float3 world_space_origin = ScreenSpaceToWorldSpace(rayOrigin);
 	float3 world_space_hit = ScreenSpaceToWorldSpace(hit);
 	float3 world_space_ray = world_space_hit - world_space_origin.xyz;
 	
 	float2 uv = (id + 0.5) / _Resolution;
-	float confidence = validHit ? FFX_SSSR_ValidateHit(hit, uv, world_space_ray, _ScreenSize.xy, _Thickness) : 0;
+	float confidence = validHit ? FFX_SSSR_ValidateHit(hit, uv, world_space_ray, _ScreenSize.xy, _Thickness * 100) : 0;
 
 	if (confidence > 0.0)
 	{
 		_HitResult[id] = length(world_space_ray);
-		_Result[id] = float4(_Input[hit.xy * _ScreenSize.xy].rgb, confidence);
+		
+		float2 prevPos = WorldToNdcPrevious(world_space_hit).xy * _ScreenSize.xy;
+		_Result[id] = float4(_Input[prevPos].rgb, 1);
+		
+		//_Result[id] = float4(_Input[hit.xy * _ScreenSize.xy].rgb, 1);
 	}
 	else
 	{
@@ -222,45 +256,4 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 	
 	_Result[id] = result;
 	_FrameCountResult[id] = accumSpeed / 255.0;
-}
-
-float4 LinearEyeDepth(float4 depth, float4 zBufferParam)
-{
-	return 1.0 / (zBufferParam.z * depth + zBufferParam.w);
-}
-
-[numthreads(8, 8, 1)]
-void Upsample(uint2 id : SV_DispatchThreadID)
-{
-	float depth = _Depth[id];
-	
-	float4 depths;
-	depths.x = _Depth.mips[1][clamp((id + int2(-1, 1)) >> 1, 0, _ResolutionMinusOne)];
-	depths.y = _Depth.mips[1][clamp((id + int2(1, 1)) >> 1, 0, _ResolutionMinusOne)];
-	depths.z = _Depth.mips[1][clamp((id + int2(1, -1)) >> 1, 0, _ResolutionMinusOne)];
-	depths.w = _Depth.mips[1][clamp((id + int2(-1, -1)) >> 1, 0, _ResolutionMinusOne)];
-	
-	float c = LinearEyeDepth(depth, _ZBufferParams);
-	depths = LinearEyeDepth(depths, _ZBufferParams);
-	
-	float4 input0 = _Input[clamp((id + int2(-1, 1)) >> 1, 0, _ResolutionMinusOne)];
-	float4 input1 = _Input[clamp((id + int2(1, 1)) >> 1, 0, _ResolutionMinusOne)];
-	float4 input2 = _Input[clamp((id + int2(1, -1)) >> 1, 0, _ResolutionMinusOne)];
-	float4 input3 = _Input[clamp((id + int2(-1, -1)) >> 1, 0, _ResolutionMinusOne)];
-	
-	float2 uv = frac((id + 0.5) * 0.5 - 0.5);
-	float4 weights = float4(1.0 - uv.x, uv.x, uv.x, 1.0 - uv.x) * float4(uv.y, uv.y, 1.0 - uv.y, 1.0 - uv.y);
-	
-	float x = dot(pow(depths, 1.0), weights);
-	float x2 = dot(pow(depths, 2.0), weights);
-	float4 y = (input0 * weights.x + input1 * weights.y + input2 * weights.z + input3 * weights.w);
-	float4 xy = (input0 * depths.x * weights.x + input1 * depths.y * weights.y + input2 * depths.z * weights.z + input3 * depths.w * weights.w);
-	
-	float4 cyx = (xy - x * y);
-	float4 vx1 = x2 - x * x;
-	
-	float4 beta1 = cyx / (vx1 + 0.0001);
-	float4 alpha = y - beta1 * x;
-	_Result[id] = beta1 * c + alpha;
-	_Result[id] = _Input[id >> 1];
 }

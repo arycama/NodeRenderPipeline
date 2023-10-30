@@ -1,4 +1,4 @@
-﻿Shader "Surface/Nature/SpeedTree 8 Imposter"
+﻿Shader"Surface/Nature/SpeedTree 8 Imposter"
 {
     Properties
     {
@@ -8,6 +8,8 @@
 		_FramesMinusOne("Frames Minus One", Float) = 7.0
 		_RcpFramesMinusOne("Rcp Frames Minus One", Float) = 1.0
 		_Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
+        _WorldOffset("World Offset", Vector) = (0, 0, 0, 0)
+
 		_CenterOffset("Center Offset", Vector) = (0, 0, 0, 0)
 		_Scale("Scale", Vector) = (1, 1, 1, 1)
 

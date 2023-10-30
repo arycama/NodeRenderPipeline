@@ -37,6 +37,9 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
     [Input] private Matrix4x4 probeWorldToLocal;
     [Input] private Vector3 probeCenter;
 
+    [Input] private Matrix4x4 shadowMatrix;
+    [Input] private RenderTargetIdentifier shadowMap;
+
     [Input, Output] private RenderTargetIdentifier result;
 
     [Input, Output] private NodeConnection connection;
@@ -69,6 +72,7 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
         // scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_LightData", lightDataBuffer);
         scope.Command.SetComputeBufferParam(deferredComputeShader, 0, "_DirectionalLightData", directionalLightBuffer);
         //scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_LightClusterIndices", lightClusterId);
+        //scope.Command.SetComputeIntParam(deferredComputeShader, "_DirectionalLightCount", directionalLightBuffer.Count);
         scope.Command.SetComputeIntParam(deferredComputeShader, "_DirectionalLightCount", directionalLightBuffer.Count);
        // scope.Command.SetComputeIntParam(deferredComputeShader, "_LightCount", lightDataBuffer.Count);
 
@@ -87,6 +91,9 @@ public partial class DeferredReflectionProbeLightingNode : RenderPipelineNode
 
         scope.Command.SetComputeMatrixParam(deferredComputeShader, "_ProbeWorldToLocal", probeWorldToLocal);
         scope.Command.SetComputeVectorParam(deferredComputeShader, "_ProbeCenter", probeCenter);
+
+        scope.Command.SetComputeMatrixParam(deferredComputeShader, "_ShadowMatrix", shadowMatrix);
+        scope.Command.SetComputeTextureParam(deferredComputeShader, 0, "_ShadowMap", shadowMap);
 
 
         // scope.Command.SetComputeFloatParam(deferredComputeShader, "_ClusterScale", clusterScale);

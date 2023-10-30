@@ -8,8 +8,6 @@ using UnityEngine.Rendering;
 [NodeMenuItem("Lighting/Reflection Probe System")]
 public partial class ReflectionProbeSystemNode : RenderPipelineNode
 {
-    private readonly static Plane[] cullingPlanes = new Plane[6];
-
     [SerializeField, Pow2(512)] private int resolution = 128;
     [SerializeField] private float nearClip = 0.1f;
     [SerializeField] private float farClip = 1000f;
@@ -17,6 +15,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 
     [SerializeField] private RenderPipelineSubGraph gbufferSubGraph;
     [SerializeField] private RenderPipelineSubGraph processSubGraph;
+    [SerializeField] private RenderPipelineSubGraph prelightSubGraph;
     [SerializeField] private RenderPipelineSubGraph lightingSubGraph;
 
     [Input] private GraphicsBuffer ambient;
@@ -24,6 +23,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
     [Input] private RenderTargetIdentifier atmosphereTransmittance;
     [Input] private RenderTargetIdentifier exposure;
     [Input] private GpuInstanceBuffers gpuInstanceBuffers;
+    [Input] private RenderTargetIdentifier shadowMap;
 
     [Header("Camera")]
     [Input] private Vector3 cameraPosition;
@@ -125,6 +125,9 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
         if (processSubGraph != null)
             processSubGraph.Initialize();
 
+        if (prelightSubGraph != null)
+            prelightSubGraph.Initialize();
+
         readyProbes = new ReadyProbeData[maxActiveProbes];
 
         // Pre-fill the probe array
@@ -175,6 +178,9 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 
         if (processSubGraph != null)
             processSubGraph.Cleanup();
+
+        if(prelightSubGraph != null) 
+            prelightSubGraph.Cleanup();
     }
 
     public override void NodeChanged()
@@ -199,6 +205,12 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             processSubGraph.Cleanup();
             processSubGraph.Initialize();
         }
+
+        if(prelightSubGraph != null)
+        {
+            prelightSubGraph.Cleanup();
+            prelightSubGraph.Initialize();
+        }
     }
 
     public override void FrameRenderComplete()
@@ -208,10 +220,19 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 
         if (gbufferSubGraph != null)
             gbufferSubGraph.FrameRenderComplete();
+
+        if(processSubGraph != null)
+            processSubGraph.FrameRenderComplete();
+
+        if (prelightSubGraph != null)
+            prelightSubGraph.FrameRenderComplete();
     }
 
     public override void Execute(ScriptableRenderContext context, Camera camera)
     {
+        if (camera.cameraType != CameraType.Game && camera.cameraType != CameraType.SceneView)
+            return;
+
         // Remove any ready probes that have been destroyed
         for (var i = 0; i < readyProbes.Length; i++)
         {
@@ -224,8 +245,8 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             }
         }
 
-        AddNewProbes(context);
-        RelightNextProbe(context);
+        AddNewProbes(context, camera);
+        RelightNextProbe(context, camera);
 
         // Debug
         using (var scope = context.ScopedCommandBuffer())
@@ -247,7 +268,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
         previousExposure = data[0];
     }
 
-    private void AddNewProbes(ScriptableRenderContext context)
+    private void AddNewProbes(ScriptableRenderContext context, Camera mainCamera)
     {
         foreach (var newProbe in EnvironmentProbe.reflectionProbes.Keys)
         {
@@ -302,6 +323,14 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 
                 var cullingPlanes = GeometryUtilities.CalculateFrustumPlanes(reflectionCamera.projectionMatrix * reflectionCamera.worldToCameraMatrix);
 
+                for (var j = 0; j < cullingPlanes.Count; j++)
+                {
+                    // Translate planes from world space to camera-relative space
+                    var plane = cullingPlanes.GetCullingPlane(j);
+                    plane.distance += Vector3.Dot(plane.normal, reflectionCamera.transform.position);
+                    cullingPlanes.SetCullingPlane(j, plane);
+                }
+
                 if (gbufferSubGraph != null)
                 {
                     var worldToView = Matrix4x4.Rotate(Quaternion.Inverse(reflectionCamera.transform.rotation));
@@ -346,11 +375,11 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
 #endif
             }
 
-            RelightProbe(index, context);
+            RelightProbe(index, context, mainCamera);
         }
     }
 
-    private void RelightNextProbe(ScriptableRenderContext context)
+    private void RelightNextProbe(ScriptableRenderContext context, Camera mainCamera)
     {
         using var profilerScope = context.ScopedCommandBuffer("ReflectionProbe Relight", true);
 
@@ -361,7 +390,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             if (readyProbes[index].isValid)
             {
                 // Found a probe, relight
-                RelightProbe(index, context);
+                RelightProbe(index, context, mainCamera);
 
                 // Increment index for next iteration
                 relightIndex = (index + 1) % maxActiveProbes;
@@ -395,7 +424,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
         }
     }
 
-    private void RelightProbe(int index, ScriptableRenderContext context)
+    private void RelightProbe(int index, ScriptableRenderContext context, Camera mainCamera)
     {
         // Update saved exposure (This value will be used for relighting)
         readyProbes[index].exposure = previousExposure;
@@ -404,7 +433,21 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
         // Do all faces at once for now, worry about culling later
         // Set position
         var camera = readyProbes[index].camera;
-        camera.transform.position = readyProbes[index].probe.transform.position;
+        var probe = readyProbes[index].probe;
+        camera.transform.position = probe.transform.position;
+
+        var shadowMatrix = Matrix4x4.identity;
+        if (prelightSubGraph != null)
+        {
+            prelightSubGraph.AddRelayInput("Probe Center", probe.transform.position + probe.ProjectionOffset);
+            prelightSubGraph.AddRelayInput("Probe Extents", Vector3.one * farClip * 0.5f);
+            prelightSubGraph.AddRelayInput("GpuInstanceBuffers", gpuInstanceBuffers);
+            prelightSubGraph.AddRelayInput("Shadowmap", shadowMap);
+            prelightSubGraph.Render(context, mainCamera, FrameCount);
+
+            if(prelightSubGraph.GetRelayValue<Matrix4x4>("Shadow Matrix", out var newShadowMatrix))
+                shadowMatrix = newShadowMatrix;
+        }
 
         // Shared temp texture for all passes
         var tempId = Shader.PropertyToID("_ReflectionProbeTemp");
@@ -419,7 +462,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             var up = CoreUtils.upVectorList[i];
             camera.transform.rotation = Quaternion.LookRotation(fwd, up);
 
-            RelightProbeFace(context, camera, tempId, i, index, readyProbes[index].exposure, readyProbes[index]);
+            RelightProbeFace(context, camera, tempId, i, index, readyProbes[index].exposure, readyProbes[index], shadowMatrix);
         }
 
         // Convolve
@@ -439,7 +482,7 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
         }
     }
 
-    private void RelightProbeFace(ScriptableRenderContext context, Camera camera, int tempId, int face, int index, float exposureValue, ReadyProbeData data)
+    private void RelightProbeFace(ScriptableRenderContext context, Camera camera, int tempId, int face, int index, float exposureValue, ReadyProbeData data, Matrix4x4 shadowMatrix)
     {
         // Evaluate
         if (lightingSubGraph != null)
@@ -477,6 +520,9 @@ public partial class ReflectionProbeSystemNode : RenderPipelineNode
             lightingSubGraph.AddRelayInput("DirectionalShadows", directionalShadows);
             lightingSubGraph.AddRelayInput("Sky Visibility Sh", skyOcclusionBuffer);
             lightingSubGraph.AddRelayInput("Sky Visibility Offset", index * 9);
+
+            lightingSubGraph.AddRelayInput("Shadowmap", shadowMap);
+            lightingSubGraph.AddRelayInput("Shadow Matrix", shadowMatrix);
 
             using (var scope = context.ScopedCommandBuffer("Reflection Probe Relight", true))
             {

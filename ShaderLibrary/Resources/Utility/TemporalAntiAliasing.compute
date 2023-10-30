@@ -85,5 +85,4 @@ void Temporal(uint2 id : SV_DispatchThreadID)
 		result = 0.0;
 	
 	_Result[id] = result;
-	//_Result[id] = _Input[id];
 }

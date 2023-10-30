@@ -18,6 +18,8 @@ float3 Fragment(float4 positionCS : SV_Position) : SV_Target
 	SurfaceData surface = SurfaceDataFromGBuffer(positionCS.xy);
 	float linearEyeDepth = LinearEyeDepth(depth);
 	
+	//return surface.Occlusion;
+	
 	//if(positionCS.x < _ScreenSize.x / 2)
 	{
 		//return LinearToSrgb(surface.Translucency);

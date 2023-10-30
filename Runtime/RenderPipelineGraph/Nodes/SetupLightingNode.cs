@@ -7,7 +7,6 @@ using UnityEngine.Rendering;
 [NodeMenuItem("Lighting/Setup Lighting")]
 public partial class SetupLightingNode : RenderPipelineNode
 {
-    private static readonly Plane[] frustumPlanes = new Plane[6];
     private static readonly IndexedString cascadeIds = new("Cascade ");
 
     private int directionalShadowsId, pointShadowsId, spotlightShadowsId, areaShadowsId;
@@ -145,8 +144,7 @@ public partial class SetupLightingNode : RenderPipelineNode
             var isValid = false;
             var shadowRequestData = new DirectionalShadowRequestData(index);
 
-            var lightToWorld = visibleLight.localToWorldMatrix.NoTranslation();
-            var worldToLight = lightToWorld.inverse;
+            var viewMatrix = visibleLight.localToWorldMatrix.inverse;
 
             var projMatrix = camera.projectionMatrix;
             camera.ResetProjectionMatrix();
@@ -174,47 +172,34 @@ public partial class SetupLightingNode : RenderPipelineNode
                         {
                             var far = z == 0 ? cascadeStart : cascadeEnd;
                             var worldPoint = camera.ViewportToWorldPoint(new(x, y, far));
-                            var localPoint = worldToLight.MultiplyPoint3x4(worldPoint);
+                            var localPoint = viewMatrix.MultiplyPoint3x4(worldPoint);
                             minValue = Vector3.Min(minValue, localPoint);
                             maxValue = Vector3.Max(maxValue, localPoint);
                         }
                     }
                 }
 
-                // Snap to texels to avoid shimmering
-                var worldUnitsPerTexel = (maxValue - minValue).XY() / directionalResolution;
-                var viewBoundsMin = new Vector3(Mathf.Floor(minValue.x / worldUnitsPerTexel.x) * worldUnitsPerTexel.x, Mathf.Floor(minValue.y / worldUnitsPerTexel.y) * worldUnitsPerTexel.y, minValue.z);
-                var viewBoundsMax = new Vector3(Mathf.Floor(maxValue.x / worldUnitsPerTexel.x) * worldUnitsPerTexel.x, Mathf.Floor(maxValue.y / worldUnitsPerTexel.y) * worldUnitsPerTexel.y, maxValue.z);
-
-                var viewCenter = 0.5f * (viewBoundsMax + viewBoundsMin);
-                var viewSize = viewBoundsMax - viewBoundsMin;
-                var viewExtents = 0.5f * viewSize;
-
-                var localView = new Vector3(viewCenter.x, viewCenter.y, viewCenter.z - viewExtents.z);
-                var viewPos = lightToWorld.MultiplyPoint3x4(localView);
-                var viewMatrix = Matrix4x4.TRS(viewPos, lightToWorld.rotation, Vector3.one).inverse;
-                var projectionMatrix = Matrix4x4.Ortho(-viewExtents.x, viewExtents.x, -viewExtents.y, viewExtents.y, 0f, viewSize.z);
+                var projectionMatrix = Matrix4x4.Ortho(minValue.x, maxValue.x, minValue.y, maxValue.y, minValue.z, maxValue.z);
                 projectionMatrix.SetColumn(2, -projectionMatrix.GetColumn(2));
 
                 // Calculate culling planes
                 using var cullingPlanes = ScopedPooledList<Plane>.Get();
 
                 // First get the planes from the view projection matrix
-                var viewProjectionMatrix = projectionMatrix * viewMatrix;
-                GeometryUtility.CalculateFrustumPlanes(viewProjectionMatrix, frustumPlanes);
-                for (var j = 0; j < 6; j++)
+                var lightFrustumPlanes = GeometryUtilities.CalculateFrustumPlanes(projectionMatrix * viewMatrix);
+                for (var j = 0; j < lightFrustumPlanes.Count; j++)
                 {
                     // Skip near plane
                     if (j != 4)
-                        cullingPlanes.Value.Add(frustumPlanes[j]);
+                        cullingPlanes.Value.Add(lightFrustumPlanes.GetCullingPlane(j));
                 }
 
                 // Now also add any main camera-frustum planes that are not facing away from the light
                 var lightDirection = -visibleLight.localToWorldMatrix.Forward();
-                GeometryUtility.CalculateFrustumPlanes(camera, frustumPlanes);
+                var cameraFrustumPlanes = GeometryUtilities.CalculateFrustumPlanes(camera.projectionMatrix * camera.worldToCameraMatrix);
                 for (var j = 0; j < 6; j++)
                 {
-                    var plane = frustumPlanes[j];
+                    var plane = cameraFrustumPlanes.GetCullingPlane(j);
                     if (Vector3.Dot(plane.normal, lightDirection) > 0.0f)
                         cullingPlanes.Value.Add(plane);
                 }
@@ -231,12 +216,12 @@ public partial class SetupLightingNode : RenderPipelineNode
                 }
 
                 // Do final matrix in RWS for rendering
-                var viewMatrixRWS = Matrix4x4Extensions.WorldToLocal(viewPos - camera.transform.position, lightToWorld.rotation);
+                var viewMatrixRWS = Matrix4x4Extensions.WorldToLocal(visibleLight.localToWorldMatrix.GetPosition() - camera.transform.position, visibleLight.localToWorldMatrix.rotation);
 
                 // GetShadowCasterBounds may return false if no Unity meshes should cast shadows, but we may have custom meshes (Eg terrain, GPU-driven rendering) that should cast shadows
                 var hasShadows = cullingResults.GetShadowCasterBounds(index, out var casterBounds);
 
-                shadowRequestData[i] = new ShadowRequestData(viewMatrixRWS, projectionMatrix, shadowSplitData, 0f, viewSize.z, hasShadows);
+                shadowRequestData[i] = new ShadowRequestData(viewMatrixRWS, projectionMatrix, shadowSplitData, 0f, maxValue.z - minValue.z, hasShadows);
                 isValid = true;
             }
 
@@ -452,8 +437,9 @@ public partial class SetupLightingNode : RenderPipelineNode
         shadowsSubGraph.AddRelayInput("GpuInstanceBuffers", gpuInstanceBuffers);
 
         // Matrices
-        shadowsSubGraph.AddRelayInput("ViewProjMatrix", GL.GetGPUProjectionMatrix(shadowRequestData.ProjectionMatrix, true) * shadowRequestData.ViewMatrix);
         shadowsSubGraph.AddRelayInput("ViewMatrix", shadowRequestData.ViewMatrix);
+        shadowsSubGraph.AddRelayInput("ProjMatrix", GL.GetGPUProjectionMatrix(shadowRequestData.ProjectionMatrix, true));
+        shadowsSubGraph.AddRelayInput("ViewProjMatrix", GL.GetGPUProjectionMatrix(shadowRequestData.ProjectionMatrix, true) * shadowRequestData.ViewMatrix);
         shadowsSubGraph.AddRelayInput("InvViewMatrix", shadowRequestData.ViewMatrix.inverse);
 
         shadowsSubGraph.AddRelayInput("Output", output);

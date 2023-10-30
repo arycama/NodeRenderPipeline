@@ -3,11 +3,9 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 
-[NodeMenuItem("Utility/Get Temporary RT")]
-public partial class GetTemporaryRTNode : RenderPipelineNode
+[NodeMenuItem("Utility/Get Temporary Camera RT")]
+public partial class GetTemporaryCameraRTNode : RenderPipelineNode
 {
-    [SerializeField] private int width;
-    [SerializeField] private int height;
     [SerializeField] private GraphicsFormat colorFormat = GraphicsFormat.R8G8B8A8_UNorm;
     [SerializeField] private GraphicsFormat depthFormat = GraphicsFormat.None;
     [SerializeField] private bool enableRandomWrite = false;
@@ -25,7 +23,7 @@ public partial class GetTemporaryRTNode : RenderPipelineNode
     public override void Execute(ScriptableRenderContext context, Camera camera)
     {
         using var scope = context.ScopedCommandBuffer();
-        var descriptor = new RenderTextureDescriptor(width, height, colorFormat, depthFormat)
+        var descriptor = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, colorFormat, depthFormat)
         {
             enableRandomWrite = enableRandomWrite,
             useMipMap = useMipMap,

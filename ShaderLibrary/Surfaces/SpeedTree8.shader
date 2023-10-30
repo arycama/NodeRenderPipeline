@@ -2,6 +2,7 @@ Shader "Surface/Nature/SpeedTree 8"
 {
     Properties
     {
+       // [HDR] _HueVariationColor("Hue Variation", Color) = (1.0, 0.85, 0.2, 0.4)
         [Toggle] _Cutout("Cutout", Float) = 0.0
         [Toggle] _IsPalm("Palm", Float) = 0.0
         [Toggle] _Billboard("Billboard", Float) = 0.0

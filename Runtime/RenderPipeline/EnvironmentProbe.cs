@@ -64,6 +64,9 @@ public class EnvironmentProbe : MonoBehaviour
 
     private static void OnPreSceneGUICallback(SceneView sceneView)
     {
+        if (!UnityEditor.Handles.ShouldRenderGizmos())
+            return;
+
         if (previewMaterial == null)
         {
             var shader = Shader.Find("Hidden/Reflection Probe Preview");

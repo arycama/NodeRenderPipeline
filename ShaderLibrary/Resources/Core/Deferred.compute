@@ -1,4 +1,5 @@
 ﻿#pragma kernel Deferred
+#pragma enable_d3d11_debug_symbols
 
 #define REFLECTION_PROBE_RENDERING
 
@@ -10,11 +11,12 @@ RWTexture2D<float3> Result;
 TextureCubeArray<float4> _GBuffer0, _GBuffer1;
 TextureCubeArray<float3> _GBuffer2;
 TextureCubeArray<float> Depth;
+Texture2D<float> _ShadowMap;
 float4x4 _PixelCoordToViewDirWS;
 uint _Offset;
 float _Index;
 
-float4x4 _ProbeWorldToLocal;
+float4x4 _ProbeWorldToLocal, _ShadowMatrix;
 float3 _ProbeCenter;
 
 [numthreads(8, 8, 1)]
@@ -39,7 +41,8 @@ void Deferred (uint2 id : SV_DispatchThreadID)
 	
 	float linearEyeDepth = LinearEyeDepth(depth);
 	float4 positionCS = float4(id + 0.5, depth, linearEyeDepth);
-	float3 positionWS = PixelToWorld(positionCS.xyz) + _ReflectionCameraPosition - _WorldSpaceCameraPos;
+	float3 positionRWS = PixelToWorld(positionCS.xyz);
+	float3 positionWS = PixelToWorld(positionCS.xyz) + _WorldSpaceCameraPos - _WorldSpaceCameraPos;
 
 	float skyVisibility = _SkyVisibilitySh[_Offset + 0];
 	skyVisibility += _SkyVisibilitySh[_Offset + 1] * N.y;
@@ -63,14 +66,17 @@ void Deferred (uint2 id : SV_DispatchThreadID)
 			continue;
     
 		// Intersect with probe bounds
-		float3 lightingVector = GetReflectionVector(lightData.Direction, (float3x4) _ProbeWorldToLocal, positionWS + _WorldSpaceCameraPos, _ProbeCenter);
+		float3 lightingVector = GetReflectionVector(lightData.Direction, (float3x4) _ProbeWorldToLocal, positionRWS + _WorldSpaceCameraPos, _ProbeCenter);
 		float shadowDepth = Depth.SampleLevel(_PointClampSampler, float4(lightingVector, _Index), 0.0);
 		
-		// If not far clip plane, continue
-		if(shadowDepth > 0.0)
-			continue;
+		float3 shadowPosition = MultiplyPoint3x4(_ShadowMatrix, positionRWS + _WorldSpaceCameraPos - _OriginalCameraPosition);
+		float shadow = _ShadowMap.SampleCmpLevelZero(_LinearClampCompareSampler, shadowPosition.xy, shadowPosition.z);
 		
-		float3 lightColor = TransmittanceToAtmosphere(positionWS  + _PlanetOffset, lightData.Direction) * (lightData.Color * _ExposureValue);
+		// If not far clip plane, continue
+		//if(shadowDepth > 0.0)
+		//	continue;
+		
+		float3 lightColor = TransmittanceToAtmosphere(positionWS + _PlanetOffset, lightData.Direction) * (lightData.Color * _ExposureValue) * shadow;
 		luminance += albedo * saturate(dot(N, lightData.Direction)) * RcpPi * lightColor;
 	}
 	

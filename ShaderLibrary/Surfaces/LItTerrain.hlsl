@@ -1,4 +1,4 @@
-#define NO_EMISSION
+ #define NO_EMISSION
 
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/Deferred.hlsl"
 #include "Packages/com.arycama.noderenderpipeline/ShaderLibrary/IndirectRendering.hlsl"

@@ -44,6 +44,7 @@ float4x4 _ProjMatrix;
 float4x4 _ViewProjMatrix;
 float4x4 _CameraViewProjMatrix;
 float4x4 _InvViewProjMatrix;
+float4x4 _ShadowProjMatrix;
 	
 float4x4 _NonJitteredViewProjMatrix;
 float4x4 _PrevViewMatrix;

@@ -39,6 +39,7 @@ cbuffer UnityPerMaterial
 {
 	float _IsPalm;
 	float _Subsurface;
+	//float4 _HueVariationColor;
 };
 
 cbuffer SpeedTreeWind
@@ -86,7 +87,7 @@ cbuffer SpeedTreeWindPrevious
 #define GEOM_TYPE_LEAF 2
 #define GEOM_TYPE_FACINGLEAF 3
 
-static const float4 _HueVariationColor = float4(0.5, 0.3, 0.1, 0.3);
+static const float4 _HueVariationColor = float4(0.7, 0.25, 0.1, 0.2);
 
 void vert(inout VertexData data)
 {
