@@ -25,6 +25,8 @@ public partial class PhysicalSkyNode : RenderPipelineNode
     [Input] private RenderTargetIdentifier volumetricClouds;
     [Input] private RenderTargetIdentifier cloudDepth;
     [Input] private RenderTargetIdentifier cloudCoverage;
+    [Input] private SmartComputeBuffer<ReflectionProbeData> reflectionProbeBuffer;
+    [Input] private GraphicsBuffer skyOcclusionBuffer;
 
     [Input] private CullingResults cullingResults;
     [Input] private RenderTargetIdentifier directionalShadows;
@@ -161,6 +163,10 @@ public partial class PhysicalSkyNode : RenderPipelineNode
 
         scope.Command.SetComputeFloatParam(computeShader, "_SampleCount", sampleCount);
         scope.Command.SetComputeFloatParam(computeShader, "_ViewHeight", (float)((double)atmosphereProfile.PlanetRadius + camera.transform.position.y));
+
+        scope.Command.SetComputeBufferParam(computeShader, kernelIndex, "_SkyOcclusion", skyOcclusionBuffer);
+        scope.Command.SetComputeBufferParam(computeShader, kernelIndex, "_ReflectionProbeData", reflectionProbeBuffer);
+        scope.Command.SetComputeIntParam(computeShader, "_ReflectionProbeCount", reflectionProbeBuffer.Count);
 
         scope.Command.DispatchNormalized(computeShader, kernelIndex, camera.pixelWidth, camera.pixelHeight, 1);
 
