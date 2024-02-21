@@ -2,6 +2,7 @@ using NodeGraph;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
+using UnityEngine.Pool;
 using UnityEngine.Rendering;
 
 [NodeMenuItem("Rendering/Deferred Water")]
@@ -33,7 +34,7 @@ public partial class DeferredWaterNode : RenderPipelineNode
 
     public override void Initialize()
     {
-        renderMaterial = CoreUtils.CreateEngineMaterial("Hidden/Deferred Water");
+        renderMaterial = new Material(Shader.Find("Hidden/Deferred Water")) { hideFlags = HideFlags.HideAndDontSave };
     }
 
     public override void Cleanup()

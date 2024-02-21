@@ -67,7 +67,6 @@ public partial class VolumetricCloudsNode : RenderPipelineNode
         scope.Command.SetComputeTextureParam(computeShader, cloudKernel, "_CloudAmbient", cloudAmbient);
 
         scope.Command.SetComputeMatrixParam(computeShader, "_PixelCoordToViewDirWS", mat);
-        scope.Command.SetComputeFloatParam(computeShader, "_FogEnabled", CoreUtils.IsSceneViewFogEnabled(camera) ? 1f : 0f);
 
         // Find first 2 directional lights
         var dirLightCount = 0;

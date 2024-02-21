@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Pool;
 using UnityEngine.Rendering;
 
 [ExecuteAlways, RequireComponent(typeof(Light))]

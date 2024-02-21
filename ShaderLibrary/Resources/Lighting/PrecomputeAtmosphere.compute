@@ -120,7 +120,7 @@ void KERNEL(uint2 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, uint gro
 		return;
 	
 	#ifdef MULTI_SCATTER
-		Result[groupId] = ScatterShared[0] / (1.0 - MultiScatterShared[0]);
+		Result[groupId] = ScatterShared[0] / (1.0 - MultiScatterShared[0]) * 0;
 	#endif
 	
 	#ifdef AMBIENT

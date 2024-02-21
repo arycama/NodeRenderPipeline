@@ -20,7 +20,7 @@ public struct ScopedCommandBuffer : IDisposable
         this.computeQueueType = computeQueueType;
 
         // Only use name if we're not profiling, otherwise it doubles up in the FrameDebugger
-        Command = name == null || useProfiler ? CommandBufferPool.Get() : CommandBufferPool.Get(name);
+        Command = CommandBufferPool.Get(name);
 
         if (useProfiler)
         {

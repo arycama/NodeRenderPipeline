@@ -151,7 +151,7 @@ public partial class LitDataNode : RenderPipelineNode
             GraphicsUtilities.HalfTexelRemap(averageAlbedoMsResolution, averageAlbedoMsResolution)
         );
 
-        var command = CommandBufferPool.Get();
+        var command = CommandBufferPool.Get("Lit Data");
         var computeShader = Resources.Load<ComputeShader>("PreIntegratedFGD");
         ConstantBuffer.Push(command, ggxLookupCalculationConstants, computeShader, Shader.PropertyToID("GGXLookupCalculationConstants"));
         ConstantBuffer.PushGlobal(command, ggxLookupConstants, Shader.PropertyToID("GGXLookupConstants"));
@@ -183,7 +183,6 @@ public partial class LitDataNode : RenderPipelineNode
             hideFlags = HideFlags.HideAndDontSave,
             wrapMode = TextureWrapMode.Clamp,
             filterMode = FilterMode.Bilinear,
-            name = CoreUtils.GetTextureAutoName(k_LtcLUTResolution, k_LtcLUTResolution, TextureFormat.RGBAHalf, depth: 2, dim: TextureDimension.Tex2DArray, name: "LTC_LUT")
         };
 
         int count = k_LtcLUTResolution * k_LtcLUTResolution;

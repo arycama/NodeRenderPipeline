@@ -17,7 +17,7 @@ public static class MaterialPool
                 throw new Exception($"Shader {shader} could not be found, check that it exists in your project and does not have compile errors.");
             }
 
-            material = CoreUtils.CreateEngineMaterial(shaderFile);
+            material = new Material(shaderFile) { hideFlags = HideFlags.HideAndDontSave };
             cache.Add(shader, material);
         }
 

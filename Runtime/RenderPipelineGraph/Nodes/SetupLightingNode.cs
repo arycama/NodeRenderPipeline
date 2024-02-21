@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using NodeGraph;
 using UnityEngine;
+using UnityEngine.Pool;
 using UnityEngine.Rendering;
 
 [NodeMenuItem("Lighting/Setup Lighting")]

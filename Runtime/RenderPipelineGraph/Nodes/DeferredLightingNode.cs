@@ -1,5 +1,6 @@
 using NodeGraph;
 using UnityEngine;
+using UnityEngine.Pool;
 using UnityEngine.Rendering;
 
 [NodeMenuItem("Lighting/Deferred Lighting")]
@@ -37,7 +38,7 @@ public partial class DeferredLightingNode : RenderPipelineNode
 
     public override void Initialize()
     {
-        material = CoreUtils.CreateEngineMaterial("Hidden/Deferred Lighting");
+        material = new Material(Shader.Find("Hidden/Deferred Lighting")) { hideFlags = HideFlags.HideAndDontSave };
     }
 
     public override void Cleanup()

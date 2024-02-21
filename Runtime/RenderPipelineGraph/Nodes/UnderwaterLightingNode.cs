@@ -1,5 +1,6 @@
 ﻿using NodeGraph;
 using UnityEngine;
+using UnityEngine.Pool;
 using UnityEngine.Rendering;
 
 [NodeMenuItem("Rendering/Underwater Lighting")]
@@ -47,7 +48,7 @@ public partial class UnderwaterLightingNode : RenderPipelineNode
     public override void Initialize()
     {
         underwaterResultId = GetShaderPropertyId("_UnderwaterResult");
-        renderMaterial = CoreUtils.CreateEngineMaterial("Hidden/Underwater Lighting");
+        renderMaterial = new Material(Shader.Find("Hidden/Underwater Lighting")) { hideFlags = HideFlags.HideAndDontSave };
         result = underwaterResultId;
     }
 
