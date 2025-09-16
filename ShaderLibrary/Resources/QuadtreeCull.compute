@@ -75,12 +75,14 @@ void InstanceCull(uint2 groupThreadId : SV_GroupThreadID, uint groupIndex : SV_G
 					float3 extents = float3(patchSize, heights.y - heights.x).xzy * 0.5;
 				#endif
 				
+				bool isVisible = true;
+				
 				#ifdef HI_Z_CULL
 					if(!HiZCull(center - extents, extents * 2, _ScreenSize.xy, _WorldToScreen))
-						return false;
+						isVisible = false;
 				#endif
 				
-				if (FrustumCull(center, extents))
+				if (isVisible && FrustumCull(center, extents))
 				{
 					float factor = ProjectedSphereRadius(length(extents), center) * _ScreenSize.x * 0.5 / _EdgeLength;
 					if (factor <= 1.0 || i + _PassOffset == _TotalPassCount - 1)
